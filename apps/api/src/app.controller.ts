@@ -1,5 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 
+import { Public } from './auth/decorators';
+
 export interface HealthResponse {
   status: 'ok';
   service: 'api';
@@ -8,7 +10,11 @@ export interface HealthResponse {
 
 @Controller()
 export class AppController {
-  /** Scaffolding smoke test: reachable at `/health`, and `/api/health` through the web proxy. */
+  /**
+   * Reachable at `/health`, and `/api/health` through the web proxy.
+   * Public so a liveness probe doesn't need credentials.
+   */
+  @Public()
   @Get('health')
   health(): HealthResponse {
     return {

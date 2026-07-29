@@ -1,12 +1,28 @@
 import 'reflect-metadata';
 
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
+import { SessionStoreService } from './auth/session-store.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+
+  // Must be registered before routes, which Nest maps during listen().
+  app.use(app.get(SessionStoreService).createMiddleware());
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      // Strip properties without a decorator: a client cannot smuggle extra
+      // fields into a DTO and have them reach Prisma.
+      whitelist: true,
+      transform: true,
+    }),
+  );
+
+  // Lets onModuleDestroy run, so the pg pools close on SIGTERM/SIGINT.
+  app.enableShutdownHooks();
 
   // No global prefix: the Nuxt dev proxy already strips `/api`, mapping
   // `/api/**` on :3000 straight onto `/**` here on :4000.

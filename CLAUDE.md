@@ -64,6 +64,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `USER` sees only `PUBLISHED` records. Enforce with a shared Prisma `where` helper in services, never in
   the UI alone.
 - Refuse to demote or deactivate the last active admin.
+- `SessionGuard` is registered globally, so access is fail-closed: a new route is protected the moment it
+  exists. Opt out with `@Public()` — never by leaving a guard off.
+- The session stores **only** `userId`; the user is re-read on every request. Do not cache the role in the
+  session, or deactivating an account stops taking effect until the cookie expires.
+- Login regenerates the session id (fixation) and `/auth/login` answers the same way for an unknown account
+  as for a wrong password. Both are covered by `test/auth.e2e-spec.ts`.
 
 ## Conventions
 
