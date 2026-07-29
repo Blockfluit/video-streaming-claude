@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    // CommonJS output: NestJS compiles to CJS and `require()`s this package,
+    // while Vite/Nitro interop with CJS without complaint. Emitting ESM here
+    // would only make the API side harder.
+    "target": "ES2023",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2023"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"]
+}
