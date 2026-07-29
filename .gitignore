@@ -26,8 +26,8 @@ build/
 .cache/
 *.tsbuildinfo
 
-# Prisma generated client
-apps/api/prisma/generated/
+# Prisma generated client — emitted as TypeScript, so it lives under src/
+apps/api/src/prisma/generated/
 
 # Logs
 *.log

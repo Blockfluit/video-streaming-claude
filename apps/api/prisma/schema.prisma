@@ -1,0 +1,420 @@
+// Data model for the video library — see docs/PLAN.md for the reasoning behind it.
+//
+// Two things this file cannot express, both handled elsewhere:
+//   - CHECK constraints. ListItem, Credit and WatchlistItem are polymorphic and each needs
+//     CHECK ((collectionId IS NULL) <> (videoId IS NULL)), hand-added to the migration.
+//   - Uniqueness over nullable columns. Postgres treats NULLs as distinct, so composite
+//     uniques containing one do not prevent duplicates; those are enforced in the services.
+
+// The v7 generator emits TypeScript, not compiled JS, so the output has to sit under src/
+// or tsc infers a different rootDir and `nest build` starts emitting dist/src/main.js.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/prisma/generated"
+  moduleFormat = "cjs"
+}
+
+// The connection URL lives in prisma.config.ts (Prisma 7 moved it out of the schema).
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum TokenKind {
+  BOOTSTRAP
+  INVITE
+}
+
+enum PublishState {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  MISSING
+}
+
+enum MediaOrigin {
+  UPLOAD
+  INGEST
+  EXTRACTED
+}
+
+enum ThumbnailSource {
+  AUTO
+  MANUAL
+}
+
+enum CreditRole {
+  ACTOR
+  DIRECTOR
+  WRITER
+  PRODUCER
+  COMPOSER
+  CINEMATOGRAPHER
+  EDITOR
+  OTHER
+}
+
+enum JobType {
+  PROBE
+  THUMBNAIL
+  TRANSCODE
+  SUBTITLE_EXTRACT
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String // argon2id
+  displayName  String
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  uploads    Video[]
+  progress   WatchProgress[]
+  events     WatchEvent[]
+  comments   Comment[]
+  watchlist  WatchlistItem[]
+  jobs       MediaJob[]
+  mintedBy   InviteToken[]   @relation("Minter")
+  redeemedBy InviteToken[]   @relation("Redeemer")
+}
+
+model InviteToken {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique // sha256(plaintext); the plaintext is shown once and never stored
+  kind         TokenKind @default(INVITE)
+  grantsRole   Role      @default(USER)
+  expiresAt    DateTime
+  redeemedAt   DateTime?
+  revokedAt    DateTime?
+  createdById  String?
+  createdBy    User?     @relation("Minter", fields: [createdById], references: [id])
+  redeemedById String?   @unique
+  redeemedUser User?     @relation("Redeemer", fields: [redeemedById], references: [id])
+  createdAt    DateTime  @default(now())
+}
+
+// Owned by migrations so connect-pg-simple's manual table.sql isn't needed.
+model Session {
+  sid    String   @id
+  sess   Json
+  expire DateTime
+
+  @@index([expire])
+  @@map("session")
+}
+
+// ---------------------------------------------------------------------------
+// Library
+// ---------------------------------------------------------------------------
+
+model Collection {
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  title       String
+  description String?
+  year        Int?
+  tags        String[]     @default([])
+  posterKey   String?
+  folderKey   String       @unique // relative folder path
+  state       PublishState @default(DRAFT)
+  origin      MediaOrigin  @default(INGEST)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  seasons       Season[]
+  videos        Video[]
+  credits       Credit[]
+  listItems     ListItem[]
+  watchlistedBy WatchlistItem[]
+
+  @@index([state])
+}
+
+model Season {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  number       Int? // null when the folder name didn't parse
+  slug         String // "season-1", or the slugified folder name
+  title        String
+  description  String?
+  posterKey    String?
+  folderKey    String     @unique
+  videos       Video[]
+
+  @@unique([collectionId, number]) // Postgres permits repeated NULLs — see the service layer
+  @@unique([collectionId, slug])
+  @@index([collectionId])
+}
+
+model Video {
+  id           String       @id @default(cuid())
+  slug         String // unique within its collection
+  collectionId String
+  collection   Collection   @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  seasonId     String?
+  season       Season?      @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  orderIndex   Int?
+  title        String
+  description  String?
+  tags         String[]     @default([])
+  state        PublishState @default(DRAFT)
+  origin       MediaOrigin  @default(INGEST)
+
+  storageKey   String    @unique // SOURCE file, relative to MEDIA_ROOT
+  contentTag   String // partial hash, for move detection
+  originalName String
+  mimeType     String
+  sizeBytes    BigInt
+  fileMtime    DateTime
+  durationSec  Float?
+  width        Int?
+  height       Int?
+  videoCodec   String?
+  audioCodec   String?
+  audioTracks  Int? // surfaced so multi-audio loss is visible before converting
+  probedAt     DateTime?
+  probeError   String?
+  missingSince DateTime?
+
+  // playbackKey is the converted MP4 in DERIVED_ROOT; streaming serves playbackKey ?? storageKey,
+  // so the same URL keeps working before and after conversion.
+  playbackKey     String?
+  playbackMime    String?
+  needsConversion Boolean   @default(false)
+  sourceDeletedAt DateTime? // source reclaimed after conversion — exempt from the missing sweep
+
+  thumbnailKey    String?
+  thumbnailSource ThumbnailSource @default(AUTO) // MANUAL is never clobbered by a reprobe
+
+  introStartSec Float? // all four markers are independently optional
+  introEndSec   Float?
+  outroStartSec Float?
+  outroEndSec   Float?
+
+  uploadedById String?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subtitles     Subtitle[]
+  jobs          MediaJob[]
+  credits       Credit[]
+  comments      Comment[]
+  progress      WatchProgress[]
+  events        WatchEvent[]
+  listItems     ListItem[]
+  watchlistedBy WatchlistItem[]
+
+  @@unique([collectionId, slug])
+  @@index([collectionId, seasonId, orderIndex])
+  @@index([state])
+  @@index([contentTag])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------
+
+model MediaJob {
+  id          String    @id @default(cuid())
+  videoId     String
+  video       Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  type        JobType
+  status      JobStatus @default(QUEUED)
+  progress    Float     @default(0) // 0..1, parsed from ffmpeg -progress
+  etaSeconds  Int?
+  message     String?
+  error       String?
+  outputKey   String?
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id])
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([videoId])
+}
+
+// ---------------------------------------------------------------------------
+// Subtitles
+// ---------------------------------------------------------------------------
+
+model Subtitle {
+  id           String      @id @default(cuid())
+  videoId      String
+  video        Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  language     String // lowercase ISO code, "en"
+  label        String // "English (SDH)"
+  storageKey   String      @unique // the .vtt actually served
+  sourceKey    String? // original .srt/.ass, if converted
+  sourceFormat String // vtt | srt | ass
+  isDefault    Boolean     @default(false)
+  origin       MediaOrigin @default(INGEST)
+  createdAt    DateTime    @default(now())
+
+  @@unique([videoId, language, label])
+  @@index([videoId])
+}
+
+// ---------------------------------------------------------------------------
+// People and credits
+// ---------------------------------------------------------------------------
+
+model Person {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String   @unique
+  bio       String?
+  photoKey  String?
+  credits   Credit[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Credit {
+  id            String      @id @default(cuid())
+  personId      String
+  person        Person      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  role          CreditRole
+  characterName String? // for ACTOR
+  position      Int         @default(0) // billing order
+  collectionId  String?
+  collection    Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  videoId       String?
+  video         Video?      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([collectionId])
+  @@index([videoId])
+  @@index([personId])
+}
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+model Comment {
+  id           String    @id @default(cuid())
+  videoId      String
+  video        Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body         String
+  timestampSec Float? // optional pin to a playback position
+  editedAt     DateTime?
+  deletedAt    DateTime? // soft delete keeps thread context and an audit trail
+  deletedById  String?
+  createdAt    DateTime  @default(now())
+
+  @@index([videoId, createdAt])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// My List
+// ---------------------------------------------------------------------------
+
+model WatchlistItem {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  videoId      String?
+  video        Video?      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+
+  @@unique([userId, collectionId]) // makes "add" idempotent — a double-click can't duplicate
+  @@unique([userId, videoId])
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Curated rows
+// ---------------------------------------------------------------------------
+
+model CuratedList {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  title       String
+  description String?
+  position    Int        @default(0) // row order on the home page
+  isVisible   Boolean    @default(true)
+  items       ListItem[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model ListItem {
+  id           String      @id @default(cuid())
+  listId       String
+  list         CuratedList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  position     Int // deliberately not unique — a unique index collides mid drag-reorder
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  videoId      String?
+  video        Video?      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, collectionId])
+  @@unique([listId, videoId])
+  @@index([listId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Watch tracking
+// ---------------------------------------------------------------------------
+
+// One rollup row per (user, video) — powers resume + continue-watching.
+model WatchProgress {
+  id              String   @id @default(cuid())
+  userId          String
+  videoId         String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video           Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  lastPositionSec Float    @default(0)
+  maxPositionSec  Float    @default(0)
+  secondsWatched  Float    @default(0)
+  viewCount       Int      @default(0)
+  completed       Boolean  @default(false)
+  firstWatchedAt  DateTime @default(now())
+  lastWatchedAt   DateTime @updatedAt
+
+  @@unique([userId, videoId])
+  @@index([videoId])
+  @@index([userId, lastWatchedAt])
+}
+
+model WatchEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  videoId       String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video         Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  playSessionId String // uuid per page-load
+  positionSec   Float
+  deltaSec      Float
+  createdAt     DateTime @default(now())
+
+  @@index([videoId, createdAt])
+  @@index([playSessionId])
+}
