@@ -45,7 +45,7 @@ nvm use                 # Node 24
 docker compose up -d    # PostgreSQL
 npm install
 cp apps/api/.env.example apps/api/.env
-npm run db:migrate      # from build step 3 onwards — no schema exists yet
+npm run db:migrate      # applies the initial migration
 npm run dev             # Nuxt on :3000, NestJS on :4000
 ```
 
