@@ -38,7 +38,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **Data**
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added
-  `CHECK ((collectionId IS NULL) <> (videoId IS NULL))` in their migration.
+  `CHECK ((collectionId IS NULL) <> (videoId IS NULL))` in their migration. Regenerating the init migration
+  drops them — re-append them.
+- Prisma 7 differs from 6 in ways that bite: the connection URL lives in `prisma.config.ts`, **not** in the
+  schema's datasource block; the client needs a driver adapter (`@prisma/adapter-pg`); and the generator
+  emits **TypeScript**, not compiled JS.
+- That generated TypeScript must stay under `src/` (`output = "../src/prisma/generated"`). Emitted anywhere
+  else it drags tsc's inferred `rootDir` up to `apps/api`, silently moving the entrypoint to
+  `dist/src/main.js`. `prisma.config.ts` is excluded from `tsconfig.build.json` for the same reason.
+- `$connect()` is **lazy** behind a driver adapter — it resolves fine with no database listening. Only a real
+  query proves the connection, which is why `PrismaService` runs `SELECT 1` at boot.
 - `BigInt` (`sizeBytes`) does not survive `JSON.stringify` — handle once at the response boundary.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
   duplicates. Enforce those in the service layer.
