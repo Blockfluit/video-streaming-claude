@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+.bootstrap-token
+
+# Media library and generated assets (can be very large)
+media/
+derived/
+
+# Build output
+dist/
+build/
+.nuxt/
+.output/
+.nitro/
+.cache/
+*.tsbuildinfo
+
+# Prisma generated client
+apps/api/prisma/generated/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

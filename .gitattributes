@@ -1,0 +1,16 @@
+# Normalise line endings to LF in the repo, regardless of checkout platform.
+* text=auto eol=lf
+
+# Media and binary assets — never diff or convert these.
+*.mp4  binary
+*.mkv  binary
+*.webm binary
+*.mov  binary
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.webp binary
+
+# Subtitles are text and must stay LF.
+*.vtt text eol=lf
+*.srt text eol=lf
