@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: video-streaming-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: video
+      POSTGRES_PASSWORD: video
+      POSTGRES_DB: video
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Without this, `npm run db:migrate` immediately after `up -d` can beat
+      # Postgres' own restart during first-time initialisation.
+      test: ["CMD-SHELL", "pg_isready -U video -d video"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

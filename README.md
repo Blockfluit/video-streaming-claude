@@ -4,7 +4,8 @@ A private, invite-only Netflix-style video library — a CRUD application for ma
 byte-range streaming, collections and seasons, and a PIM-style ingest pipeline that discovers media
 dropped on disk, stages it as drafts, and lets an admin enrich and publish it.
 
-> **Status: planning complete, implementation not started.**
+> **Status: scaffolded (build step 2 of [`docs/PLAN.md`](docs/PLAN.md)).**
+> The monorepo, database container, and both apps run; no features are implemented yet.
 > The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it does
@@ -39,15 +40,37 @@ reliably for files under `/mnt/c`, and the ingest watcher depends on it.
 
 ## Getting started
 
-Nothing is scaffolded yet — see the build order in [`docs/PLAN.md`](docs/PLAN.md).
-
 ```bash
 nvm use                 # Node 24
 docker compose up -d    # PostgreSQL
 npm install
-npm run db:migrate
+cp apps/api/.env.example apps/api/.env
+npm run db:migrate      # from build step 3 onwards — no schema exists yet
 npm run dev             # Nuxt on :3000, NestJS on :4000
 ```
+
+Then open <http://localhost:3000> — the placeholder page reports the API's health through the
+`/api` proxy, which is the quickest check that both halves are talking.
+
+### Layout
+
+| Path | What it is |
+|---|---|
+| `apps/web` | Nuxt 4 frontend, `srcDir` = `app/`, proxies `/api/**` → `:4000` |
+| `apps/api` | NestJS 11 API on `:4000` |
+| `packages/shared` | Types and pure helpers imported by both; compiled to `dist` before either app builds |
+| `media/` | `MEDIA_ROOT` — the watched source tree (contents gitignored) |
+| `derived/` | `DERIVED_ROOT` — thumbnails, posters, converted MP4/VTT (contents gitignored) |
+
+### Root scripts
+
+| Script | Does |
+|---|---|
+| `npm run dev` | Builds `packages/shared`, then runs both apps together |
+| `npm run build` | Shared → API → web, in that order |
+| `npm run typecheck` | `tsc --noEmit` across all three workspaces |
+| `npm test` | Jest (API) |
+| `npm run db:migrate` / `db:generate` / `db:studio` | Prisma, in `apps/api` |
 
 On first run the API prints a **single-use master token** and writes it to `.bootstrap-token`
 (gitignored). Redeem it at `/setup` to create the first admin account; every later account is

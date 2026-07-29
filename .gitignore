@@ -9,9 +9,13 @@ node_modules/
 !.env.example
 .bootstrap-token
 
-# Media library and generated assets (can be very large)
-media/
-derived/
+# Media library and generated assets (can be very large).
+# The directories themselves are tracked so a fresh clone has the roots the
+# API expects; their contents never are.
+media/*
+!media/.gitkeep
+derived/*
+!derived/.gitkeep
 
 # Build output
 dist/

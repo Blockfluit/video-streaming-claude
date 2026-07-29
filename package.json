@@ -1,0 +1,38 @@
+{
+  "name": "video-streaming-claude",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private, invite-only Netflix-style video library",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "predev": "npm run build -w packages/shared",
+    "dev": "concurrently -n api,web -c cyan,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/api",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:studio": "npm run db:studio -w apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "vue-demi@0.14.10": true,
+    "@prisma/engines@7.9.1": true,
+    "esbuild@0.27.7": true,
+    "esbuild@0.28.1": true,
+    "prisma@7.9.1": true,
+    "unrs-resolver@1.12.2": true
+  }
+}
