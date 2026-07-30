@@ -3,6 +3,7 @@ import {
   toPage,
   type ListVideosQuery,
   type Page,
+  type UpdateMarkersInput,
   type UpdateVideoInput,
 } from '@video/shared';
 
@@ -10,6 +11,7 @@ import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../comm
 import { slugify, uniqueSlug } from '../common/slug';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { validateMarkers, type Markers } from './markers';
 
 const VIDEO_SELECT = {
   id: true,
@@ -160,6 +162,50 @@ export class VideosService {
     if (!video) throw new NotFoundException('No such video');
 
     await this.prisma.video.delete({ where: { id } });
+  }
+
+  /**
+   * Sets, adjusts or clears the skip markers.
+   *
+   * The patch is merged onto what is already stored **before** validating, not
+   * after. Setting only `introEndSec` has to be checked against the
+   * `introStartSec` already in the database — validating the patch alone would
+   * accept an end before a start it could not see.
+   */
+  async updateMarkers(id: string, patch: UpdateMarkersInput) {
+    const video = await this.prisma.video.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        durationSec: true,
+        introStartSec: true,
+        introEndSec: true,
+        outroStartSec: true,
+        outroEndSec: true,
+      },
+    });
+    if (!video) throw new NotFoundException('No such video');
+
+    const merged: Markers = {
+      // `undefined` means "leave alone"; an explicit `null` means "clear".
+      introStartSec: patch.introStartSec === undefined ? video.introStartSec : patch.introStartSec,
+      introEndSec: patch.introEndSec === undefined ? video.introEndSec : patch.introEndSec,
+      outroStartSec: patch.outroStartSec === undefined ? video.outroStartSec : patch.outroStartSec,
+      outroEndSec: patch.outroEndSec === undefined ? video.outroEndSec : patch.outroEndSec,
+    };
+
+    const issues = validateMarkers(merged, video.durationSec);
+    if (issues.length > 0) {
+      // Same shape the validation pipe produces, so the editor renders marker
+      // errors the way it renders every other field error.
+      throw new BadRequestException({ message: 'Validation failed', errors: issues });
+    }
+
+    return this.prisma.video.update({
+      where: { id },
+      data: merged,
+      select: VIDEO_SELECT,
+    });
   }
 
   async publish(id: string) {

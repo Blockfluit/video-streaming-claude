@@ -21,9 +21,11 @@ import {
   MAX_THUMBNAIL_BYTES,
   captureThumbnailSchema,
   listVideosSchema,
+  updateMarkersSchema,
   updateVideoSchema,
   type CaptureThumbnailInput,
   type ListVideosQuery,
+  type UpdateMarkersInput,
   type UpdateVideoInput,
 } from '@video/shared';
 
@@ -101,6 +103,22 @@ export class VideosController {
   @HttpCode(HttpStatus.OK)
   archive(@Param('id') id: string) {
     return this.videos.archive(id);
+  }
+
+  /**
+   * Sets the skip-intro and skip-outro markers.
+   *
+   * Separate from `PATCH /videos/:id` because the scrub editor saves a single
+   * marker at a time as you click, and because these are validated against each
+   * other and the duration rather than independently.
+   */
+  @Patch(':id/markers')
+  @Roles('ADMIN')
+  updateMarkers(
+    @Param('id') id: string,
+    @Body(validate(updateMarkersSchema)) dto: UpdateMarkersInput,
+  ) {
+    return this.videos.updateMarkers(id, dto);
   }
 
   /**
