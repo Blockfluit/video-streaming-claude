@@ -43,6 +43,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 
+**Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
+- `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here
+  would silently break move detection.
+- Only `/` separates path segments. A backslash is a legal character in a Linux filename and must never be
+  treated as a separator.
+- Release-tag stripping matches **whole tokens** — a substring match eats real titles (`aac` inside
+  "Aachen"). `cleanTitle` also never returns empty, falling back to the raw name. That fallback masks
+  substring bugs in single-token titles, so test tag stripping with **multi-word** titles or the test proves
+  nothing.
+- The sidecar regex's stem must stay **greedy**. Lazy would split `The_Big_Sky_en_English` at the first
+  short word, reading `Big` as the language.
+- Subtitle binding is exact-stem first, then title. Ambiguity is **reported, never guessed** — the wrong
+  language on the wrong episode is worse than an issue in the admin list.
+- An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
+  problems (root-level file, depth > 3) refuse ingestion.
+
 **Data**
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added
   `CHECK ((collectionId IS NULL) <> (videoId IS NULL))` in their migration. Regenerating the init migration
