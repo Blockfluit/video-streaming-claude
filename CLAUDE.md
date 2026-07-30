@@ -112,6 +112,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
+- Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place. Inside `MEDIA_ROOT` so the rename
+  stays on one filesystem (across two mounts it fails with `EXDEV`), and dot-prefixed so both the scanner
+  and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion.
+- multer uses `diskStorage`, never memory: a 2 GB file buffered in the heap takes the process with it.
+- multer 2.2 strips **both** slash and backslash paths from `originalname`, but **not** a leading dot.
+  `.hidden.mp4` arrives intact and would become a file the scanner skips, so `sanitizeFilename` doing that
+  is load-bearing rather than belt-and-braces. Verified by mutation, not assumed.
+- An upload picks a free `storageKey` by checking the **filesystem as well as the database** — a file can be
+  on disk with no row yet, and overwriting it would destroy something nobody asked to replace.
 - The missing-sweep must key on **row ids already accounted for**, not on `storageKey`. Its snapshot is
   taken before moves are applied, so keying on the path marks a row MISSING in the same pass that just
   followed it to a new one. (This shipped as a bug and `ingest.db-spec.ts` caught it.)
