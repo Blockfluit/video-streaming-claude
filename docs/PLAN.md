@@ -781,7 +781,13 @@ All routes require an authenticated session except `POST /auth/login` and `POST 
 | Watch | `POST /videos/:id/heartbeat` · `GET /me/history` |
 | My List | `GET /me/watchlist` · `POST /me/watchlist` (`{ videoId \| collectionId }`, idempotent) · `DELETE /me/watchlist` (same body) |
 
-Self-lockout guard: refuse to demote or deactivate the last active admin.
+Self-lockout guard: refuse to demote, deactivate or delete the last active admin. A deactivated admin does
+not count as cover, and the remaining-admin count is read `FOR UPDATE` so two simultaneous demotions cannot
+both believe someone else is left.
+
+`PATCH /admin/users/:id` also sets a password. With no mailer there is no "forgot password" link, so an
+admin doing it by hand is the only recovery an account has. `DELETE` is a real delete — cascades take the
+account's comments, watch history and watchlist; `PATCH { isActive: false }` is the reversible option.
 
 ---
 
