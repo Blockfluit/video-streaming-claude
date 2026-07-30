@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
+import { MediaService } from '../media/media.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
@@ -52,6 +53,7 @@ export class ReconcileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly media: MediaService,
   ) {}
 
   get isRunning(): boolean {
@@ -153,11 +155,14 @@ export class ReconcileService {
         await this.applyMove(candidate.id, file, contentTag);
         byStorageKey.set(file.relPath, { ...candidate, storageKey: file.relPath });
         present.add(candidate.id);
+        // A move can change which file plays, so its probe is no longer trusted.
+        this.media.enqueue(candidate.id);
         moved += 1;
         continue;
       }
 
-      await this.createDraft(file, contentTag);
+      const createdId = await this.createDraft(file, contentTag);
+      if (createdId) this.media.enqueue(createdId);
       created += 1;
     }
 
@@ -234,14 +239,15 @@ export class ReconcileService {
     });
   }
 
-  private async createDraft(file: ScannedFile, contentTag: string): Promise<void> {
-    if (file.parsed.kind !== 'video') return;
+  private async createDraft(file: ScannedFile, contentTag: string): Promise<string | null> {
+    if (file.parsed.kind !== 'video') return null;
 
     const { collectionId, seasonId } = await this.ensureParents(file.parsed.collectionFolder, file.parsed.season);
 
     const slug = await this.freeVideoSlug(collectionId, slugify(file.parsed.title));
 
-    await this.prisma.video.create({
+    const created = await this.prisma.video.create({
+      select: { id: true },
       data: {
         collectionId,
         seasonId,
@@ -258,6 +264,8 @@ export class ReconcileService {
         origin: 'INGEST',
       },
     });
+
+    return created.id;
   }
 
   /**

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,11 +12,17 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import {
+  MAX_THUMBNAIL_BYTES,
+  captureThumbnailSchema,
   listVideosSchema,
   updateVideoSchema,
+  type CaptureThumbnailInput,
   type ListVideosQuery,
   type UpdateVideoInput,
 } from '@video/shared';
@@ -23,6 +30,7 @@ import {
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
+import { MediaService } from '../media/media.service';
 import { StreamingService } from './streaming.service';
 import { VideosService } from './videos.service';
 
@@ -31,6 +39,7 @@ export class VideosController {
   constructor(
     private readonly videos: VideosService,
     private readonly streaming: StreamingService,
+    private readonly media: MediaService,
   ) {}
 
   @Get()
@@ -91,4 +100,68 @@ export class VideosController {
   archive(@Param('id') id: string) {
     return this.videos.archive(id);
   }
+
+  /**
+   * Re-runs ffprobe and waits for it — the admin clicked a button and expects
+   * an answer, not a promise that something will happen eventually.
+   */
+  @Post(':id/reprobe')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async reprobe(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.media.reprobe(id);
+    return this.videos.findOne(id, user.role);
+  }
+
+  /** Uploads a poster image. Marked MANUAL, so no later probe overwrites it. */
+  @Post(':id/thumbnail')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_THUMBNAIL_BYTES, files: 1 },
+      fileFilter: (_request, file, callback) => {
+        // The client's filename is metadata, never a path component — the
+        // extension is taken from the mime type instead.
+        const extension = MIME_TO_EXTENSION[file.mimetype];
+        callback(extension ? null : new BadRequestException('Unsupported image type'), Boolean(extension));
+      },
+    }),
+  )
+  async uploadThumbnail(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+
+    const key = await this.media.setThumbnail(id, file.buffer, MIME_TO_EXTENSION[file.mimetype]);
+    return { thumbnailKey: key, thumbnailSource: 'MANUAL' };
+  }
+
+  /** Grabs a frame at a chosen moment. Also MANUAL — someone picked it. */
+  @Post(':id/thumbnail/capture')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async captureThumbnail(
+    @Param('id') id: string,
+    @Body(validate(captureThumbnailSchema)) dto: CaptureThumbnailInput,
+  ) {
+    const key = await this.media.captureThumbnail(id, dto.atSeconds);
+    return { thumbnailKey: key, thumbnailSource: 'MANUAL' };
+  }
+
+  /** Drops the poster and returns the video to AUTO; the next probe regenerates one. */
+  @Delete(':id/thumbnail')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearThumbnail(@Param('id') id: string): Promise<void> {
+    return this.media.clearThumbnail(id);
+  }
 }
+
+/** Extension taken from the mime type, never from the client's filename. */
+const MIME_TO_EXTENSION: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};

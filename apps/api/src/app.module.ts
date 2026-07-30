@@ -7,6 +7,7 @@ import { CollectionsModule } from './collections/collections.module';
 import { CommonModule } from './common/common.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
+import { MediaModule } from './media/media.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
@@ -19,6 +20,7 @@ import { VideosModule } from './videos/videos.module';
     }),
     PrismaModule,
     CommonModule,
+    MediaModule,
     AuthModule,
     InvitesModule,
     UsersModule,
