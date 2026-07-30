@@ -14,7 +14,7 @@ function contextFor(user?: AuthUser): ExecutionContext {
 }
 
 function userWithRole(role: Role): AuthUser {
-  return { id: 'u1', email: 'a@example.com', displayName: 'A', role, isActive: true };
+  return { id: 'u1', username: 'u1', displayName: 'A', role, isActive: true };
 }
 
 describe('RolesGuard', () => {

@@ -43,10 +43,10 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto, @Req() request: Request): Promise<AuthUser> {
-    const user = await this.auth.validateCredentials(dto.email, dto.password);
+    const user = await this.auth.validateCredentials(dto.username, dto.password);
     if (!user) {
       // One message for both "no such account" and "wrong password".
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid username or password');
     }
 
     // Regenerate before storing the id: without this, a session id captured

@@ -44,7 +44,7 @@ describe('Auth (e2e)', () => {
         'user-1',
         {
           id: 'user-1',
-          email: 'viewer@example.com',
+          username: 'viewer',
           displayName: 'Viewer',
           role: 'USER',
           isActive: true,
@@ -55,7 +55,7 @@ describe('Auth (e2e)', () => {
         'user-2',
         {
           id: 'user-2',
-          email: 'gone@example.com',
+          username: 'deactivated',
           displayName: 'Deactivated',
           role: 'USER',
           isActive: false,
@@ -71,13 +71,13 @@ describe('Auth (e2e)', () => {
             where,
             select,
           }: {
-            where: { id?: string; email?: string };
+            where: { id?: string; username?: string };
             select?: Record<string, boolean>;
           }) => {
             const found = [...users.values()].find(
               (user) =>
                 (where.id !== undefined && user.id === where.id) ||
-                (where.email !== undefined && user.email === where.email),
+                (where.username !== undefined && user.username === where.username),
             );
             return Promise.resolve(applySelect(found, select));
           },
@@ -127,19 +127,19 @@ describe('Auth (e2e)', () => {
     it('rejects a wrong password', async () => {
       await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: 'wrong' })
+        .send({ username: 'viewer', password: 'wrong' })
         .expect(401);
     });
 
     it('rejects an unknown account with the same message as a wrong password', async () => {
       const unknown = await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'nobody@example.com', password: PASSWORD })
+        .send({ username: 'nobody', password: PASSWORD })
         .expect(401);
 
       const wrongPassword = await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: 'wrong' })
+        .send({ username: 'viewer', password: 'wrong' })
         .expect(401);
 
       expect(unknown.body.message).toEqual(wrongPassword.body.message);
@@ -148,44 +148,54 @@ describe('Auth (e2e)', () => {
     it('rejects a deactivated account holding the right password', async () => {
       await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'gone@example.com', password: PASSWORD })
+        .send({ username: 'deactivated', password: PASSWORD })
         .expect(401);
     });
 
     it('rejects a malformed body with 400, not 401', async () => {
       await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'not-an-email', password: PASSWORD })
+        .send({ username: 'viewer' })
         .expect(400);
 
       await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'viewer@example.com' })
+        .send({ password: PASSWORD })
+        .expect(400);
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ username: '', password: PASSWORD })
         .expect(400);
     });
 
     it('accepts valid credentials and never returns the password hash', async () => {
       const response = await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
+        .send({ username: 'viewer', password: PASSWORD })
         .expect(200);
 
-      expect(response.body).toMatchObject({ id: 'user-1', email: 'viewer@example.com' });
+      expect(response.body).toMatchObject({ id: 'user-1', username: 'viewer' });
       expect(response.body.passwordHash).toBeUndefined();
       expect(response.headers['set-cookie']).toBeDefined();
     });
 
-    it('normalises email case and surrounding whitespace', async () => {
+    it('matches usernames case-insensitively and ignores surrounding whitespace', async () => {
       await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: '  VIEWER@Example.com  ', password: PASSWORD })
+        .send({ username: '  VIEWER  ', password: PASSWORD })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ username: 'ViEwEr', password: PASSWORD })
         .expect(200);
     });
 
     it('sets an httpOnly cookie', async () => {
       const response = await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
+        .send({ username: 'viewer', password: PASSWORD })
         .expect(200);
 
       const cookies = response.headers['set-cookie'] as unknown as string[];
@@ -197,10 +207,7 @@ describe('Auth (e2e)', () => {
     it('carries the session from login through /auth/me to logout', async () => {
       const agent = request.agent(app.getHttpServer());
 
-      await agent
-        .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
-        .expect(200);
+      await agent.post('/auth/login').send({ username: 'viewer', password: PASSWORD }).expect(200);
 
       const me = await agent.get('/auth/me').expect(200);
       expect(me.body).toMatchObject({ id: 'user-1', displayName: 'Viewer' });
@@ -222,12 +229,12 @@ describe('Auth (e2e)', () => {
       // is not doing its job.
       const first = await agent
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
+        .send({ username: 'viewer', password: PASSWORD })
         .expect(200);
 
       const second = await agent
         .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
+        .send({ username: 'viewer', password: PASSWORD })
         .expect(200);
 
       expect(sid(first)).not.toEqual(sid(second));
@@ -238,10 +245,7 @@ describe('Auth (e2e)', () => {
     it('invalidates a live session as soon as the account is deactivated', async () => {
       const agent = request.agent(app.getHttpServer());
 
-      await agent
-        .post('/auth/login')
-        .send({ email: 'viewer@example.com', password: PASSWORD })
-        .expect(200);
+      await agent.post('/auth/login').send({ username: 'viewer', password: PASSWORD }).expect(200);
       await agent.get('/auth/me').expect(200);
 
       users.get('user-1')!.isActive = false;

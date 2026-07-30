@@ -6,7 +6,7 @@ import type { Role } from '../prisma/generated/enums';
  */
 export interface AuthUser {
   id: string;
-  email: string;
+  username: string;
   displayName: string;
   role: Role;
   isActive: boolean;
@@ -15,7 +15,7 @@ export interface AuthUser {
 /** What `SessionGuard` selects, kept next to AuthUser so the two cannot drift. */
 export const AUTH_USER_SELECT = {
   id: true,
-  email: true,
+  username: true,
   displayName: true,
   role: true,
   isActive: true,

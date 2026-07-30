@@ -24,7 +24,7 @@ function makeRequest(userId?: string): FakeRequest {
 describe('SessionGuard', () => {
   const activeUser = {
     id: 'user-1',
-    email: 'a@example.com',
+    username: 'viewer',
     displayName: 'A',
     role: 'USER',
     isActive: true,

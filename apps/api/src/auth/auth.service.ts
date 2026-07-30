@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_USER_SELECT, type AuthUser } from './auth.types';
 import { PasswordService } from './password.service';
+import { normaliseUsername } from './username';
 
 @Injectable()
 export class AuthService {
@@ -12,9 +13,11 @@ export class AuthService {
   ) {}
 
   /** Returns the user on success, or null for any failure. Callers must not distinguish why. */
-  async validateCredentials(email: string, password: string): Promise<AuthUser | null> {
+  async validateCredentials(username: string, password: string): Promise<AuthUser | null> {
     const user = await this.prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+      // Usernames are stored lowercase, so this normalisation is what makes the
+      // lookup case-insensitive.
+      where: { username: String(normaliseUsername(username)) },
       select: { ...AUTH_USER_SELECT, passwordHash: true },
     });
 
