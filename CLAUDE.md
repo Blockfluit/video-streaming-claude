@@ -70,6 +70,23 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `qualityLabel` lives in `packages/shared` — the API probes the dimensions, the web app renders the badge.
 - ffmpeg and ffprobe are invoked with `execFile`, never `exec`. Every path reaching them came off a disk
   scan or a database row, so a filename containing `;` or `$(…)` must stay a filename.
+- **There is no ffmpeg wrapper worth adopting** — checked, and worth not re-checking. `fluent-ffmpeg` (2M
+  downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
+  abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
+  `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
+  which is where all 558 tests run. The thin wrapper in `media/ffmpeg.service.ts` stays.
+- **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
+  **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
+  It adds nothing to a successful probe, so it is always passed. Prefer it to reading stderr.
+- The **encoder** has no equivalent — ffmpeg offers only text loglevels — so stderr summarising stays the
+  fallback there. For progress, `-progress pipe:1` emits `key=value` lines, which is why step 12 must use it
+  rather than scraping the status line.
+- Failures go through `FfmpegError`, which keeps ffmpeg's diagnosis and drops the command line. `execFile`'s
+  own message leads with the whole invocation, which pushes the real cause past where `probeError` is
+  truncated and shows absolute server paths to an admin. Absolute paths in ffmpeg's output are reduced to
+  the filename for the same reason. stderr and the structured message **overlap without containing each
+  other** — stderr adds the specific cause (`moov atom not found`) that the structured message lacks — so
+  the shared part is dropped and both halves are kept.
 - Thumbnails are written to `DERIVED_ROOT`, never the watched media tree.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
@@ -106,6 +123,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   short word, reading `Big` as the language.
 - Subtitle binding is exact-stem first, then title. Ambiguity is **reported, never guessed** — the wrong
   language on the wrong episode is worse than an issue in the admin list.
+- Sidecars are matched **per folder**, never library-wide. Every show has a `Pilot`, so a wider scope makes
+  all of them ambiguous.
+- Everything served lives in `DERIVED_ROOT`, including sidecars that were already `.vtt` — copying a few
+  kilobytes beats carrying a "which root?" question through every read, and it survives the source moving.
+  `sourceKey` holds the media path the sidecar came from; without it, reconcile cannot notice a deletion.
+- Decide a subtitle's charset **before** converting, not after. Legacy `.srt` is often Windows-1252, and
+  ffmpeg either fails or emits mojibake — a conversion that already threw cannot be rescued by a retry.
+- An uploaded subtitle is sniffed for the `WEBVTT` signature. An SRT accepted as a `.vtt` loads as an empty
+  track: the viewer sees the language listed and nothing ever appears.
+- Exactly one `isDefault` per video. `<track default>` on two tracks is undefined behaviour.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
 - Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can

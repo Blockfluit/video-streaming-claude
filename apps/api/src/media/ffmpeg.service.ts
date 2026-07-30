@@ -4,7 +4,49 @@ import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-const run = promisify(execFile);
+import { FfmpegError } from './ffmpeg-error';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Runs one of the binaries, turning a failure into an `FfmpegError`.
+ *
+ * `execFile`'s own error message leads with the whole command line — absolute
+ * server paths and all — and pushes the actual diagnosis past the point where
+ * `probeError` gets truncated. This keeps what ffmpeg complained about and
+ * drops what it was asked to do.
+ */
+async function run(
+  tool: 'ffmpeg' | 'ffprobe',
+  binary: string,
+  args: string[],
+  options: { timeout: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await execFileAsync(binary, args, options);
+  } catch (cause) {
+    const error = cause as NodeJS.ErrnoException & {
+      stderr?: string;
+      stdout?: string;
+      code?: number | string;
+    };
+
+    // A missing binary is a deployment problem, not a bad file — say so plainly
+    // rather than reporting it as an unreadable video.
+    if (error.code === 'ENOENT') {
+      throw new Error(`${binary} is not installed or not on PATH`);
+    }
+
+    throw new FfmpegError(
+      tool,
+      typeof error.code === 'number' ? error.code : null,
+      error.stderr ?? '',
+      // ffprobe writes its `-show_error` JSON to stdout even when it exits
+      // non-zero, and promisify attaches it to the rejection.
+      error.stdout ?? '',
+    );
+  }
+}
 
 /**
  * The only place the ffmpeg binaries are invoked.
@@ -46,6 +88,8 @@ interface FfprobeOutput {
 /** Probing a file should never take this long; something has gone wrong if it does. */
 const PROBE_TIMEOUT_MS = 60_000;
 const THUMBNAIL_TIMEOUT_MS = 120_000;
+/** Subtitles are small; anything slower than this has gone wrong. */
+const SUBTITLE_TIMEOUT_MS = 60_000;
 
 @Injectable()
 export class FfmpegService {
@@ -65,8 +109,8 @@ export class FfmpegService {
   async isAvailable(): Promise<boolean> {
     try {
       await Promise.all([
-        run(this.ffprobe, ['-version'], { timeout: 10_000 }),
-        run(this.ffmpeg, ['-version'], { timeout: 10_000 }),
+        run('ffprobe', this.ffprobe, ['-version'], { timeout: 10_000 }),
+        run('ffmpeg', this.ffmpeg, ['-version'], { timeout: 10_000 }),
       ]);
       return true;
     } catch {
@@ -76,10 +120,14 @@ export class FfmpegService {
 
   async probe(path: string): Promise<ProbeResult> {
     const { stdout } = await run(
+      'ffprobe',
       this.ffprobe,
       [
         '-v',
         'error',
+        // Structured failures on stdout. Adds nothing to a successful probe,
+        // and replaces reading stderr when something goes wrong.
+        '-show_error',
         '-show_streams',
         '-show_format',
         '-of',
@@ -93,6 +141,34 @@ export class FfmpegService {
   }
 
   /**
+   * Converts a subtitle file to WebVTT.
+   *
+   * Mandatory rather than a nicety: `<track>` accepts only WebVTT, so an
+   * `.srt` sidecar is invisible to a browser until this runs.
+   *
+   * `charset` is passed when the source is not UTF-8. Legacy `.srt` files are
+   * very often Windows-1252, and ffmpeg does not *fail* on those — it produces
+   * mojibake, which nobody notices until a viewer reads a line.
+   */
+  async convertSubtitle(source: string, destination: string, charset?: string): Promise<void> {
+    await run(
+      'ffmpeg',
+      this.ffmpeg,
+      [
+        '-hide_banner',
+        '-y',
+        ...(charset ? ['-sub_charenc', charset] : []),
+        '-i',
+        source,
+        '-c:s',
+        'webvtt',
+        destination,
+      ],
+      { timeout: SUBTITLE_TIMEOUT_MS },
+    );
+  }
+
+  /**
    * Grabs a single frame as a JPEG.
    *
    * `-ss` before `-i` seeks by keyframe index rather than decoding up to the
@@ -100,6 +176,7 @@ export class FfmpegService {
    */
   async captureFrame(source: string, atSeconds: number, destination: string): Promise<void> {
     await run(
+      'ffmpeg',
       this.ffmpeg,
       [
         '-hide_banner',
