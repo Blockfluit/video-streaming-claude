@@ -121,3 +121,13 @@ export const listIngestIssuesSchema = pageQuerySchema.extend({
   includeResolved: booleanParam.optional().default(false),
 });
 export type ListIngestIssuesQuery = z.infer<typeof listIngestIssuesSchema>;
+
+/** Grabbing a poster frame at a chosen moment. */
+export const captureThumbnailSchema = z.object({
+  atSeconds: z.coerce.number().min(0).max(24 * 60 * 60),
+});
+export type CaptureThumbnailInput = z.infer<typeof captureThumbnailSchema>;
+
+/** Image formats a browser will render as a poster. */
+export const THUMBNAIL_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
+export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;

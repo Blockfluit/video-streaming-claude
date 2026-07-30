@@ -60,8 +60,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Stream responses are `Cache-Control: private, no-store`. A shared cache holding a range response as
   though it were the whole file corrupts playback for the next viewer.
 - `thumbnailSource = MANUAL` is never overwritten by a reprobe. Auto-generation runs only when `AUTO`.
-- `qualityLabel()` checks **width OR height**, never height alone — a 1080p film in 2.39:1 is `1920x800`.
+  Losing a hand-picked poster to a routine rescan loses an afternoon of curation.
+- `qualityLabel()` compares by **edge, not axis**: long edge against the tier's width threshold, short edge
+  against its height threshold. Height alone hides the badge on most films (a 1080p film in 2.39:1 is
+  `1920×800`); either raw dimension against either threshold over-promotes portrait video (a 1080×1920 phone
+  clip is HD, but its 1920 height clears QHD's 1440). The plan's table says the latter and also claims it
+  handles portrait correctly — those conflict, and the edge comparison is what satisfies both intents.
 - Badges render only at 1080p and above; below that, render nothing.
+- `qualityLabel` lives in `packages/shared` — the API probes the dimensions, the web app renders the badge.
+- ffmpeg and ffprobe are invoked with `execFile`, never `exec`. Every path reaching them came off a disk
+  scan or a database row, so a filename containing `;` or `$(…)` must stay a filename.
+- Thumbnails are written to `DERIVED_ROOT`, never the watched media tree.
+- A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
+  two hundred, and the admin needs to see which file and why.
+- `needsConversion` does **not** fire on nulls from a failed probe — that would queue CPU-saturating work on
+  a guess. The container check still applies, since it needs no probe.
+- Probe/thumbnail run at concurrency 2 (cheap, IO-bound). Transcoding is separate and runs one at a time.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - The missing-sweep must key on **row ids already accounted for**, not on `storageKey`. Its snapshot is
