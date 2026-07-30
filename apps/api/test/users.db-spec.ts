@@ -2,7 +2,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConflictException, Logger, type INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConflictException, Logger, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Client } from 'pg';
 import request from 'supertest';
@@ -35,7 +35,6 @@ describe('Admin users (real database)', () => {
 
     app = moduleRef.createNestApplication();
     app.use(app.get(SessionStoreService).createMiddleware());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
     prisma = app.get(PrismaService);
     users = app.get(UsersService);
@@ -125,7 +124,8 @@ describe('Admin users (real database)', () => {
 
       const response = await agent.get('/admin/users').expect(200);
 
-      expect(response.body).toHaveLength(2);
+      expect(response.body.items).toHaveLength(2);
+      expect(response.body.total).toBe(2);
       expect(JSON.stringify(response.body)).not.toContain('passwordHash');
       expect(JSON.stringify(response.body)).not.toContain('$argon2');
     });

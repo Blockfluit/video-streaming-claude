@@ -1,0 +1,113 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import {
+  createCollectionSchema,
+  deleteWithFilesSchema,
+  listCollectionsSchema,
+  publishCollectionSchema,
+  resolveQuerySchema,
+  updateCollectionSchema,
+  type CreateCollectionInput,
+  type DeleteWithFilesQuery,
+  type ListCollectionsQuery,
+  type PublishCollectionQuery,
+  type ResolveQuery,
+  type UpdateCollectionInput,
+} from '@video/shared';
+
+import type { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/decorators';
+import { validate } from '../common/zod-validation.pipe';
+import { CollectionsService } from './collections.service';
+import { ResolveService, type ResolveResult } from './resolve.service';
+
+/**
+ * Reads are open to any signed-in user and filtered by role in the service —
+ * never in the UI. Writes are ADMIN-only, marked per route rather than on the
+ * class so the reads stay reachable.
+ */
+@Controller('collections')
+export class CollectionsController {
+  constructor(
+    private readonly collections: CollectionsService,
+    private readonly resolver: ResolveService,
+  ) {}
+
+  @Get()
+  list(
+    @Query(validate(listCollectionsSchema)) query: ListCollectionsQuery,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.collections.list(query, user.role);
+  }
+
+  @Post()
+  @Roles('ADMIN')
+  create(@Body(validate(createCollectionSchema)) dto: CreateCollectionInput) {
+    return this.collections.create(dto);
+  }
+
+  /**
+   * Declared before `:slug` — Express matches in order, so a literal segment
+   * has to come first or `resolve` would be read as a collection slug.
+   */
+  @Get(':slug/resolve')
+  resolve(
+    @Param('slug') slug: string,
+    @Query(validate(resolveQuerySchema)) query: ResolveQuery,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ResolveResult> {
+    return this.resolver.resolve(slug, query.path, user.role);
+  }
+
+  @Get(':slug')
+  findOne(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
+    return this.collections.findBySlug(slug, user.role);
+  }
+
+  @Patch(':id')
+  @Roles('ADMIN')
+  update(
+    @Param('id') id: string,
+    @Body(validate(updateCollectionSchema)) dto: UpdateCollectionInput,
+  ) {
+    return this.collections.update(id, dto);
+  }
+
+  @Delete(':id')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(
+    @Param('id') id: string,
+    @Query(validate(deleteWithFilesSchema)) query: DeleteWithFilesQuery,
+  ): Promise<void> {
+    return this.collections.remove(id, query.deleteFiles);
+  }
+
+  @Post(':id/publish')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  publish(
+    @Param('id') id: string,
+    @Query(validate(publishCollectionSchema)) query: PublishCollectionQuery,
+  ) {
+    return this.collections.publish(id, query.cascade);
+  }
+
+  @Post(':id/archive')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  archive(@Param('id') id: string) {
+    return this.collections.archive(id);
+  }
+}

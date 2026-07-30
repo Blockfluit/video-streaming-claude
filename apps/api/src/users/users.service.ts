@@ -5,12 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import {
+  normaliseUsername,
+  toPage,
+  type CreateUserInput,
+  type ListUsersQuery,
+  type Page,
+  type UpdateUserInput,
+} from '@video/shared';
+
 import { PasswordService } from '../auth/password.service';
-import { normaliseUsername } from '../auth/username';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateUserDto } from './dto/create-user.dto';
-import type { UpdateUserDto } from './dto/update-user.dto';
 import { DELETED, wouldRemoveLastActiveAdmin, type AccountState } from './last-admin';
 
 /** Never includes `passwordHash`. */
@@ -44,15 +50,24 @@ export class UsersService {
     private readonly passwords: PasswordService,
   ) {}
 
-  list(): Promise<UserView[]> {
-    return this.prisma.user.findMany({
-      select: USER_SELECT,
-      orderBy: [{ role: 'asc' }, { username: 'asc' }],
-    });
+  async list(query: ListUsersQuery): Promise<Page<UserView>> {
+    const [users, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        select: USER_SELECT,
+        // `username` is unique, so this order is already total — but the id
+        // stays as a habit, since most orderings are not.
+        orderBy: [{ role: 'asc' }, { username: 'asc' }],
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.user.count(),
+    ]);
+
+    return toPage(users, total, query);
   }
 
-  async create(dto: CreateUserDto): Promise<UserView> {
-    const username = String(normaliseUsername(dto.username));
+  async create(dto: CreateUserInput): Promise<UserView> {
+    const username = normaliseUsername(dto.username);
     const passwordHash = await this.passwords.hash(dto.password);
 
     const taken = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
@@ -73,14 +88,7 @@ export class UsersService {
     });
   }
 
-  async update(id: string, dto: UpdateUserDto): Promise<UserView> {
-    // Counting keys is not enough: class-transformer materialises every
-    // declared field, so an empty body arrives as four `undefined`s.
-    const changes = Object.values(dto).filter((value) => value !== undefined);
-    if (changes.length === 0) {
-      throw new BadRequestException('Nothing to update');
-    }
-
+  async update(id: string, dto: UpdateUserInput): Promise<UserView> {
     // Hashed before the transaction: argon2id is slow, and the transaction
     // holds a lock over every active admin row while it runs.
     const passwordHash = dto.password ? await this.passwords.hash(dto.password) : undefined;

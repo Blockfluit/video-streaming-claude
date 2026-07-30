@@ -1,12 +1,12 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 
+import { normaliseUsername, type RedeemInput } from '@video/shared';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { AUTH_USER_SELECT, type AuthUser } from './auth.types';
 import { BootstrapService } from './bootstrap.service';
-import type { RedeemDto } from './dto/redeem.dto';
 import { PasswordService } from './password.service';
 import { hashToken, tokenState } from './tokens';
-import { normaliseUsername } from './username';
 
 /**
  * One message for every way a token can be unusable — unknown, expired,
@@ -29,7 +29,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       // Usernames are stored lowercase, so this normalisation is what makes the
       // lookup case-insensitive.
-      where: { username: String(normaliseUsername(username)) },
+      where: { username: normaliseUsername(username) },
       select: { ...AUTH_USER_SELECT, passwordHash: true },
     });
 
@@ -64,9 +64,9 @@ export class AuthService {
    * interleaving over HTTP, and says so. The condition is what keeps it correct
    * anyway once this runs as more than one process.
    */
-  async redeem(dto: RedeemDto): Promise<AuthUser> {
+  async redeem(dto: RedeemInput): Promise<AuthUser> {
     const tokenHash = hashToken(dto.token);
-    const username = String(normaliseUsername(dto.username));
+    const username = normaliseUsername(dto.username);
     // Hashed outside the transaction: argon2id is deliberately slow, and
     // holding a row lock for the duration would serialise concurrent signups.
     const passwordHash = await this.passwords.hash(dto.password);

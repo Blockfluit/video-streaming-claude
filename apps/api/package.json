@@ -26,14 +26,14 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@video/shared": "*",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
     "connect-pg-simple": "^10.0.0",
     "express-session": "^1.19.0",
     "langs": "^2.0.0",
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "slugify": "^1.6.9",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",

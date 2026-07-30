@@ -8,11 +8,20 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
+import {
+  createUserSchema,
+  listUsersSchema,
+  updateUserSchema,
+  type CreateUserInput,
+  type ListUsersQuery,
+  type Page,
+  type UpdateUserInput,
+} from '@video/shared';
 
 import { Roles } from '../auth/decorators';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { validate } from '../common/zod-validation.pipe';
 import { UsersService, type UserView } from './users.service';
 
 /**
@@ -30,17 +39,20 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
-  list(): Promise<UserView[]> {
-    return this.users.list();
+  list(@Query(validate(listUsersSchema)) query: ListUsersQuery): Promise<Page<UserView>> {
+    return this.users.list(query);
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto): Promise<UserView> {
+  create(@Body(validate(createUserSchema)) dto: CreateUserInput): Promise<UserView> {
     return this.users.create(dto);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto): Promise<UserView> {
+  update(
+    @Param('id') id: string,
+    @Body(validate(updateUserSchema)) dto: UpdateUserInput,
+  ): Promise<UserView> {
     return this.users.update(id, dto);
   }
 

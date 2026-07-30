@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import type { BootstrapService } from './bootstrap.service';
-import type { RedeemDto } from './dto/redeem.dto';
+import type { RedeemInput } from '@video/shared';
 import { PasswordService } from './password.service';
 import { hashToken } from './tokens';
 
@@ -22,8 +22,8 @@ describe('AuthService.redeem', () => {
   let removeTokenFile: jest.Mock;
   let service: AuthService;
 
-  const dto = (overrides: Partial<RedeemDto> = {}): RedeemDto =>
-    ({ token: 'plaintext-token', username: 'Ada', password: 'a'.repeat(12), ...overrides }) as RedeemDto;
+  const dto = (overrides: Partial<RedeemInput> = {}): RedeemInput =>
+    ({ token: 'plaintext-token', username: 'Ada', password: 'a'.repeat(12), ...overrides }) as RedeemInput;
 
   beforeEach(() => {
     findUniqueToken = jest.fn().mockResolvedValue({
@@ -94,7 +94,7 @@ describe('AuthService.redeem', () => {
       revokedAt: null,
     });
 
-    await service.redeem({ ...dto(), role: 'ADMIN' } as RedeemDto & { role: string });
+    await service.redeem({ ...dto(), role: 'ADMIN' } as RedeemInput & { role: string });
 
     expect(createUser.mock.calls[0][0].data.role).toBe('ADMIN');
   });
