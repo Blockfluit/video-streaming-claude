@@ -25,7 +25,11 @@ async function run(
   try {
     return await execFileAsync(binary, args, options);
   } catch (cause) {
-    const error = cause as NodeJS.ErrnoException & { stderr?: string; code?: number | string };
+    const error = cause as NodeJS.ErrnoException & {
+      stderr?: string;
+      stdout?: string;
+      code?: number | string;
+    };
 
     // A missing binary is a deployment problem, not a bad file — say so plainly
     // rather than reporting it as an unreadable video.
@@ -33,7 +37,14 @@ async function run(
       throw new Error(`${binary} is not installed or not on PATH`);
     }
 
-    throw new FfmpegError(tool, typeof error.code === 'number' ? error.code : null, error.stderr ?? '');
+    throw new FfmpegError(
+      tool,
+      typeof error.code === 'number' ? error.code : null,
+      error.stderr ?? '',
+      // ffprobe writes its `-show_error` JSON to stdout even when it exits
+      // non-zero, and promisify attaches it to the rejection.
+      error.stdout ?? '',
+    );
   }
 }
 
@@ -114,6 +125,9 @@ export class FfmpegService {
       [
         '-v',
         'error',
+        // Structured failures on stdout. Adds nothing to a successful probe,
+        // and replaces reading stderr when something goes wrong.
+        '-show_error',
         '-show_streams',
         '-show_format',
         '-of',

@@ -1,4 +1,4 @@
-import { FfmpegError, summariseStderr } from './ffmpeg-error';
+import { FfmpegError, parseStructuredError, summariseStderr } from './ffmpeg-error';
 
 describe('summariseStderr', () => {
   /**
@@ -68,6 +68,36 @@ describe('summariseStderr', () => {
   });
 });
 
+/**
+ * ffprobe can report its failure as JSON on stdout (`-show_error -of json`),
+ * which beats reading stderr: it is a stable contract, and it arrives without
+ * the banner, the per-run decoder address or the absolute path.
+ */
+describe('parseStructuredError', () => {
+  const failure = JSON.stringify({
+    error: { code: -1094995529, string: 'Invalid data found when processing input' },
+  });
+
+  it('reads the message ffprobe reports', () => {
+    expect(parseStructuredError(failure)).toBe('Invalid data found when processing input');
+  });
+
+  // A successful probe has no `error` key at all, so this must not invent one.
+  it('is null for a successful probe', () => {
+    expect(parseStructuredError(JSON.stringify({ streams: [], format: {} }))).toBeNull();
+  });
+
+  it('is null for output that is not JSON', () => {
+    expect(parseStructuredError('')).toBeNull();
+    expect(parseStructuredError('not json at all')).toBeNull();
+    expect(parseStructuredError('{"error": {"string": "trunca')).toBeNull();
+  });
+
+  it('is null for an empty message', () => {
+    expect(parseStructuredError(JSON.stringify({ error: { string: '  ' } }))).toBeNull();
+  });
+});
+
 describe('FfmpegError', () => {
   it('reads as the tool plus what it complained about', () => {
     const error = new FfmpegError('ffprobe', 1, '[mov @ 0x1] moov atom not found');
@@ -90,5 +120,56 @@ describe('FfmpegError', () => {
 
     expect(error.exitCode).toBe(69);
     expect(error.stderr).toBe('raw output here');
+  });
+
+  describe('when ffprobe reported a structured error', () => {
+    const structured = JSON.stringify({ error: { string: 'Invalid data found' } });
+
+    it('leads with the structured message', () => {
+      const error = new FfmpegError('ffprobe', 1, '', structured);
+
+      expect(error.message).toBe('ffprobe failed: Invalid data found');
+    });
+
+    /**
+     * stderr is often the more specific of the two — "moov atom not found"
+     * says what is actually wrong, where the structured message only says the
+     * input was invalid. Both are worth keeping.
+     */
+    it('appends the more specific stderr detail', () => {
+      const error = new FfmpegError('ffprobe', 1, '[mov @ 0x1] moov atom not found', structured);
+
+      expect(error.message).toBe('ffprobe failed: Invalid data found (moov atom not found)');
+    });
+
+    it('does not repeat itself when stderr says the same thing', () => {
+      const error = new FfmpegError('ffprobe', 1, 'Invalid data found', structured);
+
+      expect(error.message).toBe('ffprobe failed: Invalid data found');
+    });
+
+    /**
+     * The real shape from ffprobe 6.1 on a truncated download. stderr repeats
+     * the structured message *and* adds the specific cause, so the duplicate
+     * has to go without taking the useful half with it.
+     */
+    it('keeps the specific cause when stderr both repeats and adds', () => {
+      const error = new FfmpegError(
+        'ffprobe',
+        1,
+        '[mov,mp4 @ 0x55b9] moov atom not found\n/srv/media/x.mp4: Invalid data found when processing input',
+        JSON.stringify({ error: { string: 'Invalid data found when processing input' } }),
+      );
+
+      expect(error.message).toBe(
+        'ffprobe failed: Invalid data found when processing input (moov atom not found)',
+      );
+    });
+
+    it('falls back to stderr when there is no structured error', () => {
+      const error = new FfmpegError('ffmpeg', 1, 'Encoder not found', '');
+
+      expect(error.message).toBe('ffmpeg failed: Encoder not found');
+    });
   });
 });

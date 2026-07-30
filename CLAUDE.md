@@ -75,10 +75,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
   which is where all 558 tests run. The thin wrapper in `media/ffmpeg.service.ts` stays.
+- **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
+  **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
+  It adds nothing to a successful probe, so it is always passed. Prefer it to reading stderr.
+- The **encoder** has no equivalent — ffmpeg offers only text loglevels — so stderr summarising stays the
+  fallback there. For progress, `-progress pipe:1` emits `key=value` lines, which is why step 12 must use it
+  rather than scraping the status line.
 - Failures go through `FfmpegError`, which keeps ffmpeg's diagnosis and drops the command line. `execFile`'s
   own message leads with the whole invocation, which pushes the real cause past where `probeError` is
   truncated and shows absolute server paths to an admin. Absolute paths in ffmpeg's output are reduced to
-  the filename for the same reason.
+  the filename for the same reason. stderr and the structured message **overlap without containing each
+  other** — stderr adds the specific cause (`moov atom not found`) that the structured message lacks — so
+  the shared part is dropped and both halves are kept.
 - Thumbnails are written to `DERIVED_ROOT`, never the watched media tree.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
