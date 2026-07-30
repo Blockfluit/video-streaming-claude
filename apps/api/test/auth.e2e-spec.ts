@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import session from 'express-session';
@@ -37,6 +40,11 @@ describe('Auth (e2e)', () => {
   }
 
   beforeAll(async () => {
+    // BootstrapService runs on app.init(). Point it at a scratch path first —
+    // with an admin already present it deletes the file it finds, and the
+    // default path is the real `.bootstrap-token` at the repo root.
+    process.env.BOOTSTRAP_TOKEN_FILE = join(tmpdir(), 'auth-e2e-spec.bootstrap-token');
+
     const passwordHash = await new PasswordService().hash(PASSWORD);
 
     users = new Map([
@@ -82,6 +90,9 @@ describe('Auth (e2e)', () => {
             return Promise.resolve(applySelect(found, select));
           },
         ),
+        // Read only by BootstrapService: a non-zero count means "an admin
+        // exists", so it mints nothing and this suite stays about login.
+        count: jest.fn().mockResolvedValue(1),
       },
     };
 

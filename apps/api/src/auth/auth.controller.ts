@@ -15,6 +15,7 @@ import { AuthService } from './auth.service';
 import type { AuthUser } from './auth.types';
 import { CurrentUser, Public } from './decorators';
 import { LoginDto } from './dto/login.dto';
+import { RedeemDto } from './dto/redeem.dto';
 
 /** express-session's callback API, as promises. */
 function regenerate(request: Request): Promise<void> {
@@ -38,6 +39,25 @@ function destroy(request: Request): Promise<void> {
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+
+  /**
+   * Public by necessity: whoever redeems a token has no account yet, so there
+   * is nothing for `SessionGuard` to authenticate. The token is the credential.
+   */
+  @Public()
+  @Post('redeem')
+  @HttpCode(HttpStatus.CREATED)
+  async redeem(@Body() dto: RedeemDto, @Req() request: Request): Promise<AuthUser> {
+    const user = await this.auth.redeem(dto);
+
+    // Log them straight in. The alternative is redirecting to a login form to
+    // retype the password they just chose, which buys nothing.
+    await regenerate(request);
+    request.session.userId = user.id;
+    await save(request);
+
+    return user;
+  }
 
   @Public()
   @Post('login')

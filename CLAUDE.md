@@ -77,6 +77,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   session, or deactivating an account stops taking effect until the cookie expires.
 - Login regenerates the session id (fixation) and `/auth/login` answers the same way for an unknown account
   as for a wrong password. Both are covered by `test/auth.e2e-spec.ts`.
+- Invite and bootstrap tokens are hashed with **sha256, not argon2** — they are 256-bit random values, so
+  a slow KDF buys nothing. Passwords are guessable and still use argon2id. Only the hash is ever stored, so
+  a token's plaintext exists exactly once: in the mint response, or in `.bootstrap-token`.
+- `.bootstrap-token` is a live credential. Mode `600`, deleted the moment it is redeemed and on any startup
+  that finds an admin already present. A `BOOTSTRAP` row whose file is gone is unusable — nobody can present
+  that plaintext again — so startup mints a replacement rather than "reusing" it.
+- Redemption is one `$transaction` ending in a **conditional** `updateMany({ where: { id, redeemedAt: null } })`.
+  Read-then-write is not atomic; without the condition two transactions can both redeem one token. A
+  single-process API serialises requests enough that the earlier check usually catches the loser, which is
+  why the HTTP-level test cannot prove this — `auth.service.spec.ts` pins the condition instead.
+- Every way a token can fail — unknown, expired, revoked, spent — returns one identical 400. Distinguishing
+  them turns a spent token into a probe for which tokens ever existed.
 - Login identity is **username**, not email — there is no email column. Usernames are stored lowercase, so
   every lookup and every write must go through `normaliseUsername()`; querying the raw input makes login
   silently case-sensitive. `displayName` is what gets rendered and is seeded from the username as typed.
@@ -85,6 +97,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 - Pure logic (`path-parser`, subtitle matcher, `qualityLabel`, `needsConversion`) lives in testable functions
   with unit tests written **before** the code that calls them. These are the highest-risk, cheapest-to-test parts.
+- Three test tiers, and the split matters: `*.spec.ts` (unit), `*.e2e-spec.ts` (HTTP, Postgres stubbed) and
+  `*.db-spec.ts` (HTTP against a real `video_test` database). Anything whose correctness *is* a database
+  guarantee — transactions, conditional updates, constraints — belongs in the third; a stub cannot lose a
+  race. `test:db` fails loudly with no database rather than skipping, so it can never go green testing nothing.
 - Validation: `class-validator` DTOs in the API are the source of truth; `packages/shared` exports types only.
 - Commit at each checkpoint in the plan's build order, not in one large batch.
 
@@ -96,5 +112,7 @@ npm install
 npm run db:migrate      # Prisma migrations
 npm run db:studio       # Prisma Studio
 npm run dev             # Nuxt :3000, NestJS :4000
-npm test                # Jest (API)
+npm test                # Jest unit tests (API)
+npm run test:e2e        # supertest against stubbed Postgres — no database needed
+npm run test:db         # supertest against a real Postgres; creates/migrates `video_test`
 ```
