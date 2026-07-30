@@ -67,6 +67,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   clip is HD, but its 1920 height clears QHD's 1440). The plan's table says the latter and also claims it
   handles portrait correctly — those conflict, and the edge comparison is what satisfies both intents.
 - Badges render only at 1080p and above; below that, render nothing.
+- `PATCH /videos/:id/markers` merges the patch onto the **stored** markers before validating. The editor
+  saves one marker per click, so validating the patch alone would accept an end before a start it cannot
+  see. A partial pair is legal — that is the state mid-edit — and the player ignores a range it cannot use.
+- Markers are bounded by `durationSec` **when it is known**. An unprobed video still gets the ordering rules
+  and the absolute 24-hour cap; refusing markers outright would mean a probe failure also blocks curation.
 - `qualityLabel` lives in `packages/shared` — the API probes the dimensions, the web app renders the badge.
 - ffmpeg and ffprobe are invoked with `execFile`, never `exec`. Every path reaching them came off a disk
   scan or a database row, so a filename containing `;` or `$(…)` must stay a filename.

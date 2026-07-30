@@ -177,3 +177,23 @@ export const uploadVideoSchema = z.object({
   title: nonEmptyText(300).optional(),
 });
 export type UploadVideoInput = z.infer<typeof uploadVideoSchema>;
+
+/**
+ * Skip markers. Each is independently optional, and an explicit `null` clears
+ * one — which is different from omitting the field, and is how the editor
+ * removes a marker it set by mistake.
+ */
+const markerSeconds = z.coerce.number().min(0).max(24 * 60 * 60).nullable();
+
+export const updateMarkersSchema = z
+  .object({
+    introStartSec: markerSeconds,
+    introEndSec: markerSeconds,
+    outroStartSec: markerSeconds,
+    outroEndSec: markerSeconds,
+  })
+  .partial()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: 'Nothing to update',
+  });
+export type UpdateMarkersInput = z.infer<typeof updateMarkersSchema>;
