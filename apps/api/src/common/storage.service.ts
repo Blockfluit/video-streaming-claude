@@ -135,6 +135,22 @@ export class StorageService implements OnModuleInit {
     return path;
   }
 
+  /**
+   * Renames within a root.
+   *
+   * The reason transcodes write to `tmp/` first: a rename is atomic inside a
+   * filesystem, so a file appears under its final name only once it is
+   * complete. A partial file under its final name would be served to viewers
+   * and read by the next probe as though it were finished.
+   */
+  async move(root: StorageRoot, fromKey: string, toKey: string): Promise<void> {
+    const from = this.resolvePath(root, fromKey);
+    const to = this.resolvePath(root, toKey);
+
+    await mkdir(dirname(to), { recursive: true });
+    await rename(from, to);
+  }
+
   /** Deletes a file or directory. Already-gone is success, not an error. */
   async delete(root: StorageRoot, key: string): Promise<void> {
     await rm(this.resolvePath(root, key), { recursive: true, force: true });

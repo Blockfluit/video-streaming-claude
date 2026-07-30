@@ -10,6 +10,7 @@ import { InvitesModule } from './invites/invites.module';
 import { MediaModule } from './media/media.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
+import { TranscodeModule } from './transcode/transcode.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 
@@ -28,6 +29,7 @@ import { VideosModule } from './videos/videos.module';
     CollectionsModule,
     VideosModule,
     SubtitlesModule,
+    TranscodeModule,
     IngestModule,
   ],
   controllers: [AppController],

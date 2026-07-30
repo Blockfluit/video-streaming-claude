@@ -31,6 +31,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { MediaService } from '../media/media.service';
+import { JobsService } from '../transcode/jobs.service';
 import { StreamingService } from './streaming.service';
 import { VideosService } from './videos.service';
 
@@ -40,6 +41,7 @@ export class VideosController {
     private readonly videos: VideosService,
     private readonly streaming: StreamingService,
     private readonly media: MediaService,
+    private readonly jobs: JobsService,
   ) {}
 
   @Get()
@@ -148,6 +150,41 @@ export class VideosController {
   ) {
     const key = await this.media.captureThumbnail(id, dto.atSeconds);
     return { thumbnailKey: key, thumbnailSource: 'MANUAL' };
+  }
+
+  /**
+   * Queues a conversion. Returns the job rather than waiting — a transcode
+   * takes minutes, and the UI polls `/admin/jobs` for progress.
+   *
+   * Nothing converts on its own: a 200-file drop flags what needs converting
+   * and stops, so it cannot silently peg the CPU for a day.
+   */
+  @Post(':id/convert')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.ACCEPTED)
+  convert(@Param('id') id: string, @CurrentUser() admin: AuthUser) {
+    return this.jobs.enqueue(id, 'TRANSCODE', admin.id);
+  }
+
+  /** Pulls embedded text subtitle tracks out into servable VTT sidecars. */
+  @Post(':id/extract-subtitles')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.ACCEPTED)
+  extractSubtitles(@Param('id') id: string, @CurrentUser() admin: AuthUser) {
+    return this.jobs.enqueue(id, 'SUBTITLE_EXTRACT', admin.id);
+  }
+
+  /**
+   * Deletes the archival source once a conversion has replaced it.
+   *
+   * The row keeps `sourceDeletedAt` and its `playbackKey`, which is what
+   * exempts it from the missing-file sweep.
+   */
+  @Delete(':id/source')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  reclaimSource(@Param('id') id: string): Promise<void> {
+    return this.jobs.reclaimSource(id);
   }
 
   /** Drops the poster and returns the video to AUTO; the next probe regenerates one. */

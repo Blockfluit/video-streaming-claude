@@ -141,6 +141,23 @@ export class FfmpegService {
   }
 
   /**
+   * The raw stream list, for callers that need more than the summary `probe`
+   * returns — subtitle extraction has to know each track's index and codec.
+   */
+  async probeStreams(path: string): Promise<
+    { index: number; codec_type?: string; codec_name?: string; tags?: Record<string, string>; disposition?: Record<string, number> }[]
+  > {
+    const { stdout } = await run(
+      'ffprobe',
+      this.ffprobe,
+      ['-v', 'error', '-show_error', '-show_streams', '-of', 'json', path],
+      { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+    );
+
+    return (JSON.parse(stdout) as { streams?: [] }).streams ?? [];
+  }
+
+  /**
    * Converts a subtitle file to WebVTT.
    *
    * Mandatory rather than a nicety: `<track>` accepts only WebVTT, so an

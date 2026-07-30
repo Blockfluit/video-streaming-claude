@@ -154,3 +154,14 @@ export const updateSubtitleSchema = z
 export type UpdateSubtitleInput = z.infer<typeof updateSubtitleSchema>;
 
 export const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+
+export const jobTypeSchema = z.enum(['PROBE', 'THUMBNAIL', 'TRANSCODE', 'SUBTITLE_EXTRACT']);
+export const jobStatusSchema = z.enum(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED']);
+export type JobStatus = z.infer<typeof jobStatusSchema>;
+
+export const listJobsSchema = pageQuerySchema.extend({
+  status: jobStatusSchema.optional(),
+  type: jobTypeSchema.optional(),
+  videoId: idSchema.optional(),
+});
+export type ListJobsQuery = z.infer<typeof listJobsSchema>;

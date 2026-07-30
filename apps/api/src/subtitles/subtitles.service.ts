@@ -179,6 +179,58 @@ export class SubtitlesService {
     }
   }
 
+  /**
+   * Records a track pulled out of a container by the extraction job.
+   *
+   * `origin: EXTRACTED` rather than `INGEST`, so reconcile never removes it —
+   * it has no sidecar on disk to go missing, and `forgetMissingSidecars` looks
+   * only at ingested rows.
+   */
+  async registerExtracted(track: {
+    videoId: string;
+    storageKey: string;
+    language: string;
+    label: string;
+    isDefault: boolean;
+  }): Promise<void> {
+    const existing = await this.prisma.subtitle.findFirst({
+      where: { videoId: track.videoId, storageKey: track.storageKey },
+      select: { id: true },
+    });
+
+    if (existing) {
+      // Re-running extraction overwrites the file; the row just needs its
+      // labels refreshed rather than a duplicate alongside it.
+      await this.prisma.subtitle.update({
+        where: { id: existing.id },
+        data: { language: track.language, label: track.label },
+      });
+      return;
+    }
+
+    try {
+      const created = await this.prisma.subtitle.create({
+        data: {
+          videoId: track.videoId,
+          language: track.language,
+          label: track.label,
+          storageKey: track.storageKey,
+          sourceFormat: 'vtt',
+          origin: 'EXTRACTED',
+        },
+        select: { id: true },
+      });
+
+      if (track.isDefault) await this.setDefault(created.id);
+    } catch (error) {
+      // A sidecar may already claim this language and label. That is a
+      // duplicate, not a reason to fail the extraction job.
+      this.logger.warn(
+        `Could not register extracted track: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   /** Removes rows whose sidecar has gone from disk, and the files they served. */
   async forgetMissingSidecars(presentSourceKeys: Set<string>): Promise<number> {
     const ingested = await this.prisma.subtitle.findMany({

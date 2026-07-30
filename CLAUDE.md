@@ -92,7 +92,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   two hundred, and the admin needs to see which file and why.
 - `needsConversion` does **not** fire on nulls from a failed probe — that would queue CPU-saturating work on
   a guess. The container check still applies, since it needs no probe.
-- Probe/thumbnail run at concurrency 2 (cheap, IO-bound). Transcoding is separate and runs one at a time.
+- Probe/thumbnail run at concurrency 2 (cheap, IO-bound). Transcoding is separate and runs one at a time —
+  it saturates a CPU, so running several makes them all slower rather than finishing sooner.
+- **Nothing transcodes on its own.** A 200-file drop flags what needs converting and stops; an admin decides
+  when to spend the CPU.
+- Transcode output goes to `derived/tmp/` and is renamed into place **only on success**. A partial file
+  under its final name would be streamed to viewers and read by the next probe as finished.
+- Cancel sends **SIGKILL**, not SIGTERM: ffmpeg handles SIGTERM by finalising the file it is writing, and a
+  cancelled job must not leave something that looks complete.
+- Progress writes to Postgres are throttled to ~1/s. ffmpeg reports several times a second, and a write per
+  report would spend the whole transcode hammering the database.
+- `-movflags +faststart` makes ffmpeg do a final rewrite pass **after** reaching 100%, so the bar sits at
+  100% for a moment before finishing. Expected, not a hang.
+- Reclaiming a source refuses unless a `playbackKey` exists **and the file is actually there** — deleting
+  the only copy because a row says otherwise is unrecoverable.
+- Extracted subtitles are `origin: EXTRACTED`, never `INGEST`, or reconcile's sidecar sweep would delete
+  them for having no file in the media tree.
+- `-map 0:<index>` uses the absolute stream index, not `0:s:<n>`. They are different things and only the
+  first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - The missing-sweep must key on **row ids already accounted for**, not on `storageKey`. Its snapshot is
