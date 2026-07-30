@@ -32,7 +32,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `storageKey` = archival source. `playbackKey` = converted MP4. Streaming serves `playbackKey ?? storageKey`.
 - Videos with `sourceDeletedAt` set and a valid `playbackKey` are **exempt** from the missing-file sweep,
   or reclaiming disk space marks the library `MISSING`.
-- Every storage key is `path.resolve`d and confirmed inside its root before use (path traversal).
+- Every storage key is `path.resolve`d and confirmed inside its root before use (path traversal). Only
+  `StorageService` joins paths — nothing else should build one. Containment is tested with `path.relative`,
+  **never** `startsWith`: `/srv/media-backup` starts with `/srv/media` and is a different directory.
+  The check is lexical and does not follow symlinks; the roots are operator-controlled, and the threat is a
+  crafted key rather than a hostile filesystem.
+- `StorageService` refuses to start when `DERIVED_ROOT` resolves inside `MEDIA_ROOT` — that is the watcher
+  feedback loop, checked at boot because it is configuration and configuration drifts.
+- Writes go to a `.incoming` neighbour and are renamed into place, so a failed write cannot leave a
+  truncated file for the watcher to ingest.
+- Deleting a collection or season keeps its files unless `?deleteFiles=true`. Without the files gone,
+  reconcile rebuilds the rows on the next scan — the default is the recoverable mistake, not the other one.
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
@@ -71,7 +81,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `dist/src/main.js`. `prisma.config.ts` is excluded from `tsconfig.build.json` for the same reason.
 - `$connect()` is **lazy** behind a driver adapter — it resolves fine with no database listening. Only a real
   query proves the connection, which is why `PrismaService` runs `SELECT 1` at boot.
-- `BigInt` (`sizeBytes`) does not survive `JSON.stringify` — handle once at the response boundary.
+- `BigInt` (`sizeBytes`) does not survive `JSON.stringify` — handled once at the response boundary by
+  Express's `json replacer` in `main.ts`, which renders it as a **string** (a number past
+  `Number.MAX_SAFE_INTEGER` would round silently). A test app must set the same replacer or it will differ
+  from production.
+- Slugs are **stable once created**: renaming a title never moves the slug, because shared links would break.
+  Regeneration is an explicit `regenerateSlug: true`. Uniqueness scope differs per entity — collections are
+  unique library-wide, seasons and videos only within their collection, so two shows may both have a `pilot`.
+- `GET /collections/:slug/resolve` checks **season slugs before video slugs**, and the literal `:slug/resolve`
+  route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
   duplicates. Enforce those in the service layer.
 - `ListItem.position` is deliberately not unique — a unique index collides during drag-reordering.
@@ -84,8 +102,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
 **Access control**
-- `USER` sees only `PUBLISHED` records. Enforce with a shared Prisma `where` helper in services, never in
-  the UI alone.
+- `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
+- A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Spreading
+  `{ state }` after it in a Prisma `where` silently overwrites the visibility rule and `?state=DRAFT` hands
+  a `USER` the whole draft library. Filters narrow; they never widen. (This shipped as a real bug and was
+  caught by `library.db-spec.ts` — keep that test.)
+- The visibility filter applies to **nested** reads too. A published collection may contain draft videos,
+  so the `videos` relation needs its own `where`, not just the collection query.
 - Refuse to demote, deactivate **or delete** the last active admin — all three strand the library equally.
   The count of remaining admins is read `FOR UPDATE` inside the transaction: read-then-write is not atomic,
   and without the lock two admins demoted at the same moment both see "one other remains" and both commit.
