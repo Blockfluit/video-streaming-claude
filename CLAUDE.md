@@ -70,7 +70,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with a shared Prisma `where` helper in services, never in
   the UI alone.
-- Refuse to demote or deactivate the last active admin.
+- Refuse to demote, deactivate **or delete** the last active admin — all three strand the library equally.
+  The count of remaining admins is read `FOR UPDATE` inside the transaction: read-then-write is not atomic,
+  and without the lock two admins demoted at the same moment both see "one other remains" and both commit.
+  A *deactivated* admin does not count as cover. There is deliberately no self-exemption — this one rule
+  covers an admin demoting themselves and two admins stranding each other; "you can't edit yourself" would
+  only catch the first.
 - `SessionGuard` is registered globally, so access is fail-closed: a new route is protected the moment it
   exists. Opt out with `@Public()` — never by leaving a guard off.
 - The session stores **only** `userId`; the user is re-read on every request. Do not cache the role in the
