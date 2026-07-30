@@ -78,3 +78,32 @@ export function visibleStates(role: Role): PublishState[] {
 export function whereVisible(role: Role): { state?: { in: PublishState[] } } {
   return role === 'ADMIN' ? {} : { state: { in: visibleStates(role) } };
 }
+
+/**
+ * A caller's `state` filter **intersected** with what their role may see.
+ *
+ * This exists because the obvious spelling is wrong in a way that reads fine:
+ *
+ *     where: { ...whereVisible(role), ...(state ? { state } : {}) }
+ *
+ * The second spread overwrites the first, so `?state=DRAFT` hands a USER every
+ * draft in the library. Filters narrow what a role may see; they never widen
+ * it. A USER asking for DRAFT gets an empty list rather than an error — the
+ * question is answerable, the answer is just nothing.
+ *
+ * Use this instead of `whereVisible` on any endpoint that accepts a state
+ * filter, and spread it **last** so nothing can overwrite it.
+ */
+export function narrowToVisibleStates(
+  role: Role,
+  requested?: PublishState,
+): { state?: { in: PublishState[] } } {
+  const allowed = visibleStates(role);
+
+  if (requested === undefined) {
+    // An admin with no filter needs no condition at all.
+    return role === 'ADMIN' ? {} : { state: { in: allowed } };
+  }
+
+  return { state: { in: allowed.filter((state) => state === requested) } };
+}

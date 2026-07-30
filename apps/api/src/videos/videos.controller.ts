@@ -10,10 +10,16 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  listVideosSchema,
+  updateVideoSchema,
+  type ListVideosQuery,
+  type UpdateVideoInput,
+} from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
-import { ListVideosDto, UpdateVideoDto } from './dto/video.dto';
+import { validate } from '../common/zod-validation.pipe';
 import { VideosService } from './videos.service';
 
 @Controller('videos')
@@ -21,7 +27,10 @@ export class VideosController {
   constructor(private readonly videos: VideosService) {}
 
   @Get()
-  list(@Query() query: ListVideosDto, @CurrentUser() user: AuthUser) {
+  list(
+    @Query(validate(listVideosSchema)) query: ListVideosQuery,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.videos.list(query, user.role);
   }
 
@@ -32,7 +41,7 @@ export class VideosController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateVideoDto) {
+  update(@Param('id') id: string, @Body(validate(updateVideoSchema)) dto: UpdateVideoInput) {
     return this.videos.update(id, dto);
   }
 

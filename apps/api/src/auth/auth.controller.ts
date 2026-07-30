@@ -9,13 +9,18 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import {
+  loginSchema,
+  redeemSchema,
+  type LoginInput,
+  type RedeemInput,
+} from '@video/shared';
 import type { Request, Response } from 'express';
 
 import { AuthService } from './auth.service';
 import type { AuthUser } from './auth.types';
+import { validate } from '../common/zod-validation.pipe';
 import { CurrentUser, Public } from './decorators';
-import { LoginDto } from './dto/login.dto';
-import { RedeemDto } from './dto/redeem.dto';
 
 /** express-session's callback API, as promises. */
 function regenerate(request: Request): Promise<void> {
@@ -47,7 +52,10 @@ export class AuthController {
   @Public()
   @Post('redeem')
   @HttpCode(HttpStatus.CREATED)
-  async redeem(@Body() dto: RedeemDto, @Req() request: Request): Promise<AuthUser> {
+  async redeem(
+    @Body(validate(redeemSchema)) dto: RedeemInput,
+    @Req() request: Request,
+  ): Promise<AuthUser> {
     const user = await this.auth.redeem(dto);
 
     // Log them straight in. The alternative is redirecting to a login form to
@@ -62,7 +70,10 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto, @Req() request: Request): Promise<AuthUser> {
+  async login(
+    @Body(validate(loginSchema)) dto: LoginInput,
+    @Req() request: Request,
+  ): Promise<AuthUser> {
     const user = await this.auth.validateCredentials(dto.username, dto.password);
     if (!user) {
       // One message for both "no such account" and "wrong password".

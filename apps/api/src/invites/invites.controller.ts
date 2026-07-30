@@ -1,8 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import {
+  createInviteSchema,
+  listInvitesSchema,
+  type CreateInviteInput,
+  type ListInvitesQuery,
+  type Page,
+} from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
-import { CreateInviteDto } from './dto/create-invite.dto';
+import { validate } from '../common/zod-validation.pipe';
 import { InvitesService, type InviteView, type MintedInvite } from './invites.service';
 
 /**
@@ -16,13 +23,16 @@ export class InvitesController {
 
   /** The response carries the plaintext token. It is never retrievable again. */
   @Post()
-  mint(@Body() dto: CreateInviteDto, @CurrentUser() admin: AuthUser): Promise<MintedInvite> {
+  mint(
+    @Body(validate(createInviteSchema)) dto: CreateInviteInput,
+    @CurrentUser() admin: AuthUser,
+  ): Promise<MintedInvite> {
     return this.invites.mint(dto, admin.id);
   }
 
   @Get()
-  list(): Promise<InviteView[]> {
-    return this.invites.list();
+  list(@Query(validate(listInvitesSchema)) query: ListInvitesQuery): Promise<Page<InviteView>> {
+    return this.invites.list(query);
   }
 
   @Delete(':id')

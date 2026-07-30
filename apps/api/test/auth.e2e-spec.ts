@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import session from 'express-session';
 import request from 'supertest';
@@ -116,7 +116,6 @@ describe('Auth (e2e)', () => {
 
     app = moduleRef.createNestApplication();
     app.use(app.get(SessionStoreService).createMiddleware());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
   });
 

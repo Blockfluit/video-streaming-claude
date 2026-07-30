@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 
@@ -19,14 +19,10 @@ async function bootstrap(): Promise<void> {
   // Must be registered before routes, which Nest maps during listen().
   app.use(app.get(SessionStoreService).createMiddleware());
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      // Strip properties without a decorator: a client cannot smuggle extra
-      // fields into a DTO and have them reach Prisma.
-      whitelist: true,
-      transform: true,
-    }),
-  );
+  // No global validation pipe: validation is per parameter, against a schema
+  // from `@video/shared`, because the schema is what says *what* to validate.
+  // Zod objects strip unknown keys by default, so a client still cannot smuggle
+  // extra fields through to Prisma.
 
   // Lets onModuleDestroy run, so the pg pools close on SIGTERM/SIGINT.
   app.enableShutdownHooks();

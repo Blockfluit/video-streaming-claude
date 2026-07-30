@@ -2,7 +2,7 @@ import { readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Logger, type INestApplication, ValidationPipe } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
@@ -37,7 +37,6 @@ describe('Bootstrap and invites (real database)', () => {
 
     app = moduleRef.createNestApplication();
     app.use(app.get(SessionStoreService).createMiddleware());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
     prisma = app.get(PrismaService);
   }
@@ -360,7 +359,7 @@ describe('Bootstrap and invites (real database)', () => {
         .expect(400);
 
       const listed = await agent.get('/admin/invites').expect(200);
-      expect(listed.body.find((row: { id: string }) => row.id === body.id).state).toBe('REVOKED');
+      expect(listed.body.items.find((row: { id: string }) => row.id === body.id).state).toBe('REVOKED');
     });
 
     it('404s revoking something that is not there', async () => {
@@ -378,7 +377,7 @@ describe('Bootstrap and invites (real database)', () => {
         .expect(201);
 
       const listed = await agent.get('/admin/invites').expect(200);
-      const row = listed.body.find((entry: { id: string }) => entry.id === body.id);
+      const row = listed.body.items.find((entry: { id: string }) => entry.id === body.id);
 
       expect(row.state).toBe('REDEEMED');
       expect(row.redeemedUser.displayName).toBe('Grace');

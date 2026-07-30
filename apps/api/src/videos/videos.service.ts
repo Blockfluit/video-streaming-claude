@@ -1,10 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  toPage,
+  type ListVideosQuery,
+  type Page,
+  type UpdateVideoInput,
+} from '@video/shared';
 
-import { videoMissingFields, visibleStates, whereVisible } from '../common/publishing';
+import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import type { ListVideosDto, UpdateVideoDto } from './dto/video.dto';
 
 const VIDEO_SELECT = {
   id: true,
@@ -51,44 +56,47 @@ export class VideosService {
    * exists — created by ingest (step 9) or upload (step 13), never conjured
    * from a request body.
    */
-  async list(query: ListVideosDto, role: Role) {
-    /**
-     * The caller's `state` filter **intersects** what their role may see; it
-     * never replaces it. Spreading `{ state }` after `whereVisible(role)` would
-     * overwrite the visibility rule, and `?state=DRAFT` would hand a USER every
-     * draft in the library.
-     *
-     * A USER asking for DRAFT therefore gets an empty list rather than an
-     * error — the request is answerable, the answer is just nothing.
-     */
-    const allowed = visibleStates(role);
-    const states = query.state
-      ? allowed.filter((state) => state === query.state)
-      : role === 'ADMIN'
-        ? undefined
-        : allowed;
+  async list(query: ListVideosQuery, role: Role): Promise<Page<unknown>> {
+    const where = {
+      ...(query.collectionId ? { collectionId: query.collectionId } : {}),
+      ...(query.seasonId ? { seasonId: query.seasonId } : {}),
+      ...(query.tag ? { tags: { has: query.tag } } : {}),
+      ...(query.q
+        ? {
+            OR: [
+              { title: { contains: query.q, mode: 'insensitive' as const } },
+              { description: { contains: query.q, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+      // Spread last: this is the constraint nothing else may overwrite.
+      ...narrowToVisibleStates(role, query.state),
+    };
 
-    const videos = await this.prisma.video.findMany({
-      where: {
-        ...(states ? { state: { in: states } } : {}),
-        ...(query.collectionId ? { collectionId: query.collectionId } : {}),
-        ...(query.tag ? { tags: { has: query.tag } } : {}),
-        ...(query.q
-          ? {
-              OR: [
-                { title: { contains: query.q, mode: 'insensitive' as const } },
-                { description: { contains: query.q, mode: 'insensitive' as const } },
-              ],
-            }
-          : {}),
-      },
-      select: VIDEO_SELECT,
-      orderBy: [{ collectionId: 'asc' }, { seasonId: 'asc' }, { orderIndex: 'asc' }, { title: 'asc' }],
-      take: query.take ?? 50,
-      skip: query.skip ?? 0,
-    });
+    const [videos, total] = await this.prisma.$transaction([
+      this.prisma.video.findMany({
+        where,
+        select: VIDEO_SELECT,
+        // `id` last makes the order total. `orderIndex` and `title` both repeat,
+        // and offset paging over a non-total order repeats and skips rows.
+        orderBy: [
+          { collectionId: 'asc' },
+          { seasonId: 'asc' },
+          { orderIndex: 'asc' },
+          { title: 'asc' },
+          { id: 'asc' },
+        ],
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.video.count({ where }),
+    ]);
 
-    return videos.map((video) => this.withChecklist(video, role));
+    return toPage(
+      videos.map((video) => this.withChecklist(video, role)),
+      total,
+      query,
+    );
   }
 
   async findOne(id: string, role: Role) {
@@ -101,7 +109,7 @@ export class VideosService {
     return this.withChecklist(video, role);
   }
 
-  async update(id: string, dto: UpdateVideoDto) {
+  async update(id: string, dto: UpdateVideoInput) {
     const video = await this.prisma.video.findUnique({
       where: { id },
       select: { id: true, collectionId: true, title: true },

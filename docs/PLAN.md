@@ -76,7 +76,16 @@ video-streaming-claude/
     └── web/                      # Nuxt 4 (srcDir = app/)
 ```
 
-`packages/shared` exports **types only**. NestJS `class-validator` DTOs stay the validation source of truth.
+`packages/shared` exports **zod request schemas** plus response types, and both apps validate against the
+same objects — a signup form that disagrees with the endpoint behind it produces the worst kind of error,
+where the client says the input is fine and the server does not. The API applies them per parameter with a
+small `ZodValidationPipe`; there is no global pipe, since the schema is what says what to validate.
+
+Every list endpoint returns `Page<T>` (`items`, `total`, `limit`, `offset`, `hasMore`) rather than a bare
+array. `limit` defaults to 50 and is capped at 100, and a request above the cap is rejected rather than
+clamped, so response size is bounded by the API rather than by its callers. Paged queries sort by `id` last:
+offset paging over a non-total order repeats and skips rows. A collection detail response embeds its videos
+(the page groups them by season) but caps them too, with `videosTruncated` set when it does.
 
 ---
 

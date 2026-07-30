@@ -103,10 +103,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
-- A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Spreading
-  `{ state }` after it in a Prisma `where` silently overwrites the visibility rule and `?state=DRAFT` hands
-  a `USER` the whole draft library. Filters narrow; they never widen. (This shipped as a real bug and was
-  caught by `library.db-spec.ts` — keep that test.)
+- A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Use
+  `narrowToVisibleStates(role, requested)` and spread it **last** in the `where`, so nothing can overwrite
+  it. Spreading `{ state }` after the visibility rule silently replaces it and `?state=DRAFT` hands a
+  `USER` the whole draft library. Filters narrow; they never widen. (This shipped as a real bug and was
+  caught by `library.db-spec.ts` — keep that test.) Paging is a window onto what a role may see, never a
+  way past it.
 - The visibility filter applies to **nested** reads too. A published collection may contain draft videos,
   so the `videos` relation needs its own `where`, not just the collection query.
 - Refuse to demote, deactivate **or delete** the last active admin — all three strand the library equally.
@@ -145,7 +147,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `*.db-spec.ts` (HTTP against a real `video_test` database). Anything whose correctness *is* a database
   guarantee — transactions, conditional updates, constraints — belongs in the third; a stub cannot lose a
   race. `test:db` fails loudly with no database rather than skipping, so it can never go green testing nothing.
-- Validation: `class-validator` DTOs in the API are the source of truth; `packages/shared` exports types only.
+- Validation: **zod schemas in `packages/shared`** are the source of truth, so a form and the endpoint
+  behind it cannot drift apart. Applied per parameter with `validate(schema)` — there is no global pipe,
+  because the schema is what says *what* to validate. Zod objects strip unknown keys by default, which is
+  what the old `whitelist: true` did; switching any schema to `.passthrough()` silently undoes it.
+- **Every list endpoint returns a `Page<T>`**, never a bare array. `limit` defaults to 50 and is capped at
+  100 — a limit above the cap is a 400, not a silent clamp, so the worst-case response size is a property
+  of the API rather than of whoever is calling it.
+- Any paged query must sort by a **unique** column last (`id`). Offset paging over a non-total order
+  repeats and skips rows between pages, and `title`/`orderIndex`/`createdAt` all repeat.
+- `z.coerce.boolean()` is wrong for query flags — it follows JS truthiness, so `"false"` becomes `true`.
+  Use `booleanParam` from `@video/shared`.
 - Commit at each checkpoint in the plan's build order, not in one large batch.
 
 ## Commands

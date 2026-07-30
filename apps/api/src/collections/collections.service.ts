@@ -1,7 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  toPage,
+  type CreateCollectionInput,
+  type ListCollectionsQuery,
+  type Page,
+  type UpdateCollectionInput,
+} from '@video/shared';
 
 import {
   collectionMissingFields,
+  narrowToVisibleStates,
   videoMissingFields,
   whereVisible,
 } from '../common/publishing';
@@ -9,7 +17,14 @@ import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
+
+/**
+ * A collection page shows every episode grouped by season, so the videos are
+ * embedded rather than paged. Bounded anyway: a show with thousands of episodes
+ * would otherwise make one response unbounded in size. Past this, the client
+ * uses `GET /videos?collectionId=…`, which pages properly.
+ */
+const MAX_EMBEDDED_VIDEOS = 500;
 
 /** Enough to render a row in a grid. */
 const COLLECTION_SUMMARY = {
@@ -34,12 +49,35 @@ export class CollectionsService {
     private readonly storage: StorageService,
   ) {}
 
-  list(role: Role) {
-    return this.prisma.collection.findMany({
-      where: whereVisible(role),
-      select: COLLECTION_SUMMARY,
-      orderBy: { title: 'asc' },
-    });
+  async list(query: ListCollectionsQuery, role: Role): Promise<Page<unknown>> {
+    const where = {
+      ...(query.tag ? { tags: { has: query.tag } } : {}),
+      ...(query.q
+        ? {
+            OR: [
+              { title: { contains: query.q, mode: 'insensitive' as const } },
+              { description: { contains: query.q, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+      // Last, so nothing above can overwrite the visibility constraint.
+      ...narrowToVisibleStates(role, query.state),
+    };
+
+    const [collections, total] = await this.prisma.$transaction([
+      this.prisma.collection.findMany({
+        where,
+        select: COLLECTION_SUMMARY,
+        // `id` breaks ties: titles are not unique, and offset paging over a
+        // non-total order silently repeats and skips rows between pages.
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.collection.count({ where }),
+    ]);
+
+    return toPage(collections, total, query);
   }
 
   /**
@@ -80,17 +118,31 @@ export class CollectionsService {
             height: true,
             thumbnailKey: true,
           },
-          orderBy: [{ seasonId: 'asc' }, { orderIndex: 'asc' }, { title: 'asc' }],
+          orderBy: [{ seasonId: 'asc' }, { orderIndex: 'asc' }, { title: 'asc' }, { id: 'asc' }],
+          // One more than the cap, so truncation can be detected rather than
+          // guessed at from a suspiciously round number.
+          take: MAX_EMBEDDED_VIDEOS + 1,
         },
       },
     });
 
     if (!collection) throw new NotFoundException('No such collection');
 
-    return this.withChecklist(collection, role);
+    const videosTruncated = collection.videos.length > MAX_EMBEDDED_VIDEOS;
+
+    return this.withChecklist(
+      {
+        ...collection,
+        videos: videosTruncated ? collection.videos.slice(0, MAX_EMBEDDED_VIDEOS) : collection.videos,
+        // Says so out loud rather than quietly returning a partial list: the UI
+        // can point at `GET /videos?collectionId=…` for the rest.
+        videosTruncated,
+      },
+      role,
+    );
   }
 
-  async create(dto: CreateCollectionDto) {
+  async create(dto: CreateCollectionInput) {
     const slug = await this.freeCollectionSlug(slugify(dto.title));
     const folderKey = dto.folderKey ?? slug;
 
@@ -120,7 +172,7 @@ export class CollectionsService {
     });
   }
 
-  async update(id: string, dto: UpdateCollectionDto) {
+  async update(id: string, dto: UpdateCollectionInput) {
     const existing = await this.prisma.collection.findUnique({
       where: { id },
       select: { id: true, title: true },

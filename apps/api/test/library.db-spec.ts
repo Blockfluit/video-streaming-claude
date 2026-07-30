@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Logger, type INestApplication, ValidationPipe } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
@@ -39,7 +39,6 @@ describe('Library (real database)', () => {
     app = moduleRef.createNestApplication();
     app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
     app.use(app.get(SessionStoreService).createMiddleware());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
     prisma = app.get(PrismaService);
     storage = app.get(StorageService);
@@ -432,7 +431,9 @@ describe('Library (real database)', () => {
 
     it('hides a draft collection entirely', async () => {
       await user.get(`/collections/${collection.slug}`).expect(404);
-      await expect(user.get('/collections').expect(200)).resolves.toMatchObject({ body: [] });
+      await expect(user.get('/collections').expect(200)).resolves.toMatchObject({
+        body: { items: [], total: 0 },
+      });
     });
 
     /**
@@ -459,7 +460,7 @@ describe('Library (real database)', () => {
       await admin.post(`/collections/${collection.id}/publish`).expect(200);
 
       const list = await user.get('/videos').expect(200);
-      expect(list.body.map((video: { id: string }) => video.id)).toEqual([shown.id]);
+      expect(list.body.items.map((video: { id: string }) => video.id)).toEqual([shown.id]);
 
       await user.get(`/videos/${draft.id}`).expect(404);
       await user.get(`/collections/${collection.slug}/resolve?path=draft-one`).expect(404);
@@ -473,7 +474,8 @@ describe('Library (real database)', () => {
 
       const response = await user.get('/videos?state=DRAFT').expect(200);
 
-      expect(response.body).toEqual([]);
+      expect(response.body.items).toEqual([]);
+      expect(response.body.total).toBe(0);
     });
 
     it('gets no publish checklist — that is an admin concern', async () => {
@@ -527,13 +529,13 @@ describe('Library (real database)', () => {
       await admin.post(`/videos/${published.id}/publish`).expect(200);
 
       const drafts = await admin.get('/videos?state=DRAFT').expect(200);
-      expect(drafts.body.map((video: { title: string }) => video.title)).toEqual(['Draft One']);
+      expect(drafts.body.items.map((video: { title: string }) => video.title)).toEqual(['Draft One']);
 
       const live = await admin.get('/videos?state=PUBLISHED').expect(200);
-      expect(live.body.map((video: { title: string }) => video.title)).toEqual(['Published']);
+      expect(live.body.items.map((video: { title: string }) => video.title)).toEqual(['Published']);
 
       const everything = await admin.get('/videos').expect(200);
-      expect(everything.body).toHaveLength(2);
+      expect(everything.body.items).toHaveLength(2);
     });
 
     it('filters by collection, tag and search text', async () => {
@@ -543,13 +545,113 @@ describe('Library (real database)', () => {
       await seedVideo(simpsons.id, 'Bart', { tags: ['classic'] });
 
       const byCollection = await admin.get(`/videos?collectionId=${south.id}`).expect(200);
-      expect(byCollection.body).toHaveLength(1);
+      expect(byCollection.body.items).toHaveLength(1);
 
       const byTag = await admin.get('/videos?tag=classic').expect(200);
-      expect(byTag.body).toHaveLength(1);
+      expect(byTag.body.items).toHaveLength(1);
 
       const bySearch = await admin.get('/videos?q=cart').expect(200);
-      expect(bySearch.body).toHaveLength(1);
+      expect(bySearch.body.items).toHaveLength(1);
+    });
+  });
+
+  describe('pagination', () => {
+    /** 12 videos in one collection, titled so their order is predictable. */
+    async function seedMany(): Promise<string> {
+      const collection = await createCollection('Big Show');
+      for (let index = 0; index < 12; index += 1) {
+        await seedVideo(collection.id, `Episode ${String(index).padStart(2, '0')}`);
+      }
+      return collection.id;
+    }
+
+    it('returns a bounded page with the counts a UI needs', async () => {
+      await seedMany();
+
+      const response = await admin.get('/videos?limit=5').expect(200);
+
+      expect(response.body.items).toHaveLength(5);
+      expect(response.body).toMatchObject({ total: 12, limit: 5, offset: 0, hasMore: true });
+    });
+
+    it('says when there is nothing more to fetch', async () => {
+      await seedMany();
+
+      const response = await admin.get('/videos?limit=5&offset=10').expect(200);
+
+      expect(response.body.items).toHaveLength(2);
+      expect(response.body.hasMore).toBe(false);
+    });
+
+    it('defaults to a page rather than the whole table', async () => {
+      await seedMany();
+
+      const response = await admin.get('/videos').expect(200);
+
+      expect(response.body.limit).toBe(50);
+      expect(response.body.items).toHaveLength(12);
+    });
+
+    /**
+     * Offset paging over a non-total order silently repeats and skips rows, so
+     * every paged query sorts by `id` last. Walking the whole list a page at a
+     * time must see each row exactly once.
+     */
+    it('covers every row exactly once when walked page by page', async () => {
+      await seedMany();
+
+      const seen: string[] = [];
+      for (let offset = 0; offset < 12; offset += 5) {
+        const page = await admin.get(`/videos?limit=5&offset=${offset}`).expect(200);
+        seen.push(...page.body.items.map((video: { id: string }) => video.id));
+      }
+
+      expect(seen).toHaveLength(12);
+      expect(new Set(seen).size).toBe(12);
+    });
+
+    it('refuses a limit past the cap instead of quietly returning everything', async () => {
+      await seedMany();
+
+      await admin.get('/videos?limit=101').expect(400);
+      await admin.get('/videos?limit=0').expect(400);
+      await admin.get('/videos?limit=all').expect(400);
+    });
+
+    it('pages collections, users and invites too', async () => {
+      await createCollection('One');
+      await createCollection('Two');
+
+      const collections = await admin.get('/collections?limit=1').expect(200);
+      expect(collections.body).toMatchObject({ total: 2, hasMore: true });
+
+      const users = await admin.get('/admin/users?limit=1').expect(200);
+      expect(users.body.items).toHaveLength(1);
+
+      const invites = await admin.get('/admin/invites?limit=1').expect(200);
+      expect(invites.body).toHaveProperty('total');
+    });
+
+    // Paging is a window onto what the role may see, never a way past it.
+    it('does not let a USER page into drafts', async () => {
+      const collectionId = await seedMany();
+      const shown = await seedVideo(collectionId, 'Visible', publishable);
+      await admin.post(`/videos/${shown.id}/publish`).expect(200);
+      await admin
+        .patch(`/collections/${collectionId}`)
+        .send({ description: 'x', posterKey: 'p.jpg' })
+        .expect(200);
+      await admin.post(`/collections/${collectionId}/publish`).expect(200);
+      const user = await asUser();
+
+      for (const query of ['', '?limit=100', '?offset=0&limit=100', '?state=DRAFT&limit=100']) {
+        const response = await user.get(`/videos${query}`).expect(200);
+        const states = response.body.items.map((video: { state: string }) => video.state);
+        expect(states.every((state: string) => state === 'PUBLISHED')).toBe(true);
+      }
+
+      const everything = await user.get('/videos?limit=100').expect(200);
+      expect(everything.body.total).toBe(1);
     });
   });
 

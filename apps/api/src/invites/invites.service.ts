@@ -1,9 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  DEFAULT_INVITE_TTL_HOURS,
+  toPage,
+  type CreateInviteInput,
+  type ListInvitesQuery,
+  type Page,
+} from '@video/shared';
 
 import { generateToken, hashToken, tokenState, type TokenState } from '../auth/tokens';
 import type { Role, TokenKind } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import { DEFAULT_INVITE_TTL_HOURS, type CreateInviteDto } from './dto/create-invite.dto';
 
 /** Everything about a token except the one thing we never store: its plaintext. */
 const INVITE_SELECT = {
@@ -40,7 +46,7 @@ export interface MintedInvite extends InviteView {
 export class InvitesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async mint(dto: CreateInviteDto, createdById: string): Promise<MintedInvite> {
+  async mint(dto: CreateInviteInput, createdById: string): Promise<MintedInvite> {
     const plaintext = generateToken();
     const hours = dto.expiresInHours ?? DEFAULT_INVITE_TTL_HOURS;
 
@@ -58,13 +64,25 @@ export class InvitesService {
     return { ...this.toView(invite), token: plaintext };
   }
 
-  async list(): Promise<InviteView[]> {
-    const invites = await this.prisma.inviteToken.findMany({
-      select: INVITE_SELECT,
-      orderBy: { createdAt: 'desc' },
-    });
+  async list(query: ListInvitesQuery): Promise<Page<InviteView>> {
+    const [invites, total] = await this.prisma.$transaction([
+      this.prisma.inviteToken.findMany({
+        select: INVITE_SELECT,
+        // `id` last so the order is total. Two invites minted in the same
+        // millisecond would otherwise sort arbitrarily, and offset paging over
+        // an unstable order repeats and skips rows.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.inviteToken.count(),
+    ]);
 
-    return invites.map((invite) => this.toView(invite));
+    return toPage(
+      invites.map((invite) => this.toView(invite)),
+      total,
+      query,
+    );
   }
 
   /**

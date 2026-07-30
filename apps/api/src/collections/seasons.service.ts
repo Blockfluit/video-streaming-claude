@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { CreateSeasonInput, UpdateSeasonInput } from '@video/shared';
 
 import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateSeasonDto, UpdateSeasonDto } from './dto/season.dto';
 
 const SEASON_SELECT = {
   id: true,
@@ -23,7 +23,7 @@ export class SeasonsService {
     private readonly storage: StorageService,
   ) {}
 
-  async create(dto: CreateSeasonDto) {
+  async create(dto: CreateSeasonInput) {
     const collection = await this.prisma.collection.findUnique({
       where: { id: dto.collectionId },
       select: { id: true, folderKey: true },
@@ -62,7 +62,7 @@ export class SeasonsService {
     });
   }
 
-  async update(id: string, dto: UpdateSeasonDto) {
+  async update(id: string, dto: UpdateSeasonInput) {
     const season = await this.prisma.season.findUnique({
       where: { id },
       select: { id: true, collectionId: true, number: true, title: true },

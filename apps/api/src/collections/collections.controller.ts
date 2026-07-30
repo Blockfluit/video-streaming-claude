@@ -1,22 +1,34 @@
 import {
   Body,
   Controller,
-  DefaultValuePipe,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
-  ParseBoolPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  createCollectionSchema,
+  deleteWithFilesSchema,
+  listCollectionsSchema,
+  publishCollectionSchema,
+  resolveQuerySchema,
+  updateCollectionSchema,
+  type CreateCollectionInput,
+  type DeleteWithFilesQuery,
+  type ListCollectionsQuery,
+  type PublishCollectionQuery,
+  type ResolveQuery,
+  type UpdateCollectionInput,
+} from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { validate } from '../common/zod-validation.pipe';
 import { CollectionsService } from './collections.service';
-import { CreateCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
 import { ResolveService, type ResolveResult } from './resolve.service';
 
 /**
@@ -32,13 +44,16 @@ export class CollectionsController {
   ) {}
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.collections.list(user.role);
+  list(
+    @Query(validate(listCollectionsSchema)) query: ListCollectionsQuery,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.collections.list(query, user.role);
   }
 
   @Post()
   @Roles('ADMIN')
-  create(@Body() dto: CreateCollectionDto) {
+  create(@Body(validate(createCollectionSchema)) dto: CreateCollectionInput) {
     return this.collections.create(dto);
   }
 
@@ -49,10 +64,10 @@ export class CollectionsController {
   @Get(':slug/resolve')
   resolve(
     @Param('slug') slug: string,
-    @Query('path', new DefaultValuePipe('')) path: string,
+    @Query(validate(resolveQuerySchema)) query: ResolveQuery,
     @CurrentUser() user: AuthUser,
   ): Promise<ResolveResult> {
-    return this.resolver.resolve(slug, path, user.role);
+    return this.resolver.resolve(slug, query.path, user.role);
   }
 
   @Get(':slug')
@@ -62,7 +77,10 @@ export class CollectionsController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateCollectionDto) {
+  update(
+    @Param('id') id: string,
+    @Body(validate(updateCollectionSchema)) dto: UpdateCollectionInput,
+  ) {
     return this.collections.update(id, dto);
   }
 
@@ -71,11 +89,9 @@ export class CollectionsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
-    // Defaults to false: without it the row goes and reconcile puts it back,
-    // which is annoying but recoverable. The other way round is not.
-    @Query('deleteFiles', new DefaultValuePipe(false), ParseBoolPipe) deleteFiles: boolean,
+    @Query(validate(deleteWithFilesSchema)) query: DeleteWithFilesQuery,
   ): Promise<void> {
-    return this.collections.remove(id, deleteFiles);
+    return this.collections.remove(id, query.deleteFiles);
   }
 
   @Post(':id/publish')
@@ -83,9 +99,9 @@ export class CollectionsController {
   @HttpCode(HttpStatus.OK)
   publish(
     @Param('id') id: string,
-    @Query('cascade', new DefaultValuePipe(false), ParseBoolPipe) cascade: boolean,
+    @Query(validate(publishCollectionSchema)) query: PublishCollectionQuery,
   ) {
-    return this.collections.publish(id, cascade);
+    return this.collections.publish(id, query.cascade);
   }
 
   @Post(':id/archive')
