@@ -185,6 +185,22 @@ export function parseMediaPath(relPath: string): MediaPath {
     return { kind: 'issue', relPath, reason: 'empty-path' };
   }
 
+  const filename = segments[segments.length - 1];
+  const { basename, extension } = splitExtension(filename);
+  const kind = classify(extension, filename);
+
+  /**
+   * Ignored files are ignored wherever they sit — **before** the depth rules.
+   *
+   * The other order raises an issue for every `.DS_Store`, `Thumbs.db` or
+   * `.gitkeep` that happens to be at the wrong level, which buries the real
+   * problems in an admin's list. Only files the library would otherwise have
+   * ingested are worth complaining about.
+   */
+  if (kind === 'ignored') {
+    return { kind: 'ignored', relPath, reason: ignoredReason(extension, filename) };
+  }
+
   if (segments.length === 1) {
     // Nothing lives at the root — every video belongs to a collection folder.
     return { kind: 'issue', relPath, reason: 'root-level-file' };
@@ -192,14 +208,6 @@ export function parseMediaPath(relPath: string): MediaPath {
 
   if (segments.length > 3) {
     return { kind: 'issue', relPath, reason: 'too-deep' };
-  }
-
-  const filename = segments[segments.length - 1];
-  const { basename, extension } = splitExtension(filename);
-  const kind = classify(extension, filename);
-
-  if (kind === 'ignored') {
-    return { kind: 'ignored', relPath, reason: ignoredReason(extension, filename) };
   }
 
   const collectionFolder = segments[0];

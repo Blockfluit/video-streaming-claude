@@ -26,6 +26,7 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@video/shared": "*",
+    "chokidar": "^4.0.3",
     "connect-pg-simple": "^10.0.0",
     "express-session": "^1.19.0",
     "langs": "^2.0.0",

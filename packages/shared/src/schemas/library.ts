@@ -104,3 +104,20 @@ export const publishCollectionSchema = z.object({
   cascade: booleanParam.optional().default(false),
 });
 export type PublishCollectionQuery = z.infer<typeof publishCollectionSchema>;
+
+export const ingestIssueKindSchema = z.enum([
+  'ROOT_LEVEL_FILE',
+  'PATH_TOO_DEEP',
+  'UNREADABLE_SEASON',
+  'ORPHAN_SUBTITLE',
+  'AMBIGUOUS_SUBTITLE',
+  'UNREADABLE_FILE',
+  'MISSING_FILE',
+]);
+export type IngestIssueKind = z.infer<typeof ingestIssueKindSchema>;
+
+export const listIngestIssuesSchema = pageQuerySchema.extend({
+  /** Resolved issues are history rather than a to-do, so they are off by default. */
+  includeResolved: booleanParam.optional().default(false),
+});
+export type ListIngestIssuesQuery = z.infer<typeof listIngestIssuesSchema>;
