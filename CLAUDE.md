@@ -47,6 +47,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
   not do this, and without it the browser cannot seek.
+- `Content-Length` on a `206` is `end - start + 1` — both ends are inclusive. Off by one and every response
+  is short by a byte, which stalls clients rather than erroring.
+- An open-ended `bytes=0-` returns **one chunk**, not the rest of the file. A `<video>` element opens with
+  exactly that, and answering it in full sends the whole file to fetch the metadata at the front.
+- A range unit that is not `bytes`, or a multi-range request, is **ignored** (200 with the whole body) — not
+  a 416. Answering one range of several needs `multipart/byteranges`, and claiming otherwise is a lie.
+- `res.on('close')` must destroy the read stream. Seeking aborts requests constantly, and without it the
+  process leaks a file descriptor per scrub.
+- Streaming serves `playbackKey ?? storageKey` from `derived` or `media` respectively, so the URL is
+  unchanged before and after conversion and survives the source being reclaimed.
+- Stream responses are `Cache-Control: private, no-store`. A shared cache holding a range response as
+  though it were the whole file corrupts playback for the next viewer.
 - `thumbnailSource = MANUAL` is never overwritten by a reprobe. Auto-generation runs only when `AUTO`.
 - `qualityLabel()` checks **width OR height**, never height alone — a 1080p film in 2.39:1 is `1920x800`.
 - Badges render only at 1080p and above; below that, render nothing.
