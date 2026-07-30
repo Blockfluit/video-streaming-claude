@@ -1,5 +1,4 @@
 import {
-  isKnownLanguage,
   matchSubtitles,
   parseSubtitleName,
   type SubtitleCandidate,
@@ -68,25 +67,6 @@ describe('parseSubtitleName', () => {
 
   it('normalises the language code to lowercase', () => {
     expect(parseSubtitleName('film_EN_English')).toMatchObject({ lang: 'en' });
-  });
-});
-
-describe('isKnownLanguage', () => {
-  it('knows the common two-letter codes', () => {
-    expect(isKnownLanguage('en')).toBe(true);
-    expect(isKnownLanguage('nl')).toBe(true);
-    expect(isKnownLanguage('fr')).toBe(true);
-  });
-
-  it('knows three-letter codes, in both bibliographic and terminological forms', () => {
-    expect(isKnownLanguage('eng')).toBe(true);
-    expect(isKnownLanguage('dut')).toBe(true);
-    expect(isKnownLanguage('nld')).toBe(true);
-  });
-
-  it('does not know an invented code', () => {
-    expect(isKnownLanguage('zz')).toBe(false);
-    expect(isKnownLanguage('qqq')).toBe(false);
   });
 });
 

@@ -68,6 +68,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   language on the wrong episode is worse than an issue in the admin list.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
+- Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can
+  have two three-letter codes — `dut`/`nld`, `ger`/`deu` — and subtitle files in the wild use both.
 
 **Data**
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added
@@ -158,6 +160,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   repeats and skips rows between pages, and `title`/`orderIndex`/`createdAt` all repeat.
 - `z.coerce.boolean()` is wrong for query flags — it follows JS truthiness, so `"false"` becomes `true`.
   Use `booleanParam` from `@video/shared`.
+- Standard reference data (ISO 639 codes, MIME types, country codes) comes from a **package**, not a
+  hand-written table — a frozen standard transcribed by hand is where quiet errors live. Cross-cutting
+  helpers live in `src/common/` (API-wide) or `packages/shared` (both apps), so a second caller imports
+  them instead of reaching into a feature module.
 - Commit at each checkpoint in the plan's build order, not in one large batch.
 
 ## Commands

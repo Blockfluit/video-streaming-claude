@@ -1,3 +1,4 @@
+import { isKnownLanguage } from '../common/language';
 import { parseOrderAndTitle } from './path-parser';
 
 /**
@@ -65,63 +66,6 @@ export interface UnmatchedSubtitle {
 export interface SubtitleMatchResult {
   bindings: SubtitleBinding[];
   unmatched: UnmatchedSubtitle[];
-}
-
-/**
- * ISO 639-1 (two-letter) and 639-2 (three-letter) codes.
- *
- * Not exhaustive, and deliberately not a dependency: an unknown code is
- * *accepted* and flagged rather than rejected, so the cost of a gap here is one
- * advisory flag, not a subtitle that fails to load.
- */
-const ISO_639_1 = new Set([
-  'aa', 'ab', 'ae', 'af', 'ak', 'am', 'an', 'ar', 'as', 'av', 'ay', 'az',
-  'ba', 'be', 'bg', 'bh', 'bi', 'bm', 'bn', 'bo', 'br', 'bs',
-  'ca', 'ce', 'ch', 'co', 'cr', 'cs', 'cu', 'cv', 'cy',
-  'da', 'de', 'dv', 'dz',
-  'ee', 'el', 'en', 'eo', 'es', 'et', 'eu',
-  'fa', 'ff', 'fi', 'fj', 'fo', 'fr', 'fy',
-  'ga', 'gd', 'gl', 'gn', 'gu', 'gv',
-  'ha', 'he', 'hi', 'ho', 'hr', 'ht', 'hu', 'hy', 'hz',
-  'ia', 'id', 'ie', 'ig', 'ii', 'ik', 'io', 'is', 'it', 'iu',
-  'ja', 'jv',
-  'ka', 'kg', 'ki', 'kj', 'kk', 'kl', 'km', 'kn', 'ko', 'kr', 'ks', 'ku', 'kv', 'kw', 'ky',
-  'la', 'lb', 'lg', 'li', 'ln', 'lo', 'lt', 'lu', 'lv',
-  'mg', 'mh', 'mi', 'mk', 'ml', 'mn', 'mr', 'ms', 'mt', 'my',
-  'na', 'nb', 'nd', 'ne', 'ng', 'nl', 'nn', 'no', 'nr', 'nv', 'ny',
-  'oc', 'oj', 'om', 'or', 'os',
-  'pa', 'pi', 'pl', 'ps', 'pt',
-  'qu',
-  'rm', 'rn', 'ro', 'ru', 'rw',
-  'sa', 'sc', 'sd', 'se', 'sg', 'si', 'sk', 'sl', 'sm', 'sn', 'so', 'sq', 'sr', 'ss', 'st', 'su', 'sv', 'sw',
-  'ta', 'te', 'tg', 'th', 'ti', 'tk', 'tl', 'tn', 'to', 'tr', 'ts', 'tt', 'tw', 'ty',
-  'ug', 'uk', 'ur', 'uz',
-  've', 'vi', 'vo',
-  'wa', 'wo',
-  'xh',
-  'yi', 'yo',
-  'za', 'zh', 'zu',
-]);
-
-/**
- * Three-letter codes. Several languages have two — a bibliographic code derived
- * from the English name and a terminological one from the native name (`dut`
- * and `nld` for Dutch, `ger` and `deu` for German). Media files use both, so
- * both are here.
- */
-const ISO_639_2 = new Set([
-  'ara', 'baq', 'eus', 'ben', 'bul', 'cat', 'chi', 'zho', 'cze', 'ces', 'wel', 'cym',
-  'dan', 'dut', 'nld', 'eng', 'epo', 'est', 'fin', 'fre', 'fra', 'ger', 'deu', 'gre', 'ell',
-  'heb', 'hin', 'hrv', 'hun', 'ice', 'isl', 'ind', 'ita', 'jpn', 'kor', 'lat', 'lav', 'lit',
-  'mac', 'mkd', 'may', 'msa', 'mao', 'mri', 'nor', 'nob', 'nno', 'per', 'fas', 'pol', 'por',
-  'rum', 'ron', 'rus', 'slo', 'slk', 'slv', 'spa', 'srp', 'swe', 'tha', 'tur', 'ukr', 'vie',
-  'alb', 'sqi', 'arm', 'hye', 'geo', 'kat', 'tib', 'bod', 'bur', 'mya',
-]);
-
-/** True for a code in ISO 639-1 or 639-2. Unknown codes are still usable — just flagged. */
-export function isKnownLanguage(code: string): boolean {
-  const lower = code.toLowerCase();
-  return ISO_639_1.has(lower) || ISO_639_2.has(lower);
 }
 
 /**
