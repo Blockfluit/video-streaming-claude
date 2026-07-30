@@ -224,8 +224,18 @@ describe('Media probing (real ffmpeg)', () => {
       ).resolves.toBeUndefined();
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
-      expect(video.probeError).not.toBeNull();
       expect(video.probedAt).not.toBeNull();
+
+      /**
+       * The message has to say what is wrong with the file. execFile's own
+       * error leads with the whole command line, which would push the diagnosis
+       * past the point this column is truncated — and show server paths to an
+       * admin who cannot act on them.
+       */
+      expect(video.probeError).toContain('ffprobe failed');
+      expect(video.probeError).toMatch(/moov atom|Invalid data/);
+      expect(video.probeError).not.toContain('-show_streams');
+      expect(video.probeError).not.toContain(mediaRoot);
     });
 
     it('keeps going after a failure', async () => {

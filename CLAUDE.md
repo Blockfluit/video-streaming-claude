@@ -70,6 +70,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `qualityLabel` lives in `packages/shared` — the API probes the dimensions, the web app renders the badge.
 - ffmpeg and ffprobe are invoked with `execFile`, never `exec`. Every path reaching them came off a disk
   scan or a database row, so a filename containing `;` or `$(…)` must stay a filename.
+- **There is no ffmpeg wrapper worth adopting** — checked, and worth not re-checking. `fluent-ffmpeg` (2M
+  downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
+  abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
+  `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
+  which is where all 558 tests run. The thin wrapper in `media/ffmpeg.service.ts` stays.
+- Failures go through `FfmpegError`, which keeps ffmpeg's diagnosis and drops the command line. `execFile`'s
+  own message leads with the whole invocation, which pushes the real cause past where `probeError` is
+  truncated and shows absolute server paths to an admin. Absolute paths in ffmpeg's output are reduced to
+  the filename for the same reason.
 - Thumbnails are written to `DERIVED_ROOT`, never the watched media tree.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
