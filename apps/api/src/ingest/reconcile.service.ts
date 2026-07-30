@@ -3,11 +3,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { MediaService } from '../media/media.service';
+import { SubtitlesService } from '../subtitles/subtitles.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
 import { scanMediaRoot, type ScannedFile } from './media-scanner';
 import type { SeasonInfo } from './path-parser';
+import { matchSubtitles, type SubtitleCandidate, type VideoCandidate } from './subtitle-matcher';
 
 /**
  * Brings the database in line with what is actually on disk.
@@ -28,6 +30,8 @@ export interface ReconcileSummary {
   markedMissing: number;
   restored: number;
   issues: number;
+  subtitlesBound: number;
+  subtitlesRemoved: number;
   startedAt: Date;
   finishedAt: Date;
 }
@@ -54,6 +58,7 @@ export class ReconcileService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly media: MediaService,
+    private readonly subtitles: SubtitlesService,
   ) {}
 
   get isRunning(): boolean {
@@ -168,6 +173,8 @@ export class ReconcileService {
 
     const markedMissing = await this.sweepMissing(known, present);
 
+    const subtitles = await this.bindSubtitles(scan.videos, scan.subtitles, seenIssues);
+
     // Structural problems the parser refused outright.
     for (const file of scan.issues) {
       if (file.parsed.kind !== 'issue') continue;
@@ -202,16 +209,126 @@ export class ReconcileService {
       markedMissing,
       restored,
       issues: seenIssues.length,
+      subtitlesBound: subtitles.bound,
+      subtitlesRemoved: subtitles.removed,
       startedAt,
       finishedAt: new Date(),
     };
 
     this.logger.log(
       `Reconcile: ${summary.scannedFiles} files, +${created} new, ${moved} moved, ` +
-        `${markedMissing} missing, ${restored} restored, ${seenIssues.length} issues`,
+        `${markedMissing} missing, ${restored} restored, ${subtitles.bound} subtitles, ` +
+        `${seenIssues.length} issues`,
     );
 
     return summary;
+  }
+
+  /**
+   * Binds sidecar subtitles to the videos beside them, **per folder**.
+   *
+   * Per folder because that is the scope the matcher is defined over: a
+   * `Pilot_en_English.srt` belongs to the `Pilot.mp4` next to it, not to a
+   * `Pilot.mp4` in another season. Matching library-wide would make every
+   * show with a "Pilot" ambiguous.
+   */
+  private async bindSubtitles(
+    videoFiles: ScannedFile[],
+    subtitleFiles: ScannedFile[],
+    seenIssues: { kind: IngestIssueKind; path: string; detail?: string }[],
+  ): Promise<{ bound: number; removed: number }> {
+    const rows = await this.prisma.video.findMany({ select: { id: true, storageKey: true } });
+    const idByStorageKey = new Map(rows.map((row) => [row.storageKey, row.id]));
+
+    const byFolder = new Map<string, { videos: ScannedFile[]; subtitles: ScannedFile[] }>();
+    const folderOf = (relPath: string): string => relPath.split('/').slice(0, -1).join('/');
+
+    for (const file of videoFiles) {
+      const folder = folderOf(file.relPath);
+      if (!byFolder.has(folder)) byFolder.set(folder, { videos: [], subtitles: [] });
+      byFolder.get(folder)!.videos.push(file);
+    }
+    for (const file of subtitleFiles) {
+      const folder = folderOf(file.relPath);
+      if (!byFolder.has(folder)) byFolder.set(folder, { videos: [], subtitles: [] });
+      byFolder.get(folder)!.subtitles.push(file);
+    }
+
+    const boundSourceKeys = new Set<string>();
+    let bound = 0;
+
+    for (const [, group] of byFolder) {
+      if (group.subtitles.length === 0) continue;
+
+      const candidates: VideoCandidate[] = group.videos.flatMap((file) => {
+        const id = idByStorageKey.get(file.relPath);
+        // A video that failed to ingest has no row to bind to.
+        return id && file.parsed.kind === 'video' ? [{ id, basename: file.parsed.basename }] : [];
+      });
+
+      const sidecars: SubtitleCandidate[] = group.subtitles.flatMap((file) =>
+        file.parsed.kind === 'subtitle'
+          ? [{ basename: file.parsed.basename, extension: file.parsed.extension }]
+          : [],
+      );
+
+      const { bindings, unmatched } = matchSubtitles(candidates, sidecars);
+
+      for (const binding of bindings) {
+        const source = group.subtitles.find(
+          (file) => file.parsed.kind === 'subtitle' && file.parsed.basename === binding.basename,
+        );
+        if (!source) continue;
+
+        try {
+          const outcome = await this.subtitles.bindSidecar({
+            videoId: binding.videoId,
+            sourceKey: source.relPath,
+            language: binding.lang,
+            label: binding.label,
+            format: binding.extension,
+          });
+          boundSourceKeys.add(source.relPath);
+          if (outcome !== 'unchanged') bound += 1;
+
+          // Accepted, but the code is not one we recognise — worth an admin's
+          // attention without refusing a subtitle that probably works.
+          if (!binding.langKnown) {
+            seenIssues.push({
+              kind: 'ORPHAN_SUBTITLE',
+              path: source.relPath,
+              detail: `Unrecognised language code "${binding.lang}"`,
+            });
+          }
+        } catch (error) {
+          seenIssues.push({
+            kind: 'ORPHAN_SUBTITLE',
+            path: source.relPath,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      for (const orphan of unmatched) {
+        const source = group.subtitles.find(
+          (file) => file.parsed.kind === 'subtitle' && file.parsed.basename === orphan.basename,
+        );
+        if (!source) continue;
+
+        seenIssues.push({
+          kind: orphan.reason === 'ambiguous' ? 'AMBIGUOUS_SUBTITLE' : 'ORPHAN_SUBTITLE',
+          path: source.relPath,
+          detail:
+            orphan.reason === 'ambiguous'
+              ? 'Matches more than one video by title; rename it to the exact filename'
+              : `Could not bind this sidecar (${orphan.reason})`,
+        });
+      }
+    }
+
+    const removed = await this.subtitles.forgetMissingSidecars(boundSourceKeys);
+
+    return { bound, removed };
   }
 
   private async applyMove(id: string, file: ScannedFile, contentTag: string): Promise<void> {

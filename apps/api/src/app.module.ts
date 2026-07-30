@@ -9,6 +9,7 @@ import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
 import { MediaModule } from './media/media.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { SubtitlesModule } from './subtitles/subtitles.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 
@@ -26,6 +27,7 @@ import { VideosModule } from './videos/videos.module';
     UsersModule,
     CollectionsModule,
     VideosModule,
+    SubtitlesModule,
     IngestModule,
   ],
   controllers: [AppController],

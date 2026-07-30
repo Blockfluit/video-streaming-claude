@@ -46,6 +46,8 @@ interface FfprobeOutput {
 /** Probing a file should never take this long; something has gone wrong if it does. */
 const PROBE_TIMEOUT_MS = 60_000;
 const THUMBNAIL_TIMEOUT_MS = 120_000;
+/** Subtitles are small; anything slower than this has gone wrong. */
+const SUBTITLE_TIMEOUT_MS = 60_000;
 
 @Injectable()
 export class FfmpegService {
@@ -90,6 +92,33 @@ export class FfmpegService {
     );
 
     return parseProbe(stdout);
+  }
+
+  /**
+   * Converts a subtitle file to WebVTT.
+   *
+   * Mandatory rather than a nicety: `<track>` accepts only WebVTT, so an
+   * `.srt` sidecar is invisible to a browser until this runs.
+   *
+   * `charset` is passed when the source is not UTF-8. Legacy `.srt` files are
+   * very often Windows-1252, and ffmpeg does not *fail* on those — it produces
+   * mojibake, which nobody notices until a viewer reads a line.
+   */
+  async convertSubtitle(source: string, destination: string, charset?: string): Promise<void> {
+    await run(
+      this.ffmpeg,
+      [
+        '-hide_banner',
+        '-y',
+        ...(charset ? ['-sub_charenc', charset] : []),
+        '-i',
+        source,
+        '-c:s',
+        'webvtt',
+        destination,
+      ],
+      { timeout: SUBTITLE_TIMEOUT_MS },
+    );
   }
 
   /**

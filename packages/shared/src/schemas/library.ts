@@ -131,3 +131,26 @@ export type CaptureThumbnailInput = z.infer<typeof captureThumbnailSchema>;
 /** Image formats a browser will render as a poster. */
 export const THUMBNAIL_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
 export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
+
+/** A manually uploaded subtitle track. */
+export const uploadSubtitleSchema = z.object({
+  /** ISO 639-1/2. Unknown codes are accepted and flagged, never rejected. */
+  language: z.string().trim().min(2).max(3).toLowerCase(),
+  label: nonEmptyText(100),
+  isDefault: booleanParam.optional().default(false),
+});
+export type UploadSubtitleInput = z.infer<typeof uploadSubtitleSchema>;
+
+export const updateSubtitleSchema = z
+  .object({
+    language: z.string().trim().min(2).max(3).toLowerCase(),
+    label: nonEmptyText(100),
+    isDefault: z.boolean(),
+  })
+  .partial()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: 'Nothing to update',
+  });
+export type UpdateSubtitleInput = z.infer<typeof updateSubtitleSchema>;
+
+export const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;

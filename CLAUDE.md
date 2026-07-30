@@ -106,6 +106,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   short word, reading `Big` as the language.
 - Subtitle binding is exact-stem first, then title. Ambiguity is **reported, never guessed** — the wrong
   language on the wrong episode is worse than an issue in the admin list.
+- Sidecars are matched **per folder**, never library-wide. Every show has a `Pilot`, so a wider scope makes
+  all of them ambiguous.
+- Everything served lives in `DERIVED_ROOT`, including sidecars that were already `.vtt` — copying a few
+  kilobytes beats carrying a "which root?" question through every read, and it survives the source moving.
+  `sourceKey` holds the media path the sidecar came from; without it, reconcile cannot notice a deletion.
+- Decide a subtitle's charset **before** converting, not after. Legacy `.srt` is often Windows-1252, and
+  ffmpeg either fails or emits mojibake — a conversion that already threw cannot be rescued by a retry.
+- An uploaded subtitle is sniffed for the `WEBVTT` signature. An SRT accepted as a `.vtt` loads as an empty
+  track: the viewer sees the language listed and nothing ever appears.
+- Exactly one `isDefault` per video. `<track default>` on two tracks is undefined behaviour.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
 - Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can
