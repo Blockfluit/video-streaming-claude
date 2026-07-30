@@ -11,6 +11,7 @@ import { MediaModule } from './media/media.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { TranscodeModule } from './transcode/transcode.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 
@@ -30,6 +31,7 @@ import { VideosModule } from './videos/videos.module';
     VideosModule,
     SubtitlesModule,
     TranscodeModule,
+    UploadsModule,
     IngestModule,
   ],
   controllers: [AppController],

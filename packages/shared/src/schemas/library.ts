@@ -165,3 +165,15 @@ export const listJobsSchema = pageQuerySchema.extend({
   videoId: idSchema.optional(),
 });
 export type ListJobsQuery = z.infer<typeof listJobsSchema>;
+
+/** 2 GB, matching MAX_UPLOAD_BYTES in the environment. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+
+export const uploadVideoSchema = z.object({
+  collectionId: idSchema,
+  /** Omit to place the video directly in the collection. */
+  seasonId: idSchema.optional(),
+  /** Overrides the title derived from the filename. */
+  title: nonEmptyText(300).optional(),
+});
+export type UploadVideoInput = z.infer<typeof uploadVideoSchema>;
