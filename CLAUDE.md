@@ -64,6 +64,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Badges render only at 1080p and above; below that, render nothing.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
+- The missing-sweep must key on **row ids already accounted for**, not on `storageKey`. Its snapshot is
+  taken before moves are applied, so keying on the path marks a row MISSING in the same pass that just
+  followed it to a new one. (This shipped as a bug and `ingest.db-spec.ts` caught it.)
+- `contentTag` is `sha256(first 1MB + last 1MB + size)` — a *move detector*, not a content hash. Files with
+  identical ends and the same size collide by design. Never use it for deduplication or integrity.
+- A row is never deleted because its file vanished. `stateBeforeMissing` remembers what it was, so a file
+  that comes back is restored rather than silently demoted to `DRAFT`.
+- `reconcile.run()` joins an in-flight pass rather than starting a second. A folder drop fires an event per
+  file, and concurrent passes would race on the same rows.
+- Ingest issues are upserted on `(kind, path)` and *resolved*, never deleted — a rescan must not pile up
+  duplicates of the same complaint.
+- Ignoring a file beats the structural rules in `parseMediaPath`: dotfiles, partials and unknown extensions
+  are ignored at **any** depth. The other order files an issue for every `.DS_Store` and `.gitkeep`, which
+  buries the problems that need a person. (`media/.gitkeep` did exactly this on the first real run.)
 
 **Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
 - `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here

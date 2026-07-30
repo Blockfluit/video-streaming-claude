@@ -243,6 +243,30 @@ describe('parseMediaPath', () => {
     it('ignores a file with no extension at all', () => {
       expect(parseMediaPath('Harry Potter/README')).toMatchObject({ kind: 'ignored' });
     });
+
+    /**
+     * Ignoring beats the structural rules. Otherwise every `.DS_Store`,
+     * `Thumbs.db` or `.gitkeep` at the wrong level becomes an issue in the
+     * admin's list, burying the problems that actually need a person — which is
+     * exactly what happened to `media/.gitkeep` on the first real run.
+     */
+    it('ignores them wherever they sit, rather than calling them structural problems', () => {
+      expect(parseMediaPath('.gitkeep')).toMatchObject({ kind: 'ignored', reason: 'dotfile' });
+      expect(parseMediaPath('.DS_Store')).toMatchObject({ kind: 'ignored' });
+      expect(parseMediaPath('notes.txt')).toMatchObject({
+        kind: 'ignored',
+        reason: 'unknown-extension',
+      });
+      expect(parseMediaPath('A/B/C/D/.DS_Store')).toMatchObject({ kind: 'ignored' });
+      expect(parseMediaPath('A/B/C/D/notes.txt')).toMatchObject({ kind: 'ignored' });
+      expect(parseMediaPath('A/B/C/D/film.mp4.part')).toMatchObject({ kind: 'ignored' });
+    });
+
+    // A video really is a structural problem at those depths.
+    it('still reports a video at the wrong depth', () => {
+      expect(parseMediaPath('loose.mp4')).toMatchObject({ kind: 'issue' });
+      expect(parseMediaPath('A/B/C/D/film.mp4')).toMatchObject({ kind: 'issue' });
+    });
   });
 
   describe('subtitles', () => {

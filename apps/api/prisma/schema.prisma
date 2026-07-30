@@ -199,6 +199,9 @@ model Video {
   probedAt     DateTime?
   probeError   String?
   missingSince DateTime?
+  /// What the video was before the missing sweep, so a file that comes back is
+  /// restored rather than silently demoted to DRAFT.
+  stateBeforeMissing PublishState?
 
   // playbackKey is the converted MP4 in DERIVED_ROOT; streaming serves playbackKey ?? storageKey,
   // so the same URL keeps working before and after conversion.
@@ -222,6 +225,7 @@ model Video {
 
   subtitles     Subtitle[]
   jobs          MediaJob[]
+  issues        IngestIssue[]
   credits       Credit[]
   comments      Comment[]
   progress      WatchProgress[]
@@ -421,4 +425,40 @@ model WatchEvent {
 
   @@index([videoId, createdAt])
   @@index([playSessionId])
+}
+
+/// Structural problems found during ingest — recorded rather than silently dropped.
+///
+/// Keyed on (kind, path) and upserted, so rescanning does not pile up duplicates
+/// of the same complaint. An issue that stops appearing is resolved rather than
+/// deleted, which keeps a record of what the library used to be unhappy about.
+enum IngestIssueKind {
+  ROOT_LEVEL_FILE // a video sitting directly in MEDIA_ROOT
+  PATH_TOO_DEEP // nested below collection/season/file
+  UNREADABLE_SEASON // a season folder whose number could not be parsed
+  ORPHAN_SUBTITLE // a sidecar matching no video
+  AMBIGUOUS_SUBTITLE // a sidecar matching several videos equally well
+  UNREADABLE_FILE // on disk but unreadable — permissions, or a bad mount
+  MISSING_FILE // a row whose file has gone
+}
+
+model IngestIssue {
+  id     String          @id @default(cuid())
+  kind   IngestIssueKind
+  /// Relative to MEDIA_ROOT. The natural identity of an issue together with kind.
+  path   String
+  detail String?
+
+  /// Set when the issue is about a row that already exists.
+  videoId String?
+  video   Video?  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @updatedAt
+  /// Non-null once a scan no longer finds the problem.
+  resolvedAt  DateTime?
+
+  @@unique([kind, path])
+  @@index([resolvedAt])
+  @@index([videoId])
 }
