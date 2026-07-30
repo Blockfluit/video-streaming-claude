@@ -148,9 +148,9 @@ enum JobStatus       { QUEUED RUNNING SUCCEEDED FAILED CANCELLED }
 ```prisma
 model User {
   id           String   @id @default(cuid())
-  email        String   @unique
+  username     String   @unique               // login identity, stored lowercase
   passwordHash String                          // argon2id
-  displayName  String
+  displayName  String                          // seeded from the username as typed
   role         Role     @default(USER)
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -190,6 +190,13 @@ model Session {
   @@map("session")
 }
 ```
+
+Accounts are keyed on **username**, not email. The library is invite-only and has nothing to send mail
+about, so an email column would be 100% NULL until a mailer exists — at which point it can be added as a
+nullable, optional field without touching the login path. Usernames are stored lowercase, which makes
+uniqueness and lookups case-insensitive without needing `citext` or a functional index; `displayName` is
+seeded from the username as typed at redemption, so changing how your name renders never changes how you
+log in. Redeeming a token therefore asks for **username + password only**.
 
 ### Library
 

@@ -14,7 +14,14 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   does not fire reliably there and the ingest watcher depends on it.
 - Node 24 via nvm (`.nvmrc`). Interactive shells load nvm automatically; **non-interactive shells do not**
   (Ubuntu's `.bashrc` returns early), so scripted commands need `. ~/.nvm/nvm.sh` first.
-- Docker via Docker Desktop WSL integration. ffmpeg 6.1.1 with libx264 is installed system-wide.
+- Docker via Docker Desktop WSL integration — there is **no** Linux docker engine in the distro. The whole
+  toolchain (`docker`, `docker compose`, the socket) only exists while Docker Desktop is running on Windows;
+  when it is not, `docker` resolves to Docker Desktop's shim and reports *"could not be found in this WSL 2
+  distro"*, which reads like a missing install but is not one. Check `wsl.exe -l -v` for a **Running**
+  `docker-desktop` distro, and start it with `"/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe"`.
+  A `permission denied` on `/var/run/docker.sock` is the different, rarer problem: it means the `docker`
+  group is missing from the current shell's credentials (`id -nG`) and needs a new login, not a reinstall.
+- ffmpeg 6.1.1 with libx264 is installed system-wide.
 
 ## Invariants — violating these causes bugs that are painful to trace
 
@@ -64,6 +71,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `USER` sees only `PUBLISHED` records. Enforce with a shared Prisma `where` helper in services, never in
   the UI alone.
 - Refuse to demote or deactivate the last active admin.
+- `SessionGuard` is registered globally, so access is fail-closed: a new route is protected the moment it
+  exists. Opt out with `@Public()` — never by leaving a guard off.
+- The session stores **only** `userId`; the user is re-read on every request. Do not cache the role in the
+  session, or deactivating an account stops taking effect until the cookie expires.
+- Login regenerates the session id (fixation) and `/auth/login` answers the same way for an unknown account
+  as for a wrong password. Both are covered by `test/auth.e2e-spec.ts`.
+- Login identity is **username**, not email — there is no email column. Usernames are stored lowercase, so
+  every lookup and every write must go through `normaliseUsername()`; querying the raw input makes login
+  silently case-sensitive. `displayName` is what gets rendered and is seeded from the username as typed.
 
 ## Conventions
 

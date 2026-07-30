@@ -79,8 +79,12 @@ enum JobStatus {
 
 model User {
   id           String   @id @default(cuid())
-  email        String   @unique
+  // Login identity. Stored lowercase so uniqueness and lookups are
+  // case-insensitive without needing citext or a functional index.
+  username     String   @unique
   passwordHash String // argon2id
+  // What actually gets rendered — seeded from the username as typed at signup,
+  // so changing how your name displays never changes how you log in.
   displayName  String
   role         Role     @default(USER)
   isActive     Boolean  @default(true)
