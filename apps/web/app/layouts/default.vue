@@ -3,16 +3,18 @@
  * The signed-in shell. The two auth pages opt out with `layout: false` — a nav
  * bar offering "Browse" to someone who cannot browse yet is just noise.
  */
-const { user, isAdmin } = useSession()
+const { user } = useSession()
 const api = useApi()
 
-const links = computed(() => [
+// Only what exists. The admin section and the collection pages arrive with
+// their own slices — a nav link to a route with no page is a broken app, not a
+// placeholder.
+const links = [
   { label: 'Home', to: '/' },
   { label: 'Browse', to: '/browse' },
   { label: 'My List', to: '/my-list' },
   { label: 'History', to: '/history' },
-  ...(isAdmin.value ? [{ label: 'Admin', to: '/admin' }] : []),
-])
+]
 
 async function signOut() {
   await api('/auth/logout', { method: 'POST' })

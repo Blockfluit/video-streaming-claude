@@ -1,4 +1,5 @@
 import type { NitroFetchOptions } from 'nitropack'
+import type { AsyncDataOptions } from 'nuxt/app'
 
 /**
  * The only way this app talks to the API.
@@ -39,20 +40,28 @@ export function useApi() {
 }
 
 /**
- * `useFetch` against the API, for data a page needs in order to render.
+ * Page data, fetched during SSR and transferred to the client rather than
+ * fetched twice.
  *
- * Deduplicated and SSR-transferred by Nuxt, so the payload fetched on the
- * server is not fetched again on hydration.
+ * Built on `useAsyncData` over the wrapper above rather than on `useFetch`.
+ * `useFetch` is the more obvious choice and was the first attempt, but its
+ * generics do not survive being wrapped — the payload type collapses and every
+ * call site loses `.items`. `useAsyncData` takes the type parameter cleanly and
+ * gives up nothing that matters here, since the URL is already a function.
+ *
+ * The explicit key is the price: `useFetch` derives one from the call site and
+ * this cannot, so two pages sharing a key would share a cache entry.
  */
-export function useApiFetch<T>(
+export function useApiData<T>(
+  key: string,
   path: string | (() => string),
-  options: Parameters<typeof useFetch<T>>[1] = {},
+  options: Omit<AsyncDataOptions<T>, 'default'> = {},
 ) {
-  const headers = useRequestHeaders(['cookie'])
-  const url = () => withApiPrefix(typeof path === 'function' ? path() : path)
+  const api = useApi()
 
-  return useFetch<T>(url, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string>) },
-  })
+  return useAsyncData<T>(
+    key,
+    () => api<T>(typeof path === 'function' ? path() : path),
+    options,
+  )
 }

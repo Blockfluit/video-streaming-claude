@@ -272,6 +272,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   silently, and `<video>`/`<track>` cannot send `Authorization` headers (this is why auth is cookie-based).
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
+**Frontend** (`apps/web`, in addition to the notes above)
+- **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
+  bare `$fetch` runs in Nitro with no cookie jar, so a call that works in the browser 401s the moment the
+  same page renders on the server. One place that can forget is the point.
+- `useApiData` is built on `useAsyncData`, **not** `useFetch`. `useFetch` is the obvious choice and was the
+  first attempt: its generics do not survive being wrapped — the payload type collapses to `unknown` and
+  every call site loses `.items`. The price is an explicit cache key per call.
+- `auth.global.ts` is **navigation, not access control**. The API authorises every request; the middleware
+  only spares someone a page of failed calls. Nothing there is a security boundary.
+- The `?redirect=` a sign-in carries goes through `safeRedirect` — it arrives through the URL, so anyone can
+  write it, and following it after authenticating is an open redirect. A leading `/` is not enough:
+  `//evil.example` is protocol-relative and off-site, and some browsers normalise `/\evil.example` the same
+  way.
+- Artwork is `GET /videos/:id/thumbnail` and `GET /collections/:id/poster`, which **revalidate** (`ETag` +
+  `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
+  any `max-age` above zero serves the poster an admin has just replaced.
+- A nav link to a route with no page is a broken app, not a placeholder — links land with their pages.
+
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
 - A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Use
