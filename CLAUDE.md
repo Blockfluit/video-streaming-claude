@@ -298,6 +298,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Nuxt Icon's runtime endpoint defaults to **`/api/_nuxt_icon`**, which the `/api/**` proxy swallows whole
   and forwards to NestJS. Moved to `/_icons` via `icon.localApiEndpoint`; otherwise any icon resolved at
   runtime silently fails to draw.
+- The `/api/**` proxy owns that prefix entirely, so anything else wanting a server route has to move off
+  it — Nuxt Icon's default `/api/_nuxt_icon` was the first casualty and will not be the last.
+- A poster's storage key never changes, so replacing one leaves the browser showing the old picture. The
+  admin screens append a cache-busting query after a capture or upload; the ETag alone cannot help an
+  `<img>` that was never re-requested.
 - **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
   A frontend change is verified in a browser or it is not verified.
 

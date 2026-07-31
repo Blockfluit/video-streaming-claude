@@ -42,6 +42,16 @@ describe('runtime', () => {
     expect(runtime(720)).toBe('12m')
   })
 
+  /**
+   * Rounding a short clip to `0m` reads as a failed probe rather than as a
+   * short video.
+   */
+  it('falls back to seconds under a minute', () => {
+    expect(runtime(20)).toBe('20s')
+    expect(runtime(59)).toBe('59s')
+    expect(runtime(60)).toBe('1m')
+  })
+
   it('has nothing to say about an unprobed video', () => {
     expect(runtime(null)).toBeNull()
     expect(runtime(0)).toBeNull()

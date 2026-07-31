@@ -4,8 +4,8 @@
  *
  * Artwork comes from the API's image routes, which revalidate rather than
  * caching for a fixed time, so replacing a poster shows up immediately. A
- * missing image is normal (nothing has been probed yet, or an admin has not
- * chosen one), so the fallback is part of the design rather than an error path.
+ * missing image is normal (nothing probed yet, or no poster chosen), so the
+ * fallback is part of the design rather than an error path.
  */
 const props = defineProps<{
   to: string
@@ -17,6 +17,8 @@ const props = defineProps<{
   width?: number | null
   height?: number | null
   badge?: string | null
+  /** `poster` is 2:3 for collections; the default 16:9 suits a video still. */
+  shape?: 'still' | 'poster'
 }>()
 
 const broken = ref(false)
@@ -24,9 +26,10 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
 </script>
 
 <template>
-  <NuxtLink :to="to" class="group block w-44 shrink-0">
+  <NuxtLink :to="to" class="group block shrink-0">
     <div
-      class="relative aspect-video rounded-lg overflow-hidden bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) group-hover:ring-(--ui-border-accented) transition"
+      class="card-lift relative overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-white/5"
+      :class="shape === 'poster' ? 'aspect-2/3' : 'aspect-video'"
     >
       <img
         v-if="showImage"
@@ -36,22 +39,38 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
         class="size-full object-cover"
         @error="broken = true"
       >
-      <div v-else class="size-full grid place-items-center text-(--ui-text-dimmed)">
-        <UIcon name="i-lucide-film" class="size-8" />
+      <div v-else class="size-full grid place-items-center text-white/15">
+        <UIcon name="i-lucide-clapperboard" class="size-10" />
       </div>
 
-      <div class="absolute top-1.5 right-1.5 flex gap-1">
-        <UBadge v-if="badge" color="neutral" variant="solid" size="sm">{{ badge }}</UBadge>
+      <!-- Keeps the title legible over a bright frame without dimming the art. -->
+      <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent" />
+
+      <div class="absolute top-2 right-2 flex gap-1">
+        <UBadge v-if="badge" color="neutral" variant="solid" size="sm" class="bg-black/70">
+          {{ badge }}
+        </UBadge>
         <QualityBadge :width="width" :height="height" />
       </div>
 
+      <!-- Appears on hover; the whole card is the link, so this is decoration. -->
+      <div
+        class="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+      >
+        <span class="grid size-11 place-items-center rounded-full bg-white/95 shadow-lg">
+          <UIcon name="i-lucide-play" class="size-5 text-black translate-x-px" />
+        </span>
+      </div>
+
       <!-- The resume bar. Absent at zero rather than drawn empty. -->
-      <div v-if="progress" class="absolute inset-x-0 bottom-0 h-1 bg-black/40">
+      <div v-if="progress" class="absolute inset-x-0 bottom-0 h-[3px] bg-white/25">
         <div class="h-full bg-(--ui-primary)" :style="{ width: `${progress}%` }" />
       </div>
     </div>
 
-    <p class="mt-2 text-sm font-medium truncate group-hover:text-(--ui-primary)">{{ title }}</p>
-    <p v-if="subtitle" class="text-xs text-(--ui-text-muted) truncate">{{ subtitle }}</p>
+    <p class="mt-2 truncate text-sm font-medium text-white/90 group-hover:text-white">
+      {{ title }}
+    </p>
+    <p v-if="subtitle" class="truncate text-xs text-white/45">{{ subtitle }}</p>
   </NuxtLink>
 </template>

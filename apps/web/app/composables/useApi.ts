@@ -53,14 +53,17 @@ export function useApi() {
  * this cannot, so two pages sharing a key would share a cache entry.
  */
 export function useApiData<T>(
-  key: string,
+  key: string | (() => string),
   path: string | (() => string),
   options: Omit<AsyncDataOptions<T>, 'default'> = {},
 ) {
   const api = useApi()
 
+  // Resolved once, at setup. Vue reuses a component across param changes on the
+  // same route, so a reactive key would not re-run setup anyway — `watch` is
+  // what refetches, and the key only has to be unique per call site.
   return useAsyncData<T>(
-    key,
+    typeof key === 'function' ? key() : key,
     () => api<T>(typeof path === 'function' ? path() : path),
     options,
   )

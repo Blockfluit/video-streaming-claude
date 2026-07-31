@@ -23,9 +23,17 @@ export function timecode(totalSeconds: number | null | undefined): string {
   return hours > 0 ? `${hours}:${padded(minutes)}:${padded(rest)}` : `${minutes}:${padded(rest)}`
 }
 
-/** A runtime, for a card: `1h 47m`, or `12m` under the hour. */
+/**
+ * A runtime, for a card: `1h 47m`, `12m`, or `45s` under a minute.
+ *
+ * The seconds case is not hypothetical — a trailer, a clip, or a test file
+ * rounds to `0m`, which reads as "we failed to probe this" rather than "this is
+ * short".
+ */
 export function runtime(totalSeconds: number | null | undefined): string | null {
   if (totalSeconds === null || totalSeconds === undefined || totalSeconds <= 0) return null
+
+  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`
 
   const minutes = Math.round(totalSeconds / 60)
   const hours = Math.floor(minutes / 60)

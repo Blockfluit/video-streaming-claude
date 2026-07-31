@@ -12,6 +12,11 @@ export default defineNuxtConfig({
   // `/api` so the two do not fight over the prefix.
   icon: { localApiEndpoint: '/_icons' },
 
+  // A video library is watched in the dark. There is no light theme to fall
+  // back to, so the class is fixed rather than left to a system preference
+  // that would otherwise flash white on first paint.
+  colorMode: { preference: 'dark', fallback: 'dark' },
+
   devServer: { port: 3000 },
 
   routeRules: {
