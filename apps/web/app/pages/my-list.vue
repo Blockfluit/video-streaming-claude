@@ -13,6 +13,8 @@ interface CardVideo {
   slug: string
   title: string
   durationSec: number | null
+  width: number | null
+  height: number | null
   collection: { slug: string, title: string } | null
   season: { slug: string } | null
 }
@@ -74,6 +76,8 @@ async function remove(item: SavedItem) {
               ? `/api/collections/${item.collection.id}/poster`
               : `/api/videos/${item.video!.id}/thumbnail`
           "
+          :width="item.collection ? item.next?.video.width : item.video!.width"
+          :height="item.collection ? item.next?.video.height : item.video!.height"
         />
 
         <UButton

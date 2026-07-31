@@ -72,7 +72,10 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
       title: entry.collection.title,
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
       imageUrl: `/api/collections/${entry.collection.id}/poster`,
-      video: entry.next?.video ?? null,
+      // A saved show badges the episode it would play next — the collection
+      // itself has no resolution of its own.
+      width: entry.next?.video.width ?? null,
+      height: entry.next?.video.height ?? null,
     }
   }
 
@@ -82,7 +85,8 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     title: video.title,
     subtitle: video.collection?.title ?? null,
     imageUrl: `/api/videos/${video.id}/thumbnail`,
-    video,
+    width: video.width ?? null,
+    height: video.height ?? null,
   }
 }
 </script>
@@ -97,6 +101,8 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
         :title="item.video.title"
         :subtitle="item.video.collection?.title"
         :image-url="`/api/videos/${item.video.id}/thumbnail`"
+        :width="item.video.width"
+        :height="item.video.height"
         :progress="progressPercent(item.progress.lastPositionSec, item.video.durationSec)"
       />
     </MediaRow>
@@ -119,8 +125,6 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
         v-for="item in row.items"
         :key="item.id"
         v-bind="card(item)"
-        :width="card(item).video?.width"
-        :height="card(item).video?.height"
       />
     </MediaRow>
 

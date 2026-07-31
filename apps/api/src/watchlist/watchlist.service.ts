@@ -21,6 +21,8 @@ const VIDEO_SELECT = {
   title: true,
   durationSec: true,
   thumbnailKey: true,
+  width: true,
+  height: true,
   state: true,
   orderIndex: true,
   collection: { select: { id: true, slug: true, title: true } },
