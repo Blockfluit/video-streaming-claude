@@ -14,6 +14,7 @@ import { TranscodeModule } from './transcode/transcode.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
+import { WatchModule } from './watch/watch.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { VideosModule } from './videos/videos.module';
     TranscodeModule,
     UploadsModule,
     IngestModule,
+    WatchModule,
   ],
   controllers: [AppController],
 })
