@@ -171,6 +171,47 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `averageCompletion` averages per-video fractions rather than dividing summed positions by summed
   durations, which would weight a feature film far above an episode.
 
+**People, credits, comments and lists**
+- A video's credits panel is its own credits **merged with its collection's** (`credits/merge.ts`, pure).
+  On a `(personId, role)` clash the **episode's** credit wins outright — it is the more specific one and can
+  carry an episode-specific character name. Role display order comes from `Object.values(CreditRole)`, never
+  a hand-written array. The sort must be **total** (role, position, collection-before-video, name, id): the
+  two parents number positions independently so ties are normal, and a panel that reshuffles between
+  requests reads as a rendering bug for weeks.
+- Credit duplicate prevention (same person + role + parent) lives in the **service**. The parent columns are
+  nullable and Postgres compares NULLs as distinct, so a composite unique index would let every video credit
+  duplicate freely.
+- `PATCH /credits/reorder` is declared **before** `credits/:id` (Express matches in order, so the other way
+  round makes `reorder` a credit id), names its parent explicitly, and requires the **complete** list exactly
+  once. Taking ids on trust would make a reorder a way to renumber credits on a video nobody mentioned.
+- A person's name is checked for clashes **case-insensitively**; the schema's unique index is not, and would
+  hold "ada lovelace" and "Ada Lovelace" as two people.
+- A filmography is filtered by the caller's visibility, or a director's page becomes a way to read the draft
+  library.
+- Comment deletion is **soft**, so `toCommentView` is the only thing between a deleted comment and its text.
+  It builds the tombstone from nothing rather than spreading the row and overwriting — a column added later
+  would otherwise ride along unnoticed. The tombstone keeps `createdAt` (its place in the thread is the only
+  reason the row is served) and drops body, author and `timestampSec`.
+- **Editing a comment is the author's alone, admin included.** An admin moderates by removing; rewriting
+  someone's words and leaving their name on it is not moderation, and `editedAt` would make it look like
+  they had done it themselves. Deleting is the author's or any admin's, and is idempotent.
+- A comment is reached **through its video's visibility** — 404, not 403 — so a comment id is not a way to
+  act on, or confirm the existence of, a video the caller cannot see.
+- **My List** (explicit, per-user) and **curated rows** (admin-made, the same for everyone) are deliberately
+  different things, and Continue Watching is neither — it falls out of `WatchProgress`. All three land on
+  the home page.
+- Both list adds are idempotent by **catching the unique violation**, not by checking first: check-then-write
+  is not atomic and a double-click lands inside the gap. The partial uniques are what enforce it.
+- `nextEpisode` (pure) picks the first **unfinished** episode — which also covers resuming a half-watched
+  one, and does not skip an episode because a later one was finished — and returns to the first once the
+  whole thing is done. A null `orderIndex` sorts **last**: it means "ingest could not tell", and treating it
+  as episode zero offers an unnumbered extra ahead of a real episode one.
+- Curated row items are visibility-filtered **per item**. A row is admin-made and can hold anything, so that
+  filter is the only thing stopping a home-page shelf from advertising a draft. `includeHidden` does nothing
+  at all for a non-admin.
+- `DELETE /lists/:id/items/:itemId` is scoped to the list in the URL — an item id alone must not reach into
+  another row.
+
 **Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
 - `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here
   would silently break move detection.
