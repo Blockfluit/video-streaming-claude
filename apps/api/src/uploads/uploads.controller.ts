@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MAX_UPLOAD_BYTES, uploadVideoSchema, type UploadVideoInput } from '@video/shared';
+
+import { VIDEO_EXTENSIONS } from '../ingest/path-parser';
 import { diskStorage } from 'multer';
 
 import type { AuthUser } from '../auth/auth.types';
@@ -57,8 +59,18 @@ export class UploadsController {
       }),
       limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
       fileFilter: (_request, file, callback) => {
-        const ok = UploadsService.isAcceptable(file.originalname, file.mimetype);
-        callback(ok ? null : new BadRequestException('Unsupported video type'), ok);
+        // Judged on the extension only. The browser's `mimetype` comes from the
+        // OS registry rather than the file, and is wrong often enough that
+        // trusting it rejects real uploads.
+        const ok = UploadsService.isAcceptable(file.originalname);
+        callback(
+          ok
+            ? null
+            : new BadRequestException(
+                `Unsupported file type. Accepted: ${[...VIDEO_EXTENSIONS].join(', ')}`,
+              ),
+          ok,
+        );
       },
     }),
   )

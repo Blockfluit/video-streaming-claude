@@ -95,6 +95,22 @@ function onTimeUpdate() {
   emit('timeupdate', now)
 }
 
+/**
+ * Also reports the position after a seek.
+ *
+ * `timeupdate` only fires while the media is actually advancing, so dragging
+ * the scrubber on a paused video leaves every listener holding the position
+ * from before the drag — which is how "pin this comment to the current moment"
+ * ends up pinning 0:00.
+ */
+function onSeeked() {
+  const el = video.value
+  if (!el) return
+  lastTick = el.currentTime
+  currentTime.value = el.currentTime
+  emit('timeupdate', el.currentTime)
+}
+
 function onLoadedMetadata() {
   const el = video.value
   if (!el) return
@@ -178,6 +194,7 @@ onBeforeUnmount(() => {
       playsinline
       :poster="`/api/videos/${videoId}/thumbnail`"
       @timeupdate="onTimeUpdate"
+      @seeked="onSeeked"
       @loadedmetadata="onLoadedMetadata"
       @pause="beat()"
       @ended="beat()"

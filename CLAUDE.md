@@ -121,6 +121,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   stays on one filesystem (across two mounts it fails with `EXDEV`), and dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion.
 - multer uses `diskStorage`, never memory: a 2 GB file buffered in the heap takes the process with it.
+- An upload is accepted on its **extension alone**. The `mimetype` a browser attaches comes from the OS
+  registry, not the file — Windows reports `.mkv` as `video/x-matroska`, `video/mkv`, or nothing depending
+  on what claimed the extension — so ANDing it with the extension check refused real MKVs with a message
+  nobody could act on. ffprobe is the only thing that can say whether a file is playable, and it records
+  `probeError` on the next pass; a mislabelled upload becomes a draft with a diagnosis. (Shipped as a bug.)
 - multer 2.2 strips **both** slash and backslash paths from `originalname`, but **not** a leading dot.
   `.hidden.mp4` arrives intact and would become a file the scanner skips, so `sanitizeFilename` doing that
   is load-bearing rather than belt-and-braces. Verified by mutation, not assumed.
@@ -316,6 +321,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   the first character typed into a search box.
 - **Never give a `USelect` an option whose value is `''`.** Reka UI reserves the empty string for "cleared"
   and throws during render — which takes the whole page down, not just the select. Use a sentinel.
+- `GET /videos/:id/subtitles` returns a `Page` like every other list endpoint. It returned a bare array
+  until the player's `<track>` list silently came back empty — the frontend read `.items` because
+  everything else does, which is the whole point of the convention.
 - **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
   A frontend change is verified in a browser or it is not verified.
 

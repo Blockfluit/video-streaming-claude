@@ -222,6 +222,40 @@ describe('Uploads (real database)', () => {
     });
   });
 
+  /**
+   * The type a browser attaches to a file comes from the operating system's
+   * registry, not from the file. Windows reports `.mkv` as `video/x-matroska`,
+   * `video/mkv`, or nothing at all depending on what has claimed the extension —
+   * so gating on it refused real uploads with a message nobody could act on.
+   */
+  describe('whatever the browser claims the type is', () => {
+    for (const contentType of [
+      'video/x-matroska',
+      'video/mkv',
+      'application/octet-stream',
+      'application/x-matroska',
+      'text/plain',
+      '',
+    ]) {
+      it(`accepts a .mkv sent as "${contentType || 'nothing'}"`, async () => {
+        const response = await upload(
+          `claimed-${contentType.replace(/\W/g, '') || 'blank'}.mkv`,
+          {},
+          videoBytes,
+          contentType,
+        ).expect(201);
+
+        expect(response.body.storageKey).toMatch(/\.mkv$/);
+      });
+    }
+
+    // The extension is what the library keys everything off, so it still
+    // decides — a shell script does not become a video by claiming to be one.
+    it('still refuses a non-video extension dressed as a video', async () => {
+      await upload('payload.sh', {}, Buffer.from('#!/bin/sh'), 'video/mp4').expect(400);
+    });
+  });
+
   describe('what it refuses', () => {
     it('rejects a file that is not a video', async () => {
       await upload('notes.txt', {}, Buffer.from('hello'), 'text/plain').expect(400);

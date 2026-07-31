@@ -14,11 +14,33 @@ const { data: collections } = await useApiData<Page<{ id: string, title: string 
   '/collections?limit=100',
 )
 
-const toast = useToast()
 const collectionId = ref('')
 const file = ref<File | null>(null)
 const progress = ref(0)
 const uploading = ref(false)
+
+/**
+ * The outcome, kept on the page rather than in a toast.
+ *
+ * An upload takes minutes; whoever started it has looked away. A notification
+ * that fades after five seconds is exactly the wrong shape for the one message
+ * that matters — and when it was a refusal, the file simply seemed to vanish.
+ */
+const result = ref<{ ok: boolean, message: string, videoId?: string } | null>(null)
+
+/** The API's own message, which says what to do about it. */
+function reasonFrom(responseText: string, status: number): string {
+  try {
+    const body = JSON.parse(responseText)
+    const message = Array.isArray(body.message) ? body.message[0] : body.message
+    if (message) return message
+  } catch {
+    // Not JSON — a proxy error page, or the request never reached the API.
+  }
+  return status === 0
+    ? 'The connection dropped before the upload finished.'
+    : `The server refused it (HTTP ${status}).`
+}
 
 const options = computed(() =>
   (collections.value?.items ?? []).map(c => ({ label: c.title, value: c.id })),
@@ -37,6 +59,7 @@ function upload() {
 
   uploading.value = true
   progress.value = 0
+  result.value = null
 
   const request = new XMLHttpRequest()
   request.open('POST', '/api/videos/upload')
@@ -45,17 +68,26 @@ function upload() {
   })
   request.addEventListener('load', () => {
     uploading.value = false
+    progress.value = 0
+
     if (request.status >= 200 && request.status < 300) {
+      let videoId: string | undefined
+      try {
+        videoId = JSON.parse(request.responseText).id
+      } catch {
+        // A 2xx with an unreadable body still means it landed.
+      }
+      result.value = { ok: true, message: `${file.value?.name ?? 'The file'} is in the library.`, videoId }
       file.value = null
-      progress.value = 0
-      toast.add({ title: 'Uploaded. It will appear as a draft.', color: 'success' })
-    } else {
-      toast.add({ title: 'Upload refused', description: request.responseText.slice(0, 200), color: 'error' })
+      return
     }
+
+    result.value = { ok: false, message: reasonFrom(request.responseText, request.status) }
   })
   request.addEventListener('error', () => {
     uploading.value = false
-    toast.add({ title: 'Upload failed', color: 'error' })
+    progress.value = 0
+    result.value = { ok: false, message: reasonFrom('', 0) }
   })
   request.send(body)
 }
@@ -107,6 +139,27 @@ function upload() {
         >
           Upload
         </UButton>
+
+        <!-- Stays until the next upload. Whoever started this walked away. -->
+        <UAlert
+          v-if="result"
+          :color="result.ok ? 'success' : 'error'"
+          variant="subtle"
+          :icon="result.ok ? 'i-lucide-check' : 'i-lucide-triangle-alert'"
+          :title="result.ok ? 'Uploaded' : 'Not uploaded'"
+          :description="result.message"
+        >
+          <template v-if="result.ok" #actions>
+            <UButton
+              v-if="result.videoId"
+              size="xs"
+              :to="`/admin/videos/${result.videoId}`"
+            >
+              Open it
+            </UButton>
+            <UButton size="xs" variant="subtle" to="/admin/drafts">All drafts</UButton>
+          </template>
+        </UAlert>
       </div>
     </UCard>
   </div>

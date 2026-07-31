@@ -1,4 +1,30 @@
 import { expect, expectsRequest, fillStable, signIn, test, visit } from './fixtures'
+import type { Page } from '@playwright/test'
+
+
+/** Waits for metadata. Setting `currentTime` before it arrives is silently ignored. */
+async function withMetadata(page: Page) {
+  const video = page.locator('video')
+  await expect
+    .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState), { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(1)
+  return video
+}
+
+/** The id of the video the player page is currently showing. */
+async function currentVideoId(page: Page): Promise<string> {
+  const [, collection, ...rest] = new URL(page.url()).pathname.split('/').filter(Boolean)
+  const resolved = await page.evaluate(
+    async ({ slug, path }) => {
+      const response = await fetch(
+        `/api/collections/${slug}/resolve?path=${encodeURIComponent(path)}`,
+      )
+      return (await response.json()).data.id as string
+    },
+    { slug: collection, path: rest.join('/') },
+  )
+  return resolved
+}
 
 /** The viewer-facing app: every control a member can press. */
 test.describe('viewer', () => {
@@ -67,23 +93,22 @@ test.describe('viewer', () => {
      * which is worse than no test.
      */
     test('skip intro seeks past the intro', async ({ page }) => {
-      const videoId = await page.evaluate(async () => {
-        const response = await fetch('/api/me/history?limit=1')
-        const page_ = await response.json()
-        return page_.items[0]?.video?.id as string | undefined
-      })
-      const target = videoId ?? (await page.evaluate(async () => {
-        const response = await fetch('/api/videos?limit=1')
-        return (await response.json()).items[0].id as string
-      }))
+      // The marker goes on *this* video, resolved from the URL. Querying for
+      // "the first video" instead makes the test depend on the two lookups
+      // agreeing, which they stop doing the moment the library changes.
+      const target = await currentVideoId(page)
+      const duration = await (await withMetadata(page)).evaluate(
+        (el: HTMLVideoElement) => el.duration,
+      )
+      const introEnd = Math.max(1, Math.min(5, (duration || 10) / 2))
 
-      await page.evaluate(async (id) => {
+      await page.evaluate(async ({ id, end }) => {
         await fetch(`/api/videos/${id}/markers`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ introStartSec: 0, introEndSec: 5 }),
+          body: JSON.stringify({ introStartSec: 0, introEndSec: end }),
         })
-      }, target)
+      }, { id: target, end: introEnd })
       await page.reload()
       await page.waitForLoadState('networkidle')
 
@@ -120,20 +145,35 @@ test.describe('viewer', () => {
 
     test('a pinned comment seeks the player when clicked', async ({ page }) => {
       const video = page.locator('video')
-      await video.evaluate((el: HTMLVideoElement) => { el.currentTime = 8 })
+      // Two thirds in, whatever the runtime — a fixed offset overshoots a short
+      // clip, gets clamped to the end, and the assertion then measures nothing.
+      await video.evaluate((el: HTMLVideoElement) => {
+        // Two thirds in, whatever the runtime — a fixed offset overshoots a
+        // short clip and gets clamped to the end.
+        el.currentTime = Math.max(1, (el.duration || 12) * 0.66)
+      })
+
+      // The pin reads the position the UI is showing, so wait for it to catch up.
+      await expect(page.getByText(/Pin to (?!0:00)/)).toBeVisible()
 
       await page.getByPlaceholder(/Say something/).fill('Pinned by the tests')
       await page.getByRole('checkbox').check()
       await page.getByRole('button', { name: 'Post' }).click()
 
+      // The thread accumulates pins across runs, so assert against the stamp
+      // that is actually clicked rather than the number this test happened to
+      // post — otherwise it measures whichever comment sorted first.
       const stamp = page.getByRole('button', { name: /^\d+:\d\d$/ }).first()
       await expect(stamp).toBeVisible()
+      const [minutes, seconds] = (await stamp.innerText()).split(':').map(Number)
+      const expected = minutes * 60 + seconds
+      expect(expected).toBeGreaterThan(0)
 
       await video.evaluate((el: HTMLVideoElement) => { el.currentTime = 0 })
       await stamp.click()
       await expect
         .poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime))
-        .toBeGreaterThan(5)
+        .toBeGreaterThanOrEqual(expected - 1)
     })
 
     test('a comment can be deleted, and leaves a tombstone', async ({ page }) => {

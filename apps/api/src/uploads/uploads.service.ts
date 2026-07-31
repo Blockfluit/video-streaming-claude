@@ -28,25 +28,25 @@ import { sanitizeFilename, splitUploadName } from './filename';
  *   the plan means by uploads not double-creating.
  */
 
-/** The extension decides how the library treats a file, so it is the authoritative check. */
-const ALLOWED_EXTENSIONS = new Set<string>(VIDEO_EXTENSIONS);
-
 /**
- * Advisory only. Browsers are inconsistent about container types — Chrome sends
- * `video/x-matroska` for `.mkv`, Firefox sends nothing, and both send
- * `application/octet-stream` often enough that rejecting it would break real
- * uploads.
+ * The extension decides, and it decides alone.
+ *
+ * There used to be a second gate here: an allow-list of MIME types, ANDed with
+ * this one. Its own comment said browsers are inconsistent about container
+ * types — and it was right, which is exactly why gating on it was wrong. The
+ * type attached to a `<input type=file>` comes from the operating system's
+ * registry, not from the file: Windows reports `.mkv` as `video/x-matroska`,
+ * or `video/mkv`, or nothing at all, depending on what has claimed the
+ * extension. A real MKV was refused with "Unsupported video type" for no reason
+ * a person could act on.
+ *
+ * The extension is what the library keys everything else off, and ffprobe is
+ * the only thing that can actually say whether a file is playable — it runs on
+ * the next pass and records `probeError` if not. A mislabelled upload becomes a
+ * draft with a diagnosis, which is far better than a 400 the uploader cannot
+ * explain.
  */
-const ALLOWED_MIME_TYPES = new Set([
-  'video/mp4',
-  'video/x-m4v',
-  'video/x-matroska',
-  'video/quicktime',
-  'video/x-msvideo',
-  'video/webm',
-  'application/octet-stream',
-  '',
-]);
+const ALLOWED_EXTENSIONS = new Set<string>(VIDEO_EXTENSIONS);
 
 export const UPLOAD_STAGING_DIRECTORY = '.uploads';
 
@@ -69,10 +69,10 @@ export class UploadsService {
   ) {}
 
   /** True when the extension and mime type are both acceptable. Called by the multer filter. */
-  static isAcceptable(originalName: string, mimeType: string): boolean {
+  static isAcceptable(originalName: string): boolean {
     const { extension } = splitUploadName(sanitizeFilename(originalName));
 
-    return ALLOWED_EXTENSIONS.has(extension) && ALLOWED_MIME_TYPES.has(mimeType.toLowerCase());
+    return ALLOWED_EXTENSIONS.has(extension);
   }
 
   async ingestUpload(

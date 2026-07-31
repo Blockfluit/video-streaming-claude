@@ -333,8 +333,8 @@ describe('Subtitles (real database)', () => {
     it('lists the tracks for a video', async () => {
       const response = await admin.get(`/videos/${videoId}/subtitles`).expect(200);
 
-      expect(response.body).toHaveLength(1);
-      expect(response.body[0]).toMatchObject({ language: 'en', label: 'English' });
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0]).toMatchObject({ language: 'en', label: 'English' });
     });
 
     it('401s an anonymous caller — a subtitle URL is not public', async () => {
