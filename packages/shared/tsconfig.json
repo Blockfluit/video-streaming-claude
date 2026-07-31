@@ -1,8 +1,12 @@
 {
   "compilerOptions": {
-    // CommonJS output: NestJS compiles to CJS and `require()`s this package,
-    // while Vite/Nitro interop with CJS without complaint. Emitting ESM here
-    // would only make the API side harder.
+    // The CommonJS half of a dual build. NestJS compiles to CJS and
+    // `require()`s this, and ts-jest's loader needs it too.
+    //
+    // It is not enough on its own: Vite serves the package to the *browser* as
+    // a native ES module, where a CJS file exposes no named exports at all.
+    // `tsconfig.esm.json` emits the other half. Relative imports carry explicit
+    // `.js` extensions so one source tree can produce both.
     "target": "ES2023",
     "module": "commonjs",
     "moduleResolution": "node",

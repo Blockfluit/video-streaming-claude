@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { pageQuerySchema } from '../pagination';
-import { booleanParam, idSchema } from '../primitives';
+import { pageQuerySchema } from '../pagination.js';
+import { booleanParam, idSchema } from '../primitives.js';
 
 /**
  * Watch tracking — what the player reports and what the library reads back.

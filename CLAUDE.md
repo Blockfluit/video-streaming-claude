@@ -289,6 +289,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
   any `max-age` above zero serves the poster an admin has just replaced.
 - A nav link to a route with no page is a broken app, not a placeholder — links land with their pages.
+- `packages/shared` emits **both** CJS and ESM, and needs to. NestJS and ts-jest `require()` the CJS half;
+  Vite serves the package to the *browser* as a native ES module, where a CJS file exposes **no named
+  exports at all** and `import { loginSchema }` fails at parse time. SSR hides this completely — Nitro can
+  require CJS — so it only appears when a page is opened in a browser. Relative imports in `src` carry
+  explicit `.js` extensions so one source tree emits both, and `dist/esm/package.json` marks that half as
+  `type: module`.
+- Nuxt Icon's runtime endpoint defaults to **`/api/_nuxt_icon`**, which the `/api/**` proxy swallows whole
+  and forwards to NestJS. Moved to `/_icons` via `icon.localApiEndpoint`; otherwise any icon resolved at
+  runtime silently fails to draw.
+- **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
+  A frontend change is verified in a browser or it is not verified.
 
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.

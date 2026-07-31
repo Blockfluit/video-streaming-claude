@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { pageQuerySchema } from '../pagination';
-import { idSchema, nonEmptyText, optionalText } from '../primitives';
+import { pageQuerySchema } from '../pagination.js';
+import { idSchema, nonEmptyText, optionalText } from '../primitives.js';
 
 /**
  * People and the credits that attach them to a collection or a video.

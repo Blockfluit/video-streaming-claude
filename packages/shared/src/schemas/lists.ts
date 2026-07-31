@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { pageQuerySchema } from '../pagination';
-import { booleanParam, idSchema, nonEmptyText, optionalText } from '../primitives';
+import { pageQuerySchema } from '../pagination.js';
+import { booleanParam, idSchema, nonEmptyText, optionalText } from '../primitives.js';
 
 /**
  * The two lists on the home page, which are deliberately different things.

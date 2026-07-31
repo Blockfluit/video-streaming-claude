@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { pageQuerySchema } from '../pagination';
-import { nonEmptyText } from '../primitives';
+import { pageQuerySchema } from '../pagination.js';
+import { nonEmptyText } from '../primitives.js';
 
 /**
  * Comments under the player. Flat, newest first, optionally pinned to a moment.

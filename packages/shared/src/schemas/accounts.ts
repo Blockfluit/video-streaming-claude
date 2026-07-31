@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { passwordSchema, usernameSchema } from '../identity';
-import { pageQuerySchema } from '../pagination';
+import { passwordSchema, usernameSchema } from '../identity.js';
+import { pageQuerySchema } from '../pagination.js';
 
 export const roleSchema = z.enum(['USER', 'ADMIN']);
 export type Role = z.infer<typeof roleSchema>;
