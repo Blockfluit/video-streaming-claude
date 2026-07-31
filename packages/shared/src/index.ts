@@ -20,5 +20,6 @@ export * from './schemas/accounts';
 export * from './schemas/auth';
 export * from './schemas/comments';
 export * from './schemas/library';
+export * from './schemas/lists';
 export * from './schemas/people';
 export * from './schemas/watch';

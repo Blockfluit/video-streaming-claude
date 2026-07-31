@@ -9,6 +9,7 @@ import { CommonModule } from './common/common.module';
 import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
+import { ListsModule } from './lists/lists.module';
 import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -18,6 +19,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 import { WatchModule } from './watch/watch.module';
+import { WatchlistModule } from './watchlist/watchlist.module';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { WatchModule } from './watch/watch.module';
     PeopleModule,
     CreditsModule,
     CommentsModule,
+    WatchlistModule,
+    ListsModule,
   ],
   controllers: [AppController],
 })
