@@ -19,3 +19,4 @@ export * from './primitives';
 export * from './schemas/accounts';
 export * from './schemas/auth';
 export * from './schemas/library';
+export * from './schemas/watch';

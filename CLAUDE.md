@@ -141,6 +141,36 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   are ignored at **any** depth. The other order files an issue for every `.DS_Store` and `.gitkeep`, which
   buries the problems that need a person. (`media/.gitkeep` did exactly this on the first real run.)
 
+**Watch tracking** (`watch/progress.ts` is pure; `watch/watch.service.ts` is the IO around it)
+- `lastPositionSec` is where the viewer **is** and goes backwards when they seek back — it is what resume
+  restores. `maxPositionSec` is how far they ever got, is monotonic, and is what `completed` is judged on.
+  Judging completion on the playhead instead would un-finish a video the moment someone rewound to rewatch
+  a scene.
+- Position is clamped to `durationSec`. Browsers report a `currentTime` a hair past `duration` at the end of
+  playback and a container's declared duration is not exact, so storing it verbatim offers a resume that
+  seeks past the end of the file.
+- `completed` needs a duration that is known **and above zero**. A failed probe writes 0, and `x >= 0 * 0.9`
+  marks every unprobed video complete.
+- `deltaSec` is **capped** at 30s per beat, not rejected — the plan says "reject > 30", but a rejected beat
+  throws away the viewer's resume position along with the excess seconds, and missing two beats is a normal
+  network hiccup. The cap stops one bad number from rewriting a total; it is **not** a rate limit, since a
+  client beating in a loop still accumulates. That is `@nestjs/throttler` in step 18.
+- The `WatchEvent` row stores the **credited** delta, not the claimed one, so summing the log still
+  reproduces the rollup. Both are written in one transaction for the same reason.
+- `viewCount` increments only on the first beat carrying a given `playSessionId` — that lookup is why
+  `WatchEvent` has `@@index([playSessionId])`. Two concurrent first beats can both count; a view miscounted
+  by one is not worth a lock.
+- `navigator.sendBeacon` sends a string as **`text/plain`**, which the global JSON parser ignores — the
+  handler then sees an empty body and drops the one beat that carries where the viewer actually stopped. The
+  heartbeat route gets its own `json({ type: [...] })` via `MiddlewareConsumer`; everywhere else a
+  `text/plain` body stays a 400.
+- `/me/history` filters visibility on the **nested video**, not just the progress row. A video archived
+  after someone watched it must drop out of their history rather than leak its title back to them.
+- Aggregate figures are ADMIN-only; `mine` is returned to any caller. Collection `viewers` is a distinct
+  count over users — summing per-video viewer counts turns one person watching six episodes into six people.
+  `averageCompletion` averages per-video fractions rather than dividing summed positions by summed
+  durations, which would weight a feature film far above an episode.
+
 **Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
 - `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here
   would silently break move detection.
