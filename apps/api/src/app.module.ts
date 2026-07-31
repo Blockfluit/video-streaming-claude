@@ -5,9 +5,11 @@ import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CollectionsModule } from './collections/collections.module';
 import { CommonModule } from './common/common.module';
+import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
 import { MediaModule } from './media/media.module';
+import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { TranscodeModule } from './transcode/transcode.module';
@@ -35,6 +37,8 @@ import { WatchModule } from './watch/watch.module';
     UploadsModule,
     IngestModule,
     WatchModule,
+    PeopleModule,
+    CreditsModule,
   ],
   controllers: [AppController],
 })
