@@ -129,7 +129,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
   <div class="mx-auto max-w-[110rem] px-4 pt-24 pb-24 sm:px-8">
     <!-- A video: the player, its details, and the rest of the collection. -->
     <template v-if="video">
-      <nav class="mb-4 flex items-center gap-2 text-sm text-white/50">
+      <nav class="mb-4 flex items-center gap-2 text-sm text-white/65">
         <NuxtLink :to="`/c/${collection.slug}`" class="hover:text-white">
           {{ collection.title }}
         </NuxtLink>
@@ -156,7 +156,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
               <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
                 {{ video.state }}
               </UBadge>
-              <span v-if="runtime(video.durationSec)" class="text-sm text-white/50">
+              <span v-if="runtime(video.durationSec)" class="text-sm text-white/65">
                 {{ runtime(video.durationSec) }}
               </span>
               <AddToListButton :video-id="video.id" label class="ml-auto" />
@@ -188,7 +188,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
 
         <!-- The rest of the collection, so the next thing is one click away. -->
         <aside v-if="ordered.length > 1" class="space-y-3">
-          <h2 class="text-sm font-semibold tracking-wide text-white/60 uppercase">
+          <h2 class="text-sm font-semibold tracking-wide text-white/70 uppercase">
             More from {{ collection.title }}
           </h2>
           <ul class="space-y-2">
@@ -206,7 +206,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
                 >
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium">{{ entry.title }}</p>
-                  <p class="text-xs text-white/40">{{ runtime(entry.durationSec) }}</p>
+                  <p class="text-xs text-white/70">{{ runtime(entry.durationSec) }}</p>
                 </div>
               </NuxtLink>
             </li>
@@ -247,7 +247,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
         />
       </div>
 
-      <p v-if="ordered.length === 0" class="py-20 text-center text-white/40">
+      <p v-if="ordered.length === 0" class="py-20 text-center text-white/70">
         Nothing in this collection yet.
       </p>
     </template>

@@ -84,7 +84,7 @@ const FIELD_LABELS: Record<string, string> = {
     <div class="flex flex-wrap items-end gap-4">
       <div class="grow">
         <h1 class="text-2xl font-bold tracking-tight">Drafts</h1>
-        <p class="text-sm text-white/50">
+        <p class="text-sm text-white/65">
           {{ data?.total ?? 0 }} waiting · {{ ready.length }} ready to publish
         </p>
       </div>
@@ -107,9 +107,9 @@ const FIELD_LABELS: Record<string, string> = {
       </UButton>
     </div>
 
-    <div v-if="drafts.length" class="overflow-hidden rounded-lg border border-white/5">
+    <div v-if="drafts.length" class="overflow-hidden rounded-lg border border-white/12">
       <table class="w-full text-sm">
-        <thead class="bg-white/5 text-left text-xs text-white/50 uppercase">
+        <thead class="bg-white/5 text-left text-xs text-white/65 uppercase">
           <tr>
             <th class="w-10 p-3" />
             <th class="p-3">Video</th>
@@ -117,7 +117,7 @@ const FIELD_LABELS: Record<string, string> = {
             <th class="w-32 p-3" />
           </tr>
         </thead>
-        <tbody class="divide-y divide-white/5">
+        <tbody class="divide-y divide-white/10">
           <tr v-for="video in drafts" :key="video.id" class="hover:bg-white/[0.03]">
             <td class="p-3">
               <UCheckbox
@@ -137,7 +137,7 @@ const FIELD_LABELS: Record<string, string> = {
                 >
                 <div class="min-w-0">
                   <p class="truncate font-medium">{{ video.title }}</p>
-                  <div class="flex items-center gap-2 text-xs text-white/40">
+                  <div class="flex items-center gap-2 text-xs text-white/70">
                     <span>{{ runtime(video.durationSec) ?? 'unprobed' }}</span>
                     <QualityBadge :width="video.width" :height="video.height" />
                     <UBadge v-if="video.needsConversion" color="warning" variant="subtle" size="sm">
@@ -176,7 +176,7 @@ const FIELD_LABELS: Record<string, string> = {
       </table>
     </div>
 
-    <p v-else-if="status !== 'pending'" class="py-20 text-center text-white/40">
+    <p v-else-if="status !== 'pending'" class="py-20 text-center text-white/70">
       No drafts. Everything in the library has been dealt with.
     </p>
   </div>

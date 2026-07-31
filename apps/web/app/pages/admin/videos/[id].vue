@@ -187,11 +187,11 @@ const markers = [
   <div v-if="video" class="space-y-6">
     <div class="flex flex-wrap items-start gap-4">
       <div class="grow">
-        <NuxtLink to="/admin/drafts" class="text-sm text-white/40 hover:text-white">
+        <NuxtLink to="/admin/drafts" class="text-sm text-white/70 hover:text-white">
           ← Drafts
         </NuxtLink>
         <h1 class="text-2xl font-bold tracking-tight">{{ video.title }}</h1>
-        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/40">
+        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/70">
           <UBadge :color="video.state === 'PUBLISHED' ? 'success' : 'neutral'" variant="subtle">
             {{ video.state }}
           </UBadge>
@@ -259,7 +259,7 @@ const markers = [
         <UCard>
           <template #header>
             <h2 class="font-semibold">Skip markers</h2>
-            <p class="text-xs text-white/40">
+            <p class="text-xs text-white/70">
               Scrub to a position, then set. Each click saves on its own.
             </p>
           </template>
@@ -273,7 +273,7 @@ const markers = [
               @timeupdate="previewTime = ($event.target as HTMLVideoElement).currentTime"
             />
 
-            <p class="text-sm text-white/50">
+            <p class="text-sm text-white/65">
               Playhead at <span class="font-mono text-white">{{ timecode(previewTime) }}</span>
             </p>
 
@@ -283,7 +283,7 @@ const markers = [
                 :key="marker.field"
                 class="flex items-center gap-2 rounded-md bg-white/5 p-2"
               >
-                <span class="w-24 text-sm text-white/60">{{ marker.label }}</span>
+                <span class="w-24 text-sm text-white/70">{{ marker.label }}</span>
                 <span class="font-mono text-sm">
                   {{ video[marker.field] === null ? '—' : timecode(video[marker.field]!) }}
                 </span>
@@ -306,7 +306,7 @@ const markers = [
 
         <UCard>
           <template #header><h2 class="font-semibold">Subtitles</h2></template>
-          <ul v-if="subtitles?.items?.length" class="mb-4 divide-y divide-white/5">
+          <ul v-if="subtitles?.items?.length" class="mb-4 divide-y divide-white/10">
             <li
               v-for="track in subtitles.items"
               :key="track.id"
@@ -317,10 +317,10 @@ const markers = [
               <UBadge v-if="track.isDefault" color="primary" variant="subtle" size="sm">
                 default
               </UBadge>
-              <span class="ml-auto text-xs text-white/30">{{ track.origin }}</span>
+              <span class="ml-auto text-xs text-white/55">{{ track.origin }}</span>
             </li>
           </ul>
-          <p v-else class="mb-4 text-sm text-white/40">No subtitle tracks.</p>
+          <p v-else class="mb-4 text-sm text-white/70">No subtitle tracks.</p>
 
           <div class="flex flex-wrap gap-2">
             <label class="cursor-pointer">
@@ -347,7 +347,7 @@ const markers = [
         <UCard>
           <template #header>
             <h2 class="font-semibold">Poster</h2>
-            <p class="text-xs text-white/40">{{ video.thumbnailSource }}</p>
+            <p class="text-xs text-white/70">{{ video.thumbnailSource }}</p>
           </template>
 
           <img
@@ -384,15 +384,15 @@ const markers = [
           <template #header><h2 class="font-semibold">Media</h2></template>
           <dl class="space-y-2 text-sm">
             <div class="flex justify-between">
-              <dt class="text-white/50">Size</dt>
+              <dt class="text-white/65">Size</dt>
               <dd>{{ (Number(video.sizeBytes) / 1024 ** 3).toFixed(2) }} GB</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-white/50">Audio tracks</dt>
+              <dt class="text-white/65">Audio tracks</dt>
               <dd>{{ video.audioTracks ?? '—' }}</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-white/50">Converted</dt>
+              <dt class="text-white/65">Converted</dt>
               <dd>{{ video.playbackKey ? 'yes' : 'no' }}</dd>
             </div>
           </dl>

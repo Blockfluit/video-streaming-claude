@@ -63,7 +63,7 @@ const tiles = computed(() => [
   <div class="space-y-8">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Manage library</h1>
-      <p class="text-sm text-white/50">Everything that needs a decision.</p>
+      <p class="text-sm text-white/65">Everything that needs a decision.</p>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -71,7 +71,7 @@ const tiles = computed(() => [
         v-for="tile in tiles"
         :key="tile.label"
         :to="tile.to"
-        class="group rounded-lg border border-white/5 bg-(--ui-bg-elevated) p-5 transition-colors hover:border-white/15"
+        class="group rounded-lg border border-white/12 bg-(--ui-bg-elevated) p-5 transition-colors hover:border-white/25"
       >
         <div class="flex items-center gap-3">
           <UIcon
@@ -81,13 +81,13 @@ const tiles = computed(() => [
               'text-(--ui-primary)': tile.tone === 'primary',
               'text-red-400': tile.tone === 'error',
               'text-amber-400': tile.tone === 'warning',
-              'text-white/40': tile.tone === 'neutral',
+              'text-white/70': tile.tone === 'neutral',
             }"
           />
-          <span class="text-sm text-white/60">{{ tile.label }}</span>
+          <span class="text-sm text-white/70">{{ tile.label }}</span>
           <UIcon
             name="i-lucide-arrow-right"
-            class="ml-auto size-4 text-white/20 transition-transform group-hover:translate-x-0.5"
+            class="ml-auto size-4 text-white/35 transition-transform group-hover:translate-x-0.5"
           />
         </div>
         <p class="mt-3 text-3xl font-semibold tabular-nums">{{ tile.value }}</p>

@@ -53,7 +53,7 @@ async function scan() {
     <div class="flex flex-wrap items-end gap-3">
       <div class="grow">
         <h1 class="text-2xl font-bold tracking-tight">Ingest</h1>
-        <p class="text-sm text-white/50">
+        <p class="text-sm text-white/65">
           Watcher {{ status?.watching ? 'running' : 'off' }}
           <template v-if="status?.lastRunAt">
             · last scan {{ new Date(status.lastRunAt).toLocaleString() }}
@@ -73,16 +73,16 @@ async function scan() {
       description="Files are picked up automatically. A scan is only needed if the watcher was off."
     />
 
-    <div v-if="issues?.items?.length" class="overflow-hidden rounded-lg border border-white/5">
+    <div v-if="issues?.items?.length" class="overflow-hidden rounded-lg border border-white/12">
       <table class="w-full text-sm">
-        <thead class="bg-white/5 text-left text-xs text-white/50 uppercase">
+        <thead class="bg-white/5 text-left text-xs text-white/65 uppercase">
           <tr>
             <th class="p-3">Problem</th>
             <th class="p-3">Path</th>
             <th class="p-3">Detail</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-white/5">
+        <tbody class="divide-y divide-white/10">
           <tr v-for="issue in issues.items" :key="issue.id" :class="issue.resolvedAt ? 'opacity-40' : ''">
             <td class="p-3">
               <UBadge :color="issue.resolvedAt ? 'neutral' : 'warning'" variant="subtle">
@@ -90,12 +90,12 @@ async function scan() {
               </UBadge>
             </td>
             <td class="p-3 font-mono text-xs break-all">{{ issue.path }}</td>
-            <td class="p-3 text-white/60">{{ issue.detail }}</td>
+            <td class="p-3 text-white/70">{{ issue.detail }}</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <p v-else class="py-20 text-center text-white/40">Nothing to complain about.</p>
+    <p v-else class="py-20 text-center text-white/70">Nothing to complain about.</p>
   </div>
 </template>

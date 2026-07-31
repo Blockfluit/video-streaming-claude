@@ -41,7 +41,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
   <div class="min-h-screen bg-(--ui-bg)">
     <header
       class="fixed inset-x-0 top-0 z-50 transition-colors duration-300"
-      :class="scrolled ? 'bg-[#08080a]/95 backdrop-blur border-b border-white/5' : 'bg-gradient-to-b from-black/80 to-transparent'"
+      :class="scrolled ? 'bg-[#08080a]/95 backdrop-blur border-b border-white/12' : 'bg-gradient-to-b from-black/80 to-transparent'"
     >
       <div class="mx-auto flex h-16 max-w-[110rem] items-center gap-8 px-4 sm:px-8">
         <NuxtLink to="/" class="shrink-0 text-xl font-bold tracking-tight text-(--ui-primary)">
@@ -54,7 +54,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
             :key="link.to"
             :to="link.to"
             class="text-sm transition-colors"
-            :class="isActive(link.to) ? 'font-semibold text-white' : 'text-white/60 hover:text-white'"
+            :class="isActive(link.to) ? 'font-semibold text-white' : 'text-white/70 hover:text-white'"
           >
             {{ link.label }}
           </NuxtLink>
@@ -69,7 +69,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
         >
           <button type="button" class="flex items-center gap-2 text-sm text-white/80 hover:text-white">
             <span
-              class="grid size-8 place-items-center rounded bg-(--ui-primary) text-xs font-bold text-white"
+              class="grid size-8 place-items-center rounded bg-red-700 text-xs font-bold text-white"
             >
               {{ user.displayName.slice(0, 2).toUpperCase() }}
             </span>

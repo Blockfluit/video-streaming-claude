@@ -303,6 +303,19 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - A poster's storage key never changes, so replacing one leaves the browser showing the old picture. The
   admin screens append a cache-busting query after a capture or upload; the ETag alone cannot help an
   `<img>` that was never re-requested.
+- Browser tests live in `apps/web/e2e` (`npm run test:e2e -w @video/web`). They assert controls **do
+  something** — `expectsRequest` waits for the API call — because a button with no handler renders
+  perfectly. Needs both dev servers plus `npx playwright install --with-deps chromium`.
+- `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
+  clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
+  ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
+  measured by painting the colours on a canvas — Chromium returns `oklab()` for anything from the Tailwind
+  palette, and parsing that as `rgb()` silently reports every ratio as ~1.
+- Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
+  silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
+  the first character typed into a search box.
+- **Never give a `USelect` an option whose value is `''`.** Reka UI reserves the empty string for "cleared"
+  and throws during render — which takes the whole page down, not just the select. Use a sentinel.
 - **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
   A frontend change is verified in a browser or it is not verified.
 

@@ -75,7 +75,7 @@ async function update(account: Account, body: Record<string, unknown>) {
   <div class="space-y-8">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Accounts</h1>
-      <p class="text-sm text-white/50">There is no sign-up. People get in by invite.</p>
+      <p class="text-sm text-white/65">There is no sign-up. People get in by invite.</p>
     </div>
 
     <UCard>
@@ -104,10 +104,10 @@ async function update(account: Account, body: Record<string, unknown>) {
         </template>
       </UAlert>
 
-      <ul class="divide-y divide-white/5 text-sm">
+      <ul class="divide-y divide-white/10 text-sm">
         <li v-for="invite in invites?.items ?? []" :key="invite.id" class="flex items-center gap-3 py-2">
           <UBadge color="neutral" variant="subtle" size="sm">{{ invite.kind }}</UBadge>
-          <span class="text-white/50">
+          <span class="text-white/65">
             {{ new Date(invite.createdAt).toLocaleDateString() }}
           </span>
           <UBadge
@@ -120,20 +120,20 @@ async function update(account: Account, body: Record<string, unknown>) {
           </UBadge>
         </li>
       </ul>
-      <p v-if="!invites?.items?.length" class="text-sm text-white/40">No invites yet.</p>
+      <p v-if="!invites?.items?.length" class="text-sm text-white/70">No invites yet.</p>
     </UCard>
 
     <UCard>
       <template #header><h2 class="font-semibold">People</h2></template>
       <table class="w-full text-sm">
-        <tbody class="divide-y divide-white/5">
+        <tbody class="divide-y divide-white/10">
           <tr v-for="account in users?.items ?? []" :key="account.id">
             <td class="py-3">
               <p class="font-medium">
                 {{ account.displayName }}
-                <span v-if="account.id === user?.id" class="text-xs text-white/40">(you)</span>
+                <span v-if="account.id === user?.id" class="text-xs text-white/70">(you)</span>
               </p>
-              <p class="text-xs text-white/40">{{ account.username }}</p>
+              <p class="text-xs text-white/70">{{ account.username }}</p>
             </td>
             <td class="py-3">
               <UBadge :color="account.role === 'ADMIN' ? 'primary' : 'neutral'" variant="subtle">

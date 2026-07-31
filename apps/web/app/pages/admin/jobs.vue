@@ -59,7 +59,7 @@ const TONE: Record<string, string> = {
     <div class="flex items-end gap-3">
       <div class="grow">
         <h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
-        <p class="text-sm text-white/50">
+        <p class="text-sm text-white/65">
           {{ active ? 'Live — refreshing every 2s' : 'Nothing running' }}
         </p>
       </div>
@@ -70,7 +70,7 @@ const TONE: Record<string, string> = {
       <div
         v-for="job in jobs"
         :key="job.id"
-        class="rounded-lg border border-white/5 bg-(--ui-bg-elevated) p-4"
+        class="rounded-lg border border-white/12 bg-(--ui-bg-elevated) p-4"
       >
         <div class="flex flex-wrap items-center gap-3">
           <UBadge :color="(TONE[job.status] as any) ?? 'neutral'" variant="subtle">
@@ -80,7 +80,7 @@ const TONE: Record<string, string> = {
           <NuxtLink
             v-if="job.video"
             :to="`/admin/videos/${job.video.id}`"
-            class="truncate text-sm text-white/60 hover:text-white"
+            class="truncate text-sm text-white/70 hover:text-white"
           >
             {{ job.video.title }}
           </NuxtLink>
@@ -113,7 +113,7 @@ const TONE: Record<string, string> = {
               :style="{ width: `${job.progress ?? 0}%` }"
             />
           </div>
-          <p class="mt-1 text-xs text-white/40">
+          <p class="mt-1 text-xs text-white/70">
             {{ Math.round(job.progress ?? 0) }}%
             <span v-if="(job.progress ?? 0) >= 100"> — finalising the file</span>
           </p>
@@ -123,6 +123,6 @@ const TONE: Record<string, string> = {
       </div>
     </div>
 
-    <p v-else class="py-20 text-center text-white/40">No jobs yet.</p>
+    <p v-else class="py-20 text-center text-white/70">No jobs yet.</p>
   </div>
 </template>

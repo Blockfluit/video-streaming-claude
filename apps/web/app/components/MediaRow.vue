@@ -46,7 +46,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
       <ULink
         v-if="to"
         :to="to"
-        class="text-xs text-white/40 opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-white"
+        class="text-xs text-white/70 transition-colors hover:text-white"
       >
         See all →
       </ULink>

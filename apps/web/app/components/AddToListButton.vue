@@ -20,6 +20,15 @@ const isSaved = ref(props.saved ?? false)
 watch(() => props.saved, value => { isSaved.value = value ?? false })
 
 const busy = ref(false)
+
+/**
+ * Only when the button has no visible text. An `aria-label` *overrides* the
+ * button's own label, so setting both leaves the accessible name saying one
+ * thing while the screen says another.
+ */
+const ariaLabel = computed(() =>
+  props.label ? undefined : isSaved.value ? 'Remove from my list' : 'Add to my list',
+)
 const body = computed(() =>
   props.collectionId ? { collectionId: props.collectionId } : { videoId: props.videoId },
 )
@@ -47,7 +56,8 @@ async function toggle() {
     :color="isSaved ? 'primary' : 'neutral'"
     variant="solid"
     :loading="busy"
-    :aria-label="isSaved ? 'Remove from my list' : 'Add to my list'"
+    :aria-pressed="isSaved"
+    :aria-label="ariaLabel"
     @click.prevent.stop="toggle"
   >
     <span v-if="label">{{ isSaved ? 'In my list' : 'My list' }}</span>

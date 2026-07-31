@@ -65,7 +65,7 @@ function upload() {
   <div class="max-w-2xl space-y-6">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Upload</h1>
-      <p class="text-sm text-white/50">
+      <p class="text-sm text-white/65">
         Lands in the media folder as a draft, exactly as if you had copied it there.
       </p>
     </div>
@@ -81,11 +81,11 @@ function upload() {
             class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-white/15 p-8 text-center transition-colors hover:border-white/30"
           >
             <input type="file" accept="video/*,.mkv,.mp4,.avi,.mov" class="hidden" @change="pick">
-            <UIcon name="i-lucide-upload-cloud" class="size-8 text-white/30" />
+            <UIcon name="i-lucide-upload-cloud" class="size-8 text-white/55" />
             <span class="text-sm">
               {{ file ? file.name : 'Choose a video file' }}
             </span>
-            <span v-if="file" class="text-xs text-white/40">
+            <span v-if="file" class="text-xs text-white/70">
               {{ (file.size / 1024 ** 3).toFixed(2) }} GB
             </span>
           </label>
@@ -95,7 +95,7 @@ function upload() {
           <div class="h-2 overflow-hidden rounded-full bg-white/10">
             <div class="h-full bg-(--ui-primary) transition-[width]" :style="{ width: `${progress}%` }" />
           </div>
-          <p class="text-xs text-white/50">{{ Math.round(progress) }}%</p>
+          <p class="text-xs text-white/65">{{ Math.round(progress) }}%</p>
         </div>
 
         <UButton

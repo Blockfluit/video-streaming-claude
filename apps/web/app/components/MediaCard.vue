@@ -28,7 +28,7 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
 <template>
   <NuxtLink :to="to" class="group block shrink-0">
     <div
-      class="card-lift relative overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-white/5"
+      class="card-lift relative overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-white/12"
       :class="shape === 'poster' ? 'aspect-2/3' : 'aspect-video'"
     >
       <img
@@ -39,7 +39,7 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
         class="size-full object-cover"
         @error="broken = true"
       >
-      <div v-else class="size-full grid place-items-center text-white/15">
+      <div v-else class="size-full grid place-items-center text-white/40">
         <UIcon name="i-lucide-clapperboard" class="size-10" />
       </div>
 
@@ -71,6 +71,6 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
     <p class="mt-2 truncate text-sm font-medium text-white/90 group-hover:text-white">
       {{ title }}
     </p>
-    <p v-if="subtitle" class="truncate text-xs text-white/45">{{ subtitle }}</p>
+    <p v-if="subtitle" class="truncate text-xs text-white/70">{{ subtitle }}</p>
   </NuxtLink>
 </template>

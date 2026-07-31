@@ -79,7 +79,7 @@ const canDelete = (comment: CommentView) =>
   <section class="space-y-5">
     <h2 class="text-lg font-semibold">
       Comments
-      <span class="text-white/40">{{ data?.total ?? 0 }}</span>
+      <span class="text-white/70">{{ data?.total ?? 0 }}</span>
     </h2>
 
     <div class="space-y-2">
@@ -99,16 +99,16 @@ const canDelete = (comment: CommentView) =>
     </div>
 
     <ul class="space-y-4">
-      <li v-for="comment in data?.items ?? []" :key="comment.id" class="flex gap-3">
+      <li v-for="comment in data?.items ?? []" :key="comment.id" class="group flex gap-3">
         <div
           class="grid size-9 shrink-0 place-items-center rounded-full text-xs font-semibold"
-          :class="comment.deleted ? 'bg-white/5 text-white/25' : 'bg-(--ui-bg-accented) text-white/70'"
+          :class="comment.deleted ? 'bg-white/5 text-white/65' : 'bg-(--ui-bg-accented) text-white/80'"
         >
           {{ comment.deleted ? '—' : comment.user?.displayName.slice(0, 2).toUpperCase() }}
         </div>
 
         <div class="min-w-0 grow">
-          <p v-if="comment.deleted" class="text-sm text-white/30 italic">
+          <p v-if="comment.deleted" class="text-sm text-white/55 italic">
             This comment was removed.
           </p>
 
@@ -123,7 +123,7 @@ const canDelete = (comment: CommentView) =>
               >
                 {{ timecode(comment.timestampSec) }}
               </button>
-              <span v-if="comment.editedAt" class="text-xs text-white/30">edited</span>
+              <span v-if="comment.editedAt" class="text-xs text-white/55">edited</span>
 
               <UButton
                 v-if="canDelete(comment)"
@@ -131,7 +131,7 @@ const canDelete = (comment: CommentView) =>
                 variant="ghost"
                 color="neutral"
                 size="xs"
-                class="ml-auto opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+                class="ml-auto opacity-60 transition-opacity group-hover:opacity-100 focus:opacity-100"
                 aria-label="Delete comment"
                 @click="remove(comment)"
               />
@@ -142,7 +142,7 @@ const canDelete = (comment: CommentView) =>
       </li>
     </ul>
 
-    <p v-if="(data?.items?.length ?? 0) === 0" class="text-sm text-white/40">
+    <p v-if="(data?.items?.length ?? 0) === 0" class="text-sm text-white/70">
       Nothing yet. Say the first thing.
     </p>
   </section>

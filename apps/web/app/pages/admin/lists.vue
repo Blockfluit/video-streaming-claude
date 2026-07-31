@@ -90,7 +90,7 @@ async function remove(row: CuratedRow) {
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Curated rows</h1>
-      <p class="text-sm text-white/50">The shelves on the home page, in order.</p>
+      <p class="text-sm text-white/65">The shelves on the home page, in order.</p>
     </div>
 
     <div class="flex gap-2">
@@ -98,7 +98,7 @@ async function remove(row: CuratedRow) {
       <UButton icon="i-lucide-plus" @click="create">Add row</UButton>
     </div>
 
-    <div v-for="row in data?.items ?? []" :key="row.id" class="rounded-lg border border-white/5 p-4">
+    <div v-for="row in data?.items ?? []" :key="row.id" class="rounded-lg border border-white/12 p-4">
       <div class="mb-3 flex flex-wrap items-center gap-3">
         <h2 class="font-semibold">{{ row.title }}</h2>
         <UBadge v-if="!row.isVisible" color="neutral" variant="subtle" size="sm">hidden</UBadge>
@@ -147,7 +147,7 @@ async function remove(row: CuratedRow) {
           />
         </li>
       </ul>
-      <p v-else class="mb-3 text-sm text-white/40">Empty.</p>
+      <p v-else class="mb-3 text-sm text-white/70">Empty.</p>
 
       <USelect
         :items="(collections?.items ?? []).map(c => ({ label: c.title, value: c.id }))"
@@ -157,7 +157,7 @@ async function remove(row: CuratedRow) {
       />
     </div>
 
-    <p v-if="!data?.items?.length" class="py-20 text-center text-white/40">
+    <p v-if="!data?.items?.length" class="py-20 text-center text-white/70">
       No curated rows yet.
     </p>
   </div>

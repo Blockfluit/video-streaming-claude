@@ -149,7 +149,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
               {{ hero.eyebrow }}
             </p>
             <h1 class="text-4xl font-bold tracking-tight text-white sm:text-6xl">{{ hero.title }}</h1>
-            <p v-if="hero.meta" class="text-sm text-white/60">{{ hero.meta }}</p>
+            <p v-if="hero.meta" class="text-sm text-white/70">{{ hero.meta }}</p>
             <p v-if="hero.description" class="line-clamp-3 text-white/70">{{ hero.description }}</p>
 
             <div class="flex items-center gap-3 pt-2">
@@ -214,9 +214,9 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     <!-- A new library is empty, and that is a state worth designing for. -->
     <div v-if="isEmpty" class="grid min-h-screen place-items-center px-6 text-center">
       <div class="space-y-4">
-        <UIcon name="i-lucide-clapperboard" class="size-12 text-white/15" />
+        <UIcon name="i-lucide-clapperboard" class="size-12 text-white/40" />
         <h1 class="text-2xl font-semibold">Nothing here yet</h1>
-        <p class="text-white/50">Once there is something to watch, it will show up here.</p>
+        <p class="text-white/65">Once there is something to watch, it will show up here.</p>
         <UButton to="/browse" variant="subtle">Browse the library</UButton>
       </div>
     </div>
