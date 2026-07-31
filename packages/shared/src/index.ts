@@ -18,6 +18,7 @@ export * from './quality';
 export * from './primitives';
 export * from './schemas/accounts';
 export * from './schemas/auth';
+export * from './schemas/comments';
 export * from './schemas/library';
 export * from './schemas/people';
 export * from './schemas/watch';

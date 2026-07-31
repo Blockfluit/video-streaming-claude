@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CollectionsModule } from './collections/collections.module';
+import { CommentsModule } from './comments/comments.module';
 import { CommonModule } from './common/common.module';
 import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
@@ -39,6 +40,7 @@ import { WatchModule } from './watch/watch.module';
     WatchModule,
     PeopleModule,
     CreditsModule,
+    CommentsModule,
   ],
   controllers: [AppController],
 })
