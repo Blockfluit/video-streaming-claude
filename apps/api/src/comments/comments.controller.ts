@@ -13,20 +13,36 @@ import {
 import {
   createCommentSchema,
   listCommentsSchema,
+  moderateCommentsSchema,
   updateCommentSchema,
   type CreateCommentInput,
   type ListCommentsQuery,
+  type ModerateCommentsQuery,
   type UpdateCommentInput,
 } from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser } from '../auth/decorators';
+import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { CommentsService } from './comments.service';
 
 @Controller()
 export class CommentsController {
   constructor(private readonly comments: CommentsService) {}
+
+  /**
+   * The moderation queue: every comment in the library, across every video.
+   *
+   * ADMIN-only. Sits under `admin/` alongside `admin/jobs` rather than being a
+   * flag on the per-video listing, because it answers a different question and
+   * carries a different visibility rule — a moderator can reach comments on
+   * drafts, which the thread endpoint deliberately cannot.
+   */
+  @Get('admin/comments')
+  @Roles('ADMIN')
+  moderate(@Query(validate(moderateCommentsSchema)) query: ModerateCommentsQuery) {
+    return this.comments.listForModeration(query);
+  }
 
   @Get('videos/:id/comments')
   list(

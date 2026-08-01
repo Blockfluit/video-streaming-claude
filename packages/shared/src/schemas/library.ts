@@ -86,6 +86,26 @@ export const updateVideoSchema = z.object({
 });
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;
 
+/**
+ * A season's contents and their billing order, in one request.
+ *
+ * Dragging an episode changes two things at once — which season it is in and
+ * where it sits — and touches every row after it. Doing that as one PATCH per
+ * video is a dozen requests that can half-fail, leaving an order nobody chose;
+ * `orderIndex` is deliberately not unique for the same reason `ListItem.position`
+ * is not, so the whole sequence is rewritten in one transaction instead.
+ *
+ * `seasonId: null` is a real value meaning "directly in the collection", which
+ * is where films live. The list is the season's **complete** contents after the
+ * move, and the collection is named in the URL — taking ids on trust would make
+ * a reorder a way to move episodes out of a show nobody mentioned.
+ */
+export const reorderCollectionVideosSchema = z.object({
+  seasonId: idSchema.nullable(),
+  videoIds: z.array(idSchema).max(1000),
+});
+export type ReorderCollectionVideosInput = z.infer<typeof reorderCollectionVideosSchema>;
+
 export const resolveQuerySchema = z.object({
   path: z.string().max(500).default(''),
 });

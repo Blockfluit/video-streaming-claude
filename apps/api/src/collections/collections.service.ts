@@ -4,6 +4,7 @@ import {
   type CreateCollectionInput,
   type ListCollectionsQuery,
   type Page,
+  type ReorderCollectionVideosInput,
   type UpdateCollectionInput,
 } from '@video/shared';
 
@@ -290,6 +291,55 @@ export class CollectionsService {
       data: { state: 'ARCHIVED' },
       select: COLLECTION_SUMMARY,
     });
+  }
+
+  /**
+   * Rewrites which season a set of videos is in, and their order within it.
+   *
+   * One transaction rather than a PATCH per video: a drag touches every row
+   * after the drop point, and a dozen requests that can half-fail leave an
+   * order nobody chose. `orderIndex` is not unique — a unique index collides
+   * mid-drag — so the sequence is rewritten wholesale.
+   *
+   * Both parents are checked. The videos must already belong to *this*
+   * collection and the season must be one of its own; without that a reorder
+   * would be a way to pull episodes out of a show the caller never named.
+   */
+  async reorderVideos(collectionId: string, dto: ReorderCollectionVideosInput) {
+    await this.mustExist(collectionId);
+
+    const unique = new Set(dto.videoIds);
+    if (unique.size !== dto.videoIds.length) {
+      throw new BadRequestException('The same video is listed twice');
+    }
+
+    if (dto.seasonId !== null) {
+      const season = await this.prisma.season.findFirst({
+        where: { id: dto.seasonId, collectionId },
+        select: { id: true },
+      });
+      if (!season) throw new BadRequestException('That season is not in this collection');
+    }
+
+    if (dto.videoIds.length > 0) {
+      const owned = await this.prisma.video.count({
+        where: { id: { in: dto.videoIds }, collectionId },
+      });
+      if (owned !== dto.videoIds.length) {
+        throw new BadRequestException('Every video must already be in this collection');
+      }
+    }
+
+    await this.prisma.$transaction(
+      dto.videoIds.map((id, orderIndex) =>
+        this.prisma.video.update({
+          where: { id },
+          data: { seasonId: dto.seasonId, orderIndex },
+        }),
+      ),
+    );
+
+    return { moved: dto.videoIds.length };
   }
 
   private async mustExist(id: string): Promise<void> {

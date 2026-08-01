@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { pageQuerySchema } from '../pagination.js';
-import { nonEmptyText } from '../primitives.js';
+import { booleanParam, nonEmptyText } from '../primitives.js';
 
 /**
  * Comments under the player. Flat, newest first, optionally pinned to a moment.
@@ -34,3 +34,18 @@ export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
 
 export const listCommentsSchema = pageQuerySchema;
 export type ListCommentsQuery = z.infer<typeof listCommentsSchema>;
+
+/**
+ * The moderation queue: every comment in the library, newest first.
+ *
+ * Separate from `listCommentsSchema` because the two answer different
+ * questions. A thread is read in place and shows its tombstones so it still
+ * reads around the gap; a moderator is looking for something to act on, and
+ * wants the removed ones out of the way by default.
+ */
+export const moderateCommentsSchema = pageQuerySchema.extend({
+  q: z.string().trim().max(200).optional(),
+  /** Tombstones are noise when you are looking for something to remove. */
+  includeDeleted: booleanParam.optional(),
+});
+export type ModerateCommentsQuery = z.infer<typeof moderateCommentsSchema>;

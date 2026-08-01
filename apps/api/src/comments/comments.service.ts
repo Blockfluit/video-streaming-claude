@@ -8,6 +8,7 @@ import {
   toPage,
   type CreateCommentInput,
   type ListCommentsQuery,
+  type ModerateCommentsQuery,
   type Page,
   type UpdateCommentInput,
 } from '@video/shared';
@@ -31,6 +32,51 @@ const COMMENT_SELECT = {
 @Injectable()
 export class CommentsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Every comment in the library, for the moderation queue.
+   *
+   * ADMIN-only, and the visibility filter is deliberately **not** applied: a
+   * moderator has to be able to reach a comment on a draft, which is exactly
+   * where an unwanted one is least likely to be noticed by anyone else.
+   *
+   * The video is joined in because a comment out of its thread is unreadable —
+   * "delete this" is not a decision you can make without knowing what it is
+   * under.
+   */
+  async listForModeration(query: ModerateCommentsQuery): Promise<Page<unknown>> {
+    const where = {
+      ...(query.includeDeleted === true ? {} : { deletedAt: null }),
+      ...(query.q ? { body: { contains: query.q, mode: 'insensitive' as const } } : {}),
+    };
+
+    const [comments, total] = await this.prisma.$transaction([
+      this.prisma.comment.findMany({
+        where,
+        select: {
+          ...COMMENT_SELECT,
+          video: { select: { id: true, slug: true, title: true, state: true } },
+        },
+        // `id` last so the order is total — two comments can share a timestamp.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: query.limit,
+        skip: query.offset,
+      }),
+      this.prisma.comment.count({ where }),
+    ]);
+
+    /*
+     * Still serialised through `toCommentView`, which is the only thing between
+     * a deleted comment and its text. A moderation screen showing the body of
+     * something already removed would undo the removal for the one audience
+     * most likely to be looking.
+     */
+    return toPage(
+      comments.map((comment) => ({ ...toCommentView(comment), video: comment.video })),
+      total,
+      query,
+    );
+  }
 
   /**
    * Newest first, deleted ones included as tombstones so the thread still reads

@@ -77,7 +77,7 @@ async function save() {
     await refresh()
     toast.add({ title: 'Saved', color: 'success' })
   } catch (error) {
-    toast.add({ title: message(error, 'Could not save'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'Could not save'), color: 'error' })
   } finally {
     saving.value = false
   }
@@ -97,7 +97,7 @@ async function setMarker(field: string) {
   } catch (error) {
     // The API validates the merged pair, so this is where "end before start"
     // arrives — with the field it belongs to.
-    toast.add({ title: message(error, 'That marker was refused'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'That marker was refused'), color: 'error' })
   }
 }
 
@@ -126,7 +126,7 @@ async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Do
      */
     void jobs.value?.refresh().catch(() => undefined)
   } catch (error) {
-    toast.add({ title: message(error, 'That did not work'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'That did not work'), color: 'error' })
   }
 }
 
@@ -141,7 +141,7 @@ async function captureThumbnail() {
     await refresh()
     toast.add({ title: 'Poster captured', color: 'success' })
   } catch (error) {
-    toast.add({ title: message(error, 'Could not capture that frame'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'Could not capture that frame'), color: 'error' })
   }
 }
 
@@ -159,7 +159,7 @@ async function uploadPoster(event: Event) {
     posterBust.value = Date.now()
     await refresh()
   } catch (error) {
-    toast.add({ title: message(error, 'Could not upload that image'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
   }
 }
 
@@ -176,17 +176,8 @@ async function uploadSubtitle(event: Event) {
   } catch (error) {
     // An SRT accepted as .vtt loads as an empty track, so the API sniffs for
     // the WEBVTT signature and this is where that rejection surfaces.
-    toast.add({ title: message(error, 'Could not add that subtitle'), color: 'error' })
+    toast.add({ title: apiMessage(error, 'Could not add that subtitle'), color: 'error' })
   }
-}
-
-function message(error: unknown, fallback: string): string {
-  const data = (error as { data?: { message?: string | string[], errors?: { message: string }[] } }).data
-  return (
-    data?.errors?.[0]?.message
-    ?? (Array.isArray(data?.message) ? data.message[0] : data?.message)
-    ?? fallback
-  )
 }
 
 const markers = [

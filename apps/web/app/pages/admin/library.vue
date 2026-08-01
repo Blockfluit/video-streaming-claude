@@ -96,7 +96,7 @@ useHead({ title: 'All titles' })
         <NuxtLink
           v-for="collection in collections.items"
           :key="collection.id"
-          :to="`/c/${collection.slug}`"
+          :to="`/admin/collections/${collection.slug}`"
           class="flex items-center gap-3 rounded-lg border border-(--ui-border-accented) bg-(--ui-bg-elevated) p-3 transition-colors hover:border-(--ui-text-dimmed) hover:bg-(--ui-bg-accented)"
         >
           <img
