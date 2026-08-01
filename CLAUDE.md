@@ -29,6 +29,19 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds thumbnails,
   posters and converted MP4/VTT and is **never** inside `media/` — generated output landing in the watched
   tree causes a watcher feedback loop.
+- **Every folder directly under `MEDIA_ROOT` is a drive**, a symlink to a physical disk in production. A
+  drive is where bytes live and is never a collection. The convention is
+  `media/<drive>/<item>/<season>/file`, and what an item folder *becomes* is decided by what is inside it
+  (`ingest/structure.ts`): season folders or two videos make a collection, a lone video does not.
+- The scanner follows a symlinked directory at the **drive level only**. `readdir` reports one as neither a
+  file nor a directory, so without that every disk is skipped and the scan returns an empty library rather
+  than an error. Deeper symlinks stay unfollowed, and `MAX_WALK_DEPTH` still bounds the walk.
+- A video **loose in a drive root** is not ingested. It raises a `LOOSE_DRIVE_FILE` issue: a drive holds
+  unrelated things, so there is no folder to take a suggestion from and nothing to say whether it stands
+  alone or belongs with its neighbours.
+- The folder layout is only an **initial suggestion**. A proposal is applied when a video is first
+  discovered and never again — a move on disk follows the file and changes nothing else. Re-deriving would
+  undo whatever an admin has arranged, on the strength of someone tidying up a disk.
 - `storageKey` = archival source. `playbackKey` = converted MP4. Streaming serves `playbackKey ?? storageKey`.
 - Videos with `sourceDeletedAt` set and a valid `playbackKey` are **exempt** from the missing-file sweep,
   or reclaiming disk space marks the library `MISSING`.
@@ -87,7 +100,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 499 unit, 19 e2e and 458 db. The thin wrapper in
+  which is where every API test runs — 536 unit, 19 e2e and 457 db. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -131,9 +144,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
-- Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place. Inside `MEDIA_ROOT` so the rename
-  stays on one filesystem (across two mounts it fails with `EXDEV`), and dot-prefixed so both the scanner
-  and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion.
+- Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place, dot-prefixed so both the scanner
+  and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion. The rename
+  now crosses filesystems, because each drive is its own disk: `StorageService.move` catches `EXDEV` and
+  copies to a **dot-prefixed neighbour** in the target directory before renaming, so a file still appears
+  under its final name only once it is complete.
+- **Upload places files and creates no rows.** It writes them into the shape the convention expects on a
+  drive the uploader picks — a single file gets a folder named after it, a folder tree lands as given — and
+  reconcile makes of them exactly what it would make of the same folders copied there by hand. One rule for
+  what the library is, not two. Attribution (`uploadedById`, `origin: UPLOAD`) is stamped afterwards on
+  `storageKey`, or an upload would be indistinguishable from a copy.
+- A directory upload's relative paths travel in a **parallel `paths` field**, one per file in order, because
+  multer strips separators from `originalname`. Traversal segments are dropped **before** `sanitizeFilename`
+  runs: it gives an unusable segment a fallback rather than an empty string, so filtering afterwards turned
+  `../../escaped` into real folders called `upload`. (Caught by `uploads.db-spec.ts`.)
 - multer uses `diskStorage`, never memory: a 2 GB file buffered in the heap takes the process with it.
 - An upload is accepted on its **extension alone**. The `mimetype` a browser attaches comes from the OS
   registry, not the file — Windows reports `.mkv` as `video/x-matroska`, `video/mkv`, or nothing depending
@@ -271,6 +295,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 **Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
 - `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here
   would silently break move detection.
+- A dot on **any** segment hides the whole branch, not just a file — upload staging is `<drive>/.uploads/`.
+- The collection-or-not decision cannot be made one path at a time, which is why `structure.ts` exists: "one
+  video in a folder" and "two videos in a folder" differ only in what else is there.
 - Only `/` separates path segments. A backslash is a legal character in a Linux filename and must never be
   treated as a separator.
 - Release-tag stripping matches **whole tokens** — a substring match eats real titles (`aac` inside
@@ -315,8 +342,14 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `Number.MAX_SAFE_INTEGER` would round silently). A test app must set the same replacer or it will differ
   from production.
 - Slugs are **stable once created**: renaming a title never moves the slug, because shared links would break.
-  Regeneration is an explicit `regenerateSlug: true`. Uniqueness scope differs per entity — collections are
-  unique library-wide, seasons and videos only within their collection, so two shows may both have a `pilot`.
+  Regeneration is an explicit `regenerateSlug: true`. Collections and **videos** are unique library-wide —
+  a video is addressed at `/v/<slug>` on its own, so there is no collection for a scope to mean — and
+  seasons only within their collection.
+- A video belongs to any number of collections through **`CollectionVideo`**, which carries `seasonId` and
+  `orderIndex`: those say where it sits *in one collection*, and the same episode can be episode 3 of a show
+  and item 1 of a best-of row. `seasonId` must belong to `collectionId`; Prisma cannot say that across a
+  relation, so the service does. Deleting a collection takes its seasons and memberships and **leaves the
+  videos standing** — a shelf is not the books.
 - `GET /collections/:slug/resolve` checks **season slugs before video slugs**, and the literal `:slug/resolve`
   route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
@@ -334,6 +367,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `headers: useRequestHeaders(['cookie'])` — wrap it once in a `useApi()` composable.
 - Everything is same-origin via the Nuxt `/api/**` proxy. Keep it that way: a cross-origin `<track>` fails
   silently, and `<video>`/`<track>` cannot send `Authorization` headers (this is why auth is cookie-based).
+- A video is shown at **`/v/<slug>`**, its own page. `watchPath` therefore cannot return null any more — it
+  used to, for a video that arrived without a collection, which is now simply what a standalone film is.
+  `/c/<collection>/…` still resolves so shared links do not rot, and redirects a video to its canonical URL.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
 **Frontend** (`apps/web`, in addition to the notes above)
