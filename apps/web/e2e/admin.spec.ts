@@ -319,6 +319,81 @@ test.describe('admin', () => {
   })
 
   /**
+   * Deleting a season now sticks, because the empty folder goes with it —
+   * previously the next scan rebuilt the row from that folder and the deletion
+   * appeared to undo itself.
+   *
+   * A season that still holds episodes is the dangerous case and is confirmed
+   * first, because removing its files means removing films.
+   */
+  test('deleting a season warns when it still holds episodes', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.locator('main a[href^="/admin/collections/"]').first().click()
+    await page.waitForURL(/\/admin\/collections\//)
+
+    const number = 40 + (Date.now() % 20)
+    await fillStable(page, 'input[placeholder="Number"]', String(number))
+    await expectsRequest(page, /\/seasons$/, 'POST', () =>
+      page.getByRole('button', { name: 'Add', exact: true }).click())
+
+    const season = page.getByRole('region', { name: `Season ${number}` })
+    // Wait for the new season to render before dragging onto it — a drop that
+    // lands mid-re-render goes nowhere, and the request never fires.
+    await expect(season.getByText('Drop an episode here.')).toBeVisible()
+
+    const episode = page.getByRole('region', { name: 'Not in a season' })
+      .locator('li[draggable="true"]').first()
+    await expectsRequest(page, /\/videos\/order$/, 'PATCH', () => episode.dragTo(season))
+    await expect(season.locator('li[draggable="true"]')).toHaveCount(1)
+
+    // Now it holds something, so the delete must stop and explain.
+    await page.getByRole('button', { name: `Remove Season ${number}` }).click()
+    await expect(page.getByText('This season still has episodes')).toBeVisible()
+    await expect(page.getByText(/recreate the season/)).toBeVisible()
+
+    // Backing out leaves everything alone — including the film.
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    // Wait for the dialog to actually go: while it is closing its overlay still
+    // swallows pointer events, so the drag below lands on nothing and the
+    // request never fires.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(season.locator('li[draggable="true"]')).toHaveCount(1)
+
+    /*
+     * Cleanup goes through the API, not the UI.
+     *
+     * The destructive button is deliberately not pressed: it deletes the video
+     * file, and that file is a real film in the dev library. And the episode is
+     * moved out by request rather than by dragging — dragging straight after
+     * the dialog closes is timing-sensitive and this test is about the warning,
+     * not about the drag, which the previous test already covers.
+     */
+    await page.evaluate(async (seasonNumber) => {
+      const collections = await (await fetch('/api/collections?limit=1')).json()
+      const collection = collections.items[0]
+      const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+      const season = detail.seasons.find(
+        (candidate: { number: number | null }) => candidate.number === seasonNumber,
+      )
+      if (!season) return
+
+      // Empty it first, so deleting the season never has files to consider.
+      await fetch(`/api/collections/${collection.id}/videos/order`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seasonId: null, videoIds: detail.videos.map((v: { id: string }) => v.id) }),
+      })
+      await fetch(`/api/seasons/${season.id}`, { method: 'DELETE' })
+    }, number)
+
+    // The empty folder goes with the row, which is the point of this branch:
+    // reload and the season is not rebuilt from a directory left behind.
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    await expect(page.getByRole('region', { name: `Season ${number}` })).toHaveCount(0)
+  })
+
+  /**
    * The moderation queue. Removal is the only power an admin has over someone
    * else's comment — the API refuses an edit even for them, because rewriting
    * someone's words and leaving their name on it is not moderation.

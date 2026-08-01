@@ -105,6 +105,24 @@ export class SeasonsService {
    * them with it — the schema's `onDelete: SetNull` on `Video.seasonId` says
    * the same thing. Losing a season folder should not lose the episodes.
    */
+  /**
+   * Deletes a season, and tidies up the folder it left behind.
+   *
+   * `deleteFiles` still means what it always meant: take the directory and
+   * everything in it, films included. That is the destructive option and stays
+   * opt-in.
+   *
+   * What changed is the *default*. It used to leave the directory untouched,
+   * which meant deleting a season through the UI did not stick — reconcile
+   * rebuilds rows from the tree, so the next scan found the orphaned folder and
+   * created the season again. The screen and the disk disagreed, and the disk
+   * won a few minutes later.
+   *
+   * So an **empty** directory is now removed. Nothing in it can be lost, and
+   * leaving it is the entire reason the season came back. A directory that
+   * still holds something is left exactly as before: the caller has to say
+   * `deleteFiles` to destroy media, and never gets there by accident.
+   */
   async remove(id: string, deleteFiles: boolean): Promise<void> {
     const season = await this.prisma.season.findUnique({
       where: { id },
@@ -116,7 +134,10 @@ export class SeasonsService {
 
     if (deleteFiles) {
       await this.storage.delete('media', season.folderKey);
+      return;
     }
+
+    await this.storage.deleteIfEmpty('media', season.folderKey);
   }
 
   /** Season slugs are unique within their collection, not library-wide. */
