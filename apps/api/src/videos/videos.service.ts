@@ -128,6 +128,20 @@ export class VideosService {
   }
 
   /**
+   * A video by its slug, which is how it is addressed now that it has a page of
+   * its own rather than one borrowed from a collection.
+   */
+  async findBySlug(slug: string, role: Role) {
+    const video = await this.prisma.video.findFirst({
+      where: { slug, ...whereVisible(role) },
+      select: VIDEO_SELECT,
+    });
+    if (!video) throw new NotFoundException('No such video');
+
+    return this.withChecklist(video, role);
+  }
+
+  /**
    * Edits the video itself, and only that.
    *
    * Which collections it belongs to, which season, and in what order are facts

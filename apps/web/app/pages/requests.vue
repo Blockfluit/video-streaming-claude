@@ -72,7 +72,7 @@ function matchPath(match: RequestView['libraryMatch']): string | null {
 
   return match.kind === 'collection'
     ? collectionPath(match)
-    : watchPath({ slug: match.slug, collection: match.collection, season: match.season })
+    : watchPath({ slug: match.slug })
 }
 
 async function submit() {

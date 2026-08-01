@@ -8,31 +8,29 @@ describe('collectionPath', () => {
   })
 })
 
+/**
+ * A video is addressed on its own now.
+ *
+ * These used to be about assembling `/c/<collection>/<season>/<video>` without
+ * dropping a segment — an absent season interpolated as an empty one gives
+ * `/c/films//the-film`, a different route and a 404. That whole class of
+ * mistake is gone with the shape: there is one segment, and it is the video's.
+ */
 describe('watchPath', () => {
-  it('includes the season when there is one', () => {
-    expect(
-      watchPath({ slug: 'pilot', collection: { slug: 'the-show' }, season: { slug: 'season-1' } }),
-    ).toBe('/c/the-show/season-1/pilot')
+  it('points at the video\'s own page', () => {
+    expect(watchPath({ slug: 'the-film' })).toBe('/v/the-film')
   })
 
-  // A film sits directly in its collection, with no season in between.
-  it('omits the season when there is none', () => {
-    expect(watchPath({ slug: 'the-film', collection: { slug: 'films' }, season: null })).toBe(
-      '/c/films/the-film',
-    )
+  it('never leaves an empty segment behind', () => {
+    expect(watchPath({ slug: 'the-film' })).not.toContain('//')
   })
 
   /**
-   * The failure this exists to prevent: an absent season interpolated as an
-   * empty segment gives `/c/films//the-film`, which is a different route and a
-   * 404.
+   * The reason the return type is no longer nullable. A video with no
+   * collection used to have no link at all; it is now the ordinary case of a
+   * standalone film, and it has a page like everything else.
    */
-  it('never leaves an empty segment behind', () => {
-    expect(watchPath({ slug: 'the-film', collection: { slug: 'films' } })).not.toContain('//')
-  })
-
-  it('has no link to offer when the collection did not come along', () => {
-    expect(watchPath({ slug: 'orphan' })).toBeNull()
-    expect(watchPath({ slug: 'orphan', collection: null })).toBeNull()
+  it('has a link for a video that belongs to no collection', () => {
+    expect(watchPath({ slug: 'orphan' })).toBe('/v/orphan')
   })
 })

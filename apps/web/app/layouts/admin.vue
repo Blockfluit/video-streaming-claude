@@ -17,6 +17,7 @@ const sections = [
   { label: 'Library', to: '/admin/library', icon: 'i-lucide-library' },
   { label: 'Upload', to: '/admin/upload', icon: 'i-lucide-upload' },
   { label: 'Jobs', to: '/admin/jobs', icon: 'i-lucide-cpu' },
+  { label: 'Media', to: '/admin/media', icon: 'i-lucide-hard-drive' },
   { label: 'Ingest', to: '/admin/ingest', icon: 'i-lucide-folder-sync' },
   { label: 'Curated rows', to: '/admin/lists', icon: 'i-lucide-rows-3' },
   { label: 'Comments', to: '/admin/comments', icon: 'i-lucide-message-square' },
