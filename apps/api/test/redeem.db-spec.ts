@@ -381,6 +381,34 @@ describe('Bootstrap and invites (real database)', () => {
 
       expect(row.state).toBe('REDEEMED');
       expect(row.redeemedUser.displayName).toBe('Grace');
+      // The username as well as the display name: only the username is unique,
+      // so it is the only thing that can name the account unambiguously. This
+      // row is the one place both halves of `normaliseUsername()` are on the
+      // wire together — typed as `Grace`, stored and served as `grace`.
+      expect(row.redeemedUser.username).toBe('grace');
+      expect(row.createdBy.username).toBe('ada');
+    });
+
+    it('honours an explicit expiry', async () => {
+      const agent = await adminAgent();
+
+      const before = Date.now();
+      const { body } = await agent.post('/admin/invites').send({ expiresInHours: 24 }).expect(201);
+      const after = Date.now();
+
+      // A window rather than an instant — the request takes real time, and the
+      // clock is read inside the service.
+      const expiresAt = new Date(body.expiresAt).getTime();
+      expect(expiresAt).toBeGreaterThanOrEqual(before + 24 * 3_600_000);
+      expect(expiresAt).toBeLessThanOrEqual(after + 24 * 3_600_000);
+    });
+
+    it('refuses an expiry past the cap', async () => {
+      const agent = await adminAgent();
+
+      // The bound is the only thing standing between an invite and a permanent
+      // way in, and this library has no other front door.
+      await agent.post('/admin/invites').send({ expiresInHours: 2161 }).expect(400);
     });
 
     describe('role enforcement', () => {

@@ -56,3 +56,65 @@ export function progressPercent(
 
   return Math.min(100, Math.max(0, (positionSec / durationSec) * 100))
 }
+
+/**
+ * Dates, with the locale **and the time zone** pinned.
+ *
+ * Both matter, and the time zone is the one that bites. Every page here renders
+ * once in Nitro and again in the browser; `toLocaleDateString()` reads whatever
+ * the ambient locale and `TZ` happen to be in each. Differ by an hour and an
+ * evening timestamp lands on two different days, which is a hydration mismatch —
+ * and Vue's answer to one is to discard the server-rendered subtree.
+ *
+ * UTC is the right zone for an audit surface. It costs an admin two hours ahead
+ * a near-midnight event showing on the previous day, and buys that two admins in
+ * two zones reading the same row describe the same thing.
+ *
+ * Hoisted to module scope because building an `Intl.DateTimeFormat` is the
+ * expensive part of `Intl`, and these render once per table cell.
+ *
+ * `en-GB` gives `1 Aug 2026` rather than `8/1/2026` — on a screen whose whole
+ * job is *when did this happen*, a format that reads as either the 1st of August
+ * or the 8th of January is worse than useless. A small-ICU Node build carries
+ * only `en-US` and would quietly resolve `en-GB` to it; the unit tests pin the
+ * exact output string, so that fails in CI rather than in someone's browser.
+ */
+const SHORT_DATE = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: 'UTC',
+})
+
+/** `null` rather than `Invalid Date`, so a caller can `?? '—'`. */
+function parse(value: string | Date | null | undefined): Date | null {
+  if (value === null || value === undefined) return null
+
+  const date = value instanceof Date ? value : new Date(value)
+
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/** A day, for a table cell: `1 Aug 2026`. */
+export function shortDate(value: string | Date | null | undefined): string | null {
+  const date = parse(value)
+
+  return date === null ? null : SHORT_DATE.format(date)
+}
+
+/** A day and a 24-hour clock: `1 Aug 2026, 14:32`. */
+export function dateTime(value: string | Date | null | undefined): string | null {
+  const date = parse(value)
+
+  return date === null ? null : DATE_TIME.format(date)
+}

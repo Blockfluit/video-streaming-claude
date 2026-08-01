@@ -6,6 +6,7 @@ import {
   removeSeasonWithFolder,
   test,
   toast,
+  USERNAME,
   visit,
 } from './fixtures'
 
@@ -433,9 +434,116 @@ test.describe('admin', () => {
     await expect(token).toBeVisible()
     expect((await token.innerText()).length).toBeGreaterThan(20)
 
+    // The same secret as something sendable. The link carries the token to
+    // /setup, which prefills it — that pairing is asserted below.
+    const link = page.getByRole('link', { name: /\/setup\?token=/ })
+    await expect(link).toBeVisible()
+    expect(await link.getAttribute('href')).toContain(`/setup?token=${await token.innerText()}`)
+
     // Held in memory only — a reload must not show it again.
     await page.reload()
     await expect(page.getByText('Copy this now')).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /\/setup\?token=/ })).toHaveCount(0)
+  })
+
+  test('clicking a column header sorts by it, and again reverses it', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    const table = page.getByRole('table', { name: 'Invites' })
+    const kind = table.getByRole('columnheader', { name: 'Kind' })
+    const kindCells = table.locator('tbody tr td:first-child')
+
+    // The API sends newest-created first, and the page keeps that.
+    await expect(table.getByRole('columnheader', { name: 'Created' }))
+      .toHaveAttribute('aria-sort', 'descending')
+
+    await kind.getByRole('button').click()
+    await expect(kind).toHaveAttribute('aria-sort', 'ascending')
+    const ascending = await kindCells.allInnerTexts()
+    expect(ascending).toEqual([...ascending].sort())
+
+    await kind.getByRole('button').click()
+    await expect(kind).toHaveAttribute('aria-sort', 'descending')
+    // Compared against the same values sorted the other way, not against the
+    // reversed array: ties break on `id` ascending in *both* directions, so a
+    // straight reversal is not what a descending sort produces.
+    const descending = await kindCells.allInnerTexts()
+    expect(descending).toEqual([...ascending].sort((a, b) => b.localeCompare(a)))
+
+    // One column sorted at a time — the previous one goes back to neutral.
+    await expect(table.getByRole('columnheader', { name: 'Created' }))
+      .toHaveAttribute('aria-sort', 'none')
+  })
+
+  test('the invite table header stays put while the list scrolls', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    const scroller = page.locator('div', { has: page.getByRole('table', { name: 'Invites' }) }).last()
+    const heading = page.getByRole('table', { name: 'Invites' }).getByRole('columnheader', { name: 'Kind' })
+
+    const before = await heading.boundingBox()
+    await scroller.evaluate(node => node.scrollBy(0, 400))
+    // A header that scrolls away leaves the viewport; a sticky one does not
+    // move at all, which is the difference worth asserting.
+    await expect(async () => {
+      const after = await heading.boundingBox()
+      expect(after?.y).toBeCloseTo(before?.y ?? 0, 0)
+    }).toPass()
+  })
+
+  test('the invite list names who minted a token and what state it is in', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    await expectsRequest(page, /\/admin\/invites$/, 'POST', () =>
+      page.getByRole('button', { name: 'Mint a token' }).click())
+
+    // Newest first (createdAt desc, id desc), so this run's mint is row one.
+    const row = page.getByRole('table', { name: 'Invites' }).locator('tbody tr').first()
+
+    await expect(row).toContainText('INVITE')
+    await expect(row).toContainText('VALID')
+    await expect(row).toContainText('expires')
+    // The username rather than the display name: it is the unique one, and it
+    // is the half that only arrives if the API's sub-select asked for it.
+    await expect(row).toContainText(USERNAME)
+  })
+
+  test('revoking an invite asks first, and kills it on confirmation', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    // Non-default values, so the row proves the form actually sends them
+    // rather than the API's own defaults happening to match.
+    await page.getByRole('combobox', { name: 'How long the invite lasts' }).click()
+    await page.getByRole('option', { name: '24 hours' }).click()
+    await page.getByRole('combobox', { name: 'Role the invite grants' }).click()
+    await page.getByRole('option', { name: 'Admin' }).click()
+
+    await expectsRequest(page, /\/admin\/invites$/, 'POST', () =>
+      page.getByRole('button', { name: 'Mint a token' }).click())
+
+    const row = page.getByRole('table', { name: 'Invites' }).locator('tbody tr').first()
+    await expect(row).toContainText('ADMIN')
+    await expect(row).toContainText('VALID')
+
+    // Backing out leaves the token live.
+    await row.getByRole('button', { name: /^Revoke invite/ }).click()
+    await expect(page.getByText('This invite can still be used')).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    // A closing dialog's overlay still swallows pointer events, so the next
+    // click lands on nothing and the request never fires.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(row).toContainText('VALID')
+
+    // Unlike the season delete, this one is safe to finish: it revokes a token
+    // this test minted a moment ago and nothing leaves the disk.
+    await row.getByRole('button', { name: /^Revoke invite/ }).click()
+    await expectsRequest(page, /\/admin\/invites\//, 'DELETE', () =>
+      page.getByRole('button', { name: 'Revoke this invite' }).click())
+
+    await toast(page, 'Invite revoked')
+    await expect(row).toContainText('REVOKED')
+    await expect(row).toContainText('revoked')
+    await expect(row.getByRole('button', { name: /^Revoke invite/ })).toHaveCount(0)
   })
 
   test('the last admin cannot be demoted', async ({ page }) => {
@@ -476,5 +584,29 @@ test.describe('admin', () => {
     if (await blocked.count() > 0) {
       await expect(blocked.first().getByRole('checkbox')).toBeDisabled()
     }
+  })
+})
+
+/**
+ * The receiving end of an invite link.
+ *
+ * Signed out on purpose: `auth.global.ts` bounces an authenticated visitor off
+ * `/setup` to the home page, so the shared `storageState` would never reach the
+ * page under test.
+ */
+test.describe('redeeming by link', () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test('the token in the URL arrives in the form', async ({ page }) => {
+    await visit(page, '/setup?token=not-a-real-token-just-a-string')
+
+    await expect(page.getByRole('textbox', { name: 'Token' }))
+      .toHaveValue('not-a-real-token-just-a-string')
+  })
+
+  test('the field is still empty and usable without a link', async ({ page }) => {
+    await visit(page, '/setup')
+
+    await expect(page.getByRole('textbox', { name: 'Token' })).toHaveValue('')
   })
 })

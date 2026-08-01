@@ -58,7 +58,7 @@ useHead({ title: 'Ingest' })
         <p class="text-sm text-(--ui-text-muted)">
           Watcher {{ status?.watching ? 'running' : 'off' }}
           <template v-if="status?.lastRunAt">
-            · last scan {{ new Date(status.lastRunAt).toLocaleString() }}
+            · last scan {{ dateTime(status.lastRunAt) }}
           </template>
         </p>
       </div>

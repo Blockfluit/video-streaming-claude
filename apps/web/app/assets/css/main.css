@@ -63,6 +63,55 @@ html {
    * Not visible in headless Chromium, which uses overlay scrollbars of width 0.
    */
   scrollbar-gutter: stable;
+
+  /*
+   * The scrollbar, in the palette rather than the operating system's.
+   *
+   * A stock scrollbar on this background is a bright grey slab: it is the
+   * lightest thing on a near-black page that is not artwork, so the eye goes to
+   * the chrome instead of the shelves.
+   *
+   * Both properties are **inherited**, so declaring them here reaches every
+   * scroll container in the app — including the ones Reka UI teleports to
+   * `<body>`, which no descendant selector would have caught.
+   *
+   * The thumb is `--ui-border-accented` for the same reason a control's edge
+   * is: a scrollbar bounds something, so it answers to the 3:1 floor for
+   * non-text contrast, not to whatever looks tasteful. The track is transparent
+   * so the gutter above stays a strip of page rather than a visible channel.
+   */
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-border-accented) transparent;
+}
+
+/*
+ * The same again for browsers without the standard properties — Chromium below
+ * 121 and Safari below 18.2. Where both are understood the standard ones win
+ * and these are ignored, which is why the colours have to agree.
+ *
+ * `.no-scrollbar` (the shelves) stays hidden: its own rules are more specific
+ * than these, and an explicit `scrollbar-width: none` beats an inherited value.
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  /* Drawn inside a transparent border so the thumb reads as a floating pill
+     rather than a bar welded to the edge of the pane. */
+  background-color: var(--ui-border-accented);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ui-text-dimmed);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,

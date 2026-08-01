@@ -20,9 +20,19 @@ const INVITE_SELECT = {
   redeemedAt: true,
   revokedAt: true,
   createdAt: true,
-  createdBy: { select: { id: true, displayName: true } },
-  redeemedUser: { select: { id: true, displayName: true } },
+  // `username` as well as `displayName`: only the username is unique, so it is
+  // the only thing that can tell two people with the same display name apart in
+  // the admin list.
+  createdBy: { select: { id: true, displayName: true, username: true } },
+  redeemedUser: { select: { id: true, displayName: true, username: true } },
 } as const;
+
+/** Whoever minted a token, or whoever spent it. */
+interface InvitePerson {
+  id: string;
+  displayName: string;
+  username: string;
+}
 
 export interface InviteView {
   id: string;
@@ -33,8 +43,8 @@ export interface InviteView {
   redeemedAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
-  createdBy: { id: string; displayName: string } | null;
-  redeemedUser: { id: string; displayName: string } | null;
+  createdBy: InvitePerson | null;
+  redeemedUser: InvitePerson | null;
 }
 
 /** A freshly minted invite. `token` is the only time the plaintext ever exists outside the minter's screen. */

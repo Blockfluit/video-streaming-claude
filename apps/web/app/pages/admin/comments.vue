@@ -73,10 +73,6 @@ async function remove(comment: ModeratedComment) {
   }
 }
 
-function when(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
 useHead({ title: 'Comments' })
 </script>
 
@@ -110,7 +106,7 @@ useHead({ title: 'Comments' })
       >
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="font-medium">{{ comment.user?.displayName ?? 'Removed' }}</span>
-          <span class="text-(--ui-text-dimmed)">{{ when(comment.createdAt) }}</span>
+          <span class="text-(--ui-text-dimmed)">{{ dateTime(comment.createdAt) }}</span>
 
           <NuxtLink
             v-if="comment.video"
