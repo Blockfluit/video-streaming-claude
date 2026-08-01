@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
 import { scanMediaRoot, type ScannedFile } from './media-scanner';
 import type { SeasonInfo } from './path-parser';
+import { itemFolderKey } from './structure';
 import { matchSubtitles, type SubtitleCandidate, type VideoCandidate } from './subtitle-matcher';
 
 /**
@@ -191,7 +192,7 @@ export class ReconcileService {
       if (file.parsed.kind === 'video' && file.parsed.season?.needsReview) {
         seenIssues.push({
           kind: 'UNREADABLE_SEASON',
-          path: `${file.parsed.collectionFolder}/${file.parsed.season.folder}`,
+          path: `${itemFolderKey(file.parsed)}/${file.parsed.season.folder}`,
           detail: `Could not read a season number from "${file.parsed.season.folder}"`,
         });
       }
@@ -335,7 +336,7 @@ export class ReconcileService {
   private async applyMove(id: string, file: ScannedFile, contentTag: string): Promise<void> {
     if (file.parsed.kind !== 'video') return;
 
-    const { collectionId, seasonId } = await this.ensureParents(file.parsed.collectionFolder, file.parsed.season);
+    const { collectionId, seasonId } = await this.ensureParents(itemFolderKey(file.parsed), file.parsed.season);
 
     // The row id survives, and with it every comment, progress row and
     // watchlist entry pointing at this video. That is the whole point of
@@ -360,7 +361,7 @@ export class ReconcileService {
   private async createDraft(file: ScannedFile, contentTag: string): Promise<string | null> {
     if (file.parsed.kind !== 'video') return null;
 
-    const { collectionId, seasonId } = await this.ensureParents(file.parsed.collectionFolder, file.parsed.season);
+    const { collectionId, seasonId } = await this.ensureParents(itemFolderKey(file.parsed), file.parsed.season);
 
     const slug = await this.freeVideoSlug(collectionId, slugify(file.parsed.title));
 
