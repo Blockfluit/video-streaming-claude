@@ -6,6 +6,7 @@ import {
   removeSeasonWithFolder,
   test,
   toast,
+  USERNAME,
   visit,
 } from './fixtures'
 
@@ -436,6 +437,61 @@ test.describe('admin', () => {
     // Held in memory only — a reload must not show it again.
     await page.reload()
     await expect(page.getByText('Copy this now')).toHaveCount(0)
+  })
+
+  test('the invite list names who minted a token and what state it is in', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    await expectsRequest(page, /\/admin\/invites$/, 'POST', () =>
+      page.getByRole('button', { name: 'Mint a token' }).click())
+
+    // Newest first (createdAt desc, id desc), so this run's mint is row one.
+    const row = page.getByRole('table', { name: 'Invites' }).locator('tbody tr').first()
+
+    await expect(row).toContainText('INVITE')
+    await expect(row).toContainText('VALID')
+    await expect(row).toContainText('expires')
+    // The username rather than the display name: it is the unique one, and it
+    // is the half that only arrives if the API's sub-select asked for it.
+    await expect(row).toContainText(USERNAME)
+  })
+
+  test('revoking an invite asks first, and kills it on confirmation', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    // Non-default values, so the row proves the form actually sends them
+    // rather than the API's own defaults happening to match.
+    await page.getByRole('combobox', { name: 'How long the invite lasts' }).click()
+    await page.getByRole('option', { name: '24 hours' }).click()
+    await page.getByRole('combobox', { name: 'Role the invite grants' }).click()
+    await page.getByRole('option', { name: 'Admin' }).click()
+
+    await expectsRequest(page, /\/admin\/invites$/, 'POST', () =>
+      page.getByRole('button', { name: 'Mint a token' }).click())
+
+    const row = page.getByRole('table', { name: 'Invites' }).locator('tbody tr').first()
+    await expect(row).toContainText('ADMIN')
+    await expect(row).toContainText('VALID')
+
+    // Backing out leaves the token live.
+    await row.getByRole('button', { name: /^Revoke invite/ }).click()
+    await expect(page.getByText('This invite can still be used')).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    // A closing dialog's overlay still swallows pointer events, so the next
+    // click lands on nothing and the request never fires.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(row).toContainText('VALID')
+
+    // Unlike the season delete, this one is safe to finish: it revokes a token
+    // this test minted a moment ago and nothing leaves the disk.
+    await row.getByRole('button', { name: /^Revoke invite/ }).click()
+    await expectsRequest(page, /\/admin\/invites\//, 'DELETE', () =>
+      page.getByRole('button', { name: 'Revoke this invite' }).click())
+
+    await toast(page, 'Invite revoked')
+    await expect(row).toContainText('REVOKED')
+    await expect(row).toContainText('revoked')
+    await expect(row.getByRole('button', { name: /^Revoke invite/ })).toHaveCount(0)
   })
 
   test('the last admin cannot be demoted', async ({ page }) => {
