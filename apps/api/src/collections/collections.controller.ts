@@ -153,7 +153,7 @@ export class CollectionsController {
 
   @Get(':slug')
   findOne(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
-    return this.collections.findBySlug(slug, user.role);
+    return this.collections.findBySlug(slug, user.role, user.id);
   }
 
   @Patch(':id')

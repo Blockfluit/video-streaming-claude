@@ -200,35 +200,26 @@ async function removeSeason(season: Season, deleteFiles: boolean) {
  * reappear a round trip later. The server is then told, and a failure puts the
  * list back.
  */
-interface Group { season: Season | null, videos: VideoRow[] }
+type Group = SeasonGroup<Season, VideoRow>
 
 const groups = ref<Group[]>([])
 
+/**
+ * Held in a ref rather than computed straight off the fetch so a drag can
+ * rearrange it immediately, and grouped by the shared helper the viewer's
+ * collection overview also uses — two copies of "which episode belongs where,
+ * and in what order" is how one screen ends up numbering episodes differently
+ * from the other.
+ *
+ * `includeEmptyLoose` because this screen needs the "not in a season" bucket as
+ * a drop target even when it is empty: you cannot drop onto something absent.
+ * The viewer wants the opposite and passes nothing.
+ */
 function regroup(): void {
   const detail = collection.value
-  if (!detail) {
-    groups.value = []
-    return
-  }
-
-  const ordered = (list: VideoRow[]) =>
-    [...list].sort(
-      (a, b) =>
-        // A null orderIndex means "ingest could not tell" and sorts last;
-        // treating it as zero would put an unnumbered extra ahead of episode one.
-        (a.orderIndex ?? Number.POSITIVE_INFINITY) - (b.orderIndex ?? Number.POSITIVE_INFINITY)
-        || a.title.localeCompare(b.title),
-    )
-
-  const bySeason: Group[] = detail.seasons.map(season => ({
-    season,
-    videos: ordered(detail.videos.filter(v => v.seasonId === season.id)),
-  }))
-
-  // Always present, even when empty — it is a drop target for pulling an
-  // episode back out of a season, and you cannot drop onto something absent.
-  bySeason.push({ season: null, videos: ordered(detail.videos.filter(v => v.seasonId === null)) })
-  groups.value = bySeason
+  groups.value = detail
+    ? groupVideosBySeason(detail.seasons, detail.videos, { includeEmptyLoose: true })
+    : []
 }
 
 watch(collection, regroup, { immediate: true })
@@ -316,12 +307,6 @@ async function commit(group: Group) {
     // server does not have.
     regroup()
   }
-}
-
-function seasonLabel(season: Season | null): string {
-  if (!season) return 'Not in a season'
-  if (season.title) return season.title
-  return season.number === null ? 'Unnumbered season' : `Season ${season.number}`
 }
 
 /** Seconds as something a person reads at a glance. */

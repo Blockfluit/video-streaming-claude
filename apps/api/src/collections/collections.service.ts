@@ -18,6 +18,7 @@ import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import type { Role } from '../prisma/generated/enums';
 import { bannerKeyFor } from '../common/image-uploads';
+import { nextEpisode } from '../watchlist/next-episode';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -91,7 +92,11 @@ export class CollectionsService {
    * collection — a published collection can hold draft videos, and a USER must
    * not see them.
    */
-  async findBySlug(slug: string, role: Role) {
+  /**
+   * `userId` is what makes `next` personal; it is nullable so the shape stays
+   * usable from anywhere that has no caller in hand.
+   */
+  async findBySlug(slug: string, role: Role, userId: string | null = null) {
     const collection = await this.prisma.collection.findFirst({
       where: { slug, ...whereVisible(role) },
       select: {
@@ -133,16 +138,53 @@ export class CollectionsService {
     if (!collection) throw new NotFoundException('No such collection');
 
     const videosTruncated = collection.videos.length > MAX_EMBEDDED_VIDEOS;
+    const videos = videosTruncated
+      ? collection.videos.slice(0, MAX_EMBEDDED_VIDEOS)
+      : collection.videos;
 
     return this.withChecklist(
       {
         ...collection,
-        videos: videosTruncated ? collection.videos.slice(0, MAX_EMBEDDED_VIDEOS) : collection.videos,
+        videos,
         // Says so out loud rather than quietly returning a partial list: the UI
         // can point at `GET /videos?collectionId=…` for the rest.
         videosTruncated,
+        next: await this.nextFor(videos, userId),
       },
       role,
+    );
+  }
+
+  /**
+   * Which episode the overview's Play button offers.
+   *
+   * Reuses the pure `nextEpisode` the home page's saved-collection cards
+   * already go through, rather than re-deriving "which one is next" on the
+   * client. That rule has an edge at each end — nothing watched, everything
+   * watched — and it knows that a null `orderIndex` sorts last and that
+   * finishing a later episode must not skip an earlier unfinished one. A
+   * second implementation would drift, and the drift would look like the page
+   * merely offering the wrong episode.
+   *
+   * Computed over the **embedded** list, so on a truncated collection it is the
+   * next episode of the first `MAX_EMBEDDED_VIDEOS`. Acceptable because the
+   * truncation is reported in the same response.
+   */
+  private async nextFor(
+    videos: { id: string; orderIndex: number | null }[],
+    userId: string | null,
+  ): Promise<ReturnType<typeof nextEpisode> | null> {
+    // Nothing to offer, and no reason to ask the database.
+    if (videos.length === 0 || !userId) return nextEpisode(videos, new Map());
+
+    const progress = await this.prisma.watchProgress.findMany({
+      where: { userId, videoId: { in: videos.map((video) => video.id) } },
+      select: { videoId: true, completed: true, lastPositionSec: true },
+    });
+
+    return nextEpisode(
+      videos,
+      new Map(progress.map((row) => [row.videoId, row])),
     );
   }
 

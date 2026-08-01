@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Page } from '@video/shared'
+import { trailerYoutubeIdFor, type Page } from '@video/shared'
 
 /**
  * The home page: a hero, then Continue Watching, My List, and whatever rows an
@@ -18,7 +18,20 @@ interface CardVideo {
   durationSec: number | null
   width?: number | null
   height?: number | null
-  collection: { slug: string, title: string } | null
+  /** Only the hero reads these; a card renders its thumbnail. */
+  thumbnailKey?: string | null
+  bannerKey?: string | null
+  trailerYoutubeId?: string | null
+  collection:
+    | {
+      id: string
+      slug: string
+      title: string
+      posterKey?: string | null
+      bannerKey?: string | null
+      trailerYoutubeId?: string | null
+    }
+    | null
   season: { slug: string } | null
 }
 
@@ -51,6 +64,9 @@ interface FeaturedCollection {
   title: string
   description: string | null
   year: number | null
+  posterKey: string | null
+  bannerKey: string | null
+  trailerYoutubeId: string | null
 }
 
 const [{ data: history }, { data: watchlist }, { data: rows }, { data: collections }] = await Promise.all([
@@ -78,8 +94,10 @@ const hero = computed(() => {
       title: resuming.video.title,
       meta: resuming.video.collection?.title ?? null,
       description: resuming.video.description ?? null,
-      to: overviewPath(resuming.video) ?? '/browse',
-      image: `/api/videos/${resuming.video.id}/thumbnail`,
+      // Already started, so this one resumes rather than explaining itself.
+      to: playPath(resuming.video) ?? '/browse',
+      image: videoHeroImage(resuming.video, resuming.video.collection),
+      trailerYoutubeId: trailerYoutubeIdFor(resuming.video, resuming.video.collection),
       resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
     }
   }
@@ -93,7 +111,8 @@ const hero = computed(() => {
     meta: featured.year ? String(featured.year) : null,
     description: featured.description,
     to: collectionPath(featured),
-    image: `/api/collections/${featured.id}/poster`,
+    image: collectionHeroImage(featured),
+    trailerYoutubeId: featured.trailerYoutubeId ?? null,
     resume: 0,
   }
 })
@@ -109,9 +128,10 @@ const isEmpty = computed(
 function card(entry: { video: CardVideo | null, collection: SavedItem['collection'], next?: SavedItem['next'] }) {
   if (entry.collection) {
     return {
-      // A saved show points at the episode it would play next, resolved
-      // server-side against this viewer's progress.
-      to: (entry.next ? overviewPath(entry.next.video) : null) ?? collectionPath(entry.collection),
+      // The collection, not its next episode. The overview carries a Resume
+      // button built from the same server-resolved `next`, so getting back in
+      // is still one click — via a page that says what you are about to watch.
+      to: collectionPath(entry.collection),
       title: entry.collection.title,
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
       imageUrl: `/api/collections/${entry.collection.id}/poster`,
@@ -136,56 +156,22 @@ useHead({ title: 'Home' })
 
 <template>
   <div>
-    <!-- Full-bleed, and it runs under the transparent header on purpose. -->
-    <section v-if="hero" class="relative h-[58vh] min-h-100 w-full overflow-hidden">
-      <img :src="hero.image" alt="" class="size-full object-cover">
-      <!--
-        Three scrims, written as real gradients rather than utilities so they
-        interpolate to `--ui-bg` itself. The first pass hardcoded #08080a, so
-        when the page background moved the fade stopped landing on it and the
-        artwork ended on a visible horizontal seam.
-
-        Bottom fade is half the hero rather than a fixed 10rem: on a short
-        viewport a fixed height leaves the seam above the fold, which is
-        exactly where it is most obvious.
-      -->
-      <div
-        class="absolute inset-0"
-        style="background: linear-gradient(to right, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 78%, transparent) 42%, transparent 72%)"
-      />
-      <div
-        class="absolute inset-x-0 bottom-0 h-1/2"
-        style="background: linear-gradient(to top, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 55%, transparent) 55%, transparent 100%)"
-      />
-
-      <div class="absolute inset-0 flex items-center">
-        <div class="page-shell">
-          <div class="rise max-w-xl space-y-4">
-            <!--
-              The eyebrow is set in muted text with a red rule beside it rather
-              than in red type. Red on near-black passes WCAG and still reads
-              poorly at 12px, which is the whole reason this pass exists.
-            -->
-            <p class="flex items-center gap-2 text-xs font-semibold tracking-[0.2em] text-(--ui-text-muted) uppercase">
-              <span aria-hidden="true" class="h-3 w-0.5 rounded-full bg-(--ui-primary)" />
-              {{ hero.eyebrow }}
-            </p>
-            <h1 class="text-4xl font-bold tracking-tight text-white sm:text-6xl">{{ hero.title }}</h1>
-            <p v-if="hero.meta" class="text-sm text-(--ui-text-muted)">{{ hero.meta }}</p>
-            <p v-if="hero.description" class="line-clamp-3 text-(--ui-text-muted)">{{ hero.description }}</p>
-
-            <div class="flex items-center gap-3 pt-2">
-              <UButton :to="hero.to" size="lg" icon="i-lucide-play" class="font-semibold">
-                {{ hero.resume ? 'Resume' : 'Play' }}
-              </UButton>
-              <div v-if="hero.resume" class="h-1 w-40 overflow-hidden rounded-full bg-white/20">
-                <div class="h-full bg-(--ui-primary)" :style="{ width: `${hero.resume}%` }" />
-              </div>
-            </div>
-          </div>
-        </div>
+    <TrailerHero
+      v-if="hero"
+      :title="hero.title"
+      :eyebrow="hero.eyebrow"
+      :meta="hero.meta"
+      :description="hero.description"
+      :image-url="hero.image"
+      :trailer-youtube-id="hero.trailerYoutubeId"
+    >
+      <UButton :to="hero.to" size="lg" icon="i-lucide-play" class="font-semibold">
+        {{ hero.resume ? 'Resume' : 'Play' }}
+      </UButton>
+      <div v-if="hero.resume" class="h-1 w-40 overflow-hidden rounded-full bg-white/20">
+        <div class="h-full bg-(--ui-primary)" :style="{ width: `${hero.resume}%` }" />
       </div>
-    </section>
+    </TrailerHero>
 
     <div
       class="page-shell space-y-8 pb-24"
@@ -201,7 +187,7 @@ useHead({ title: 'Home' })
           v-for="item in continueWatching"
           :key="item.video.id"
           class="w-56 sm:w-64"
-          :to="overviewPath(item.video) ?? '/browse'"
+          :to="playPath(item.video) ?? '/browse'"
           :title="item.video.title"
           :subtitle="item.video.collection?.title"
           :image-url="`/api/videos/${item.video.id}/thumbnail`"

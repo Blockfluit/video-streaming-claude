@@ -39,10 +39,36 @@ export function expectApiRejection(page: object, pattern: RegExp): void {
   allowances.set(page, [...(allowances.get(page) ?? []), pattern])
 }
 
+/**
+ * Hosts the trailer hero embeds from.
+ *
+ * Blocked in every test. Two reasons, and both would otherwise be blamed on
+ * the app: a real embed emits its own telemetry requests, some of which answer
+ * 4xx and would trip the watchdog below on every page carrying a hero; and a
+ * streaming trailer keeps the network busy indefinitely, so `visit()`'s
+ * `networkidle` would never settle and every navigation would time out.
+ *
+ * Fulfilled rather than aborted, so no failed request exists to notice. What
+ * the tests assert is the `<iframe src>` — which is ours — rather than whether
+ * Google chose to play something.
+ */
+const THIRD_PARTY_MEDIA = [
+  '**://*.youtube-nocookie.com/**',
+  '**://*.youtube.com/**',
+  '**://*.googlevideo.com/**',
+  '**://*.ytimg.com/**',
+]
+
 export const test = base.extend<{ failOnConsoleError: void }>({
   failOnConsoleError: [
-    async ({ page }, use) => {
+    async ({ page, baseURL }, use) => {
       const problems: string[] = []
+
+      for (const pattern of THIRD_PARTY_MEDIA) {
+        await page.route(pattern, route =>
+          route.fulfill({ status: 200, contentType: 'text/html', body: '' }),
+        )
+      }
 
       // A JS exception is always a failure: it is what a component throwing
       // during hydration looks like, and it leaves the server-rendered markup
@@ -52,6 +78,10 @@ export const test = base.extend<{ failOnConsoleError: void }>({
       page.on('response', (response) => {
         if (response.status() < 400) return
         const url = response.url()
+        // Only our own responses say anything about our own app. A third party
+        // answering 4xx is their business, and letting it fail a test here
+        // makes the suite depend on someone else's uptime.
+        if (baseURL && !url.startsWith(baseURL)) return
         if (ALWAYS_ALLOWED.some(allowed => url.includes(allowed))) return
         if ((allowances.get(page) ?? []).some(pattern => pattern.test(url))) return
         problems.push(`${response.status()} ${url}`)

@@ -197,10 +197,32 @@ test.describe('legibility', () => {
     })
   }
 
+  /**
+   * Split in two when a card stopped opening the player.
+   *
+   * Repointing the old test at the overview would have quietly left the player
+   * — comment box and all — with no contrast audit at all, which is the kind of
+   * gap this file exists to prevent.
+   */
+  test('the overview page too', async ({ page }) => {
+    await visit(page, '/')
+    await page.locator('main a[href^="/c/"]').first().click()
+    await page.waitForURL(/\/c\/.+/)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `overview:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
   test('the player page too', async ({ page }) => {
     await visit(page, '/')
     await page.locator('main a[href^="/c/"]').first().click()
-    await page.waitForURL(/\/c\/.+\/.+/)
+    await page.waitForURL(/\/c\/.+/)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/play=1/)
 
     // Post a comment so its controls are on the page to be judged. Unique per
     // run, or repeated runs pile up identical text and the locator turns

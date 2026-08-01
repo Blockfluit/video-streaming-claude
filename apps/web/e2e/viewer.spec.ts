@@ -29,24 +29,98 @@ async function currentVideoId(page: Page): Promise<string> {
 /** The viewer-facing app: every control a member can press. */
 test.describe('viewer', () => {
 
-  test('the hero play button reaches a player', async ({ page }) => {
+  /**
+   * The hero resumes rather than explaining itself.
+   *
+   * Continue Watching and "Next episode" are the only places that go straight
+   * into the player: someone mid-episode has already seen the overview, and
+   * making them click twice to get back is friction. When nothing has been
+   * watched the hero is the featured collection instead, which opens an
+   * overview — so this accepts either and asserts on where it landed.
+   */
+  test('the hero button reaches a player or a collection overview', async ({ page }) => {
     await visit(page, '/')
-    const hero = page.getByRole('link', { name: /^(Resume|Play)$/ })
+    const hero = page.getByRole('link', { name: /^(Resume|Play)/ })
     await expect(hero).toBeVisible()
 
+    const href = await hero.getAttribute('href') ?? ''
     await hero.click()
     await page.waitForURL(/\/c\//)
-    await expect(page.locator('video')).toBeVisible()
+
+    if (href.includes('play=1')) {
+      await expect(page.locator('video')).toBeVisible()
+    } else {
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    }
   })
 
-  test('a card opens its video', async ({ page }) => {
+  /**
+   * The change this step exists for: a card no longer starts playback. It
+   * opens a page that says what the thing is, and Play is a second, deliberate
+   * click.
+   */
+  test('a card opens the overview, and Play starts the video', async ({ page }) => {
     await visit(page, '/')
     const card = page.locator('main a[href^="/c/"]').first()
     const href = await card.getAttribute('href')
 
     await card.click()
     await page.waitForURL(url => url.pathname === href)
+
+    // The overview, not the player.
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page.locator('video')).toHaveCount(0)
+
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/play=1/)
     await expect(page.locator('video')).toBeVisible()
+  })
+
+  /**
+   * The trailer is created on mount, after a delay, and only when motion is
+   * allowed. The iframe never loads — third-party media is stubbed in
+   * `fixtures.ts` — so what is checked is that we asked for the right thing:
+   * the nocookie host, muted, and looping with the `playlist` YouTube needs to
+   * honour `loop` at all.
+   */
+  test('a trailer fades in over the hero when one is set', async ({ page }) => {
+    const withTrailer = await page.evaluate(async () => {
+      const response = await fetch('/api/collections?limit=100')
+      const items = (await response.json()).items as { slug: string, trailerYoutubeId: string | null }[]
+      return items.find(collection => collection.trailerYoutubeId)?.slug ?? null
+    })
+    // Decided from the data, never from a locator count — `count()` does not
+    // retry, so a skip written that way runs before the page renders and is
+    // therefore always true.
+    test.skip(!withTrailer, 'no collection in this library has a trailer')
+
+    await visit(page, `/c/${withTrailer}`)
+
+    const frame = page.locator('iframe[src*="youtube-nocookie.com/embed/"]')
+    await expect(frame).toBeVisible({ timeout: 15_000 })
+
+    const src = await frame.getAttribute('src') ?? ''
+    expect(src).toContain('mute=1')
+    // `loop=1` alone plays once and stops; the playlist is what makes it loop.
+    expect(src).toContain('loop=1')
+    expect(src).toContain('playlist=')
+  })
+
+  /** The one accessibility rule the feature has, and it must not be advisory. */
+  test('no trailer is created under prefers-reduced-motion', async ({ page }) => {
+    const withTrailer = await page.evaluate(async () => {
+      const response = await fetch('/api/collections?limit=100')
+      const items = (await response.json()).items as { slug: string, trailerYoutubeId: string | null }[]
+      return items.find(collection => collection.trailerYoutubeId)?.slug ?? null
+    })
+    test.skip(!withTrailer, 'no collection in this library has a trailer')
+
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await visit(page, `/c/${withTrailer}`)
+
+    // Comfortably past the 2s delay.
+    await page.waitForTimeout(4000)
+    await expect(page.locator('iframe[src*="youtube"]')).toHaveCount(0)
   })
 
   test('search narrows the browse page and survives a reload', async ({ page }) => {
@@ -68,10 +142,17 @@ test.describe('viewer', () => {
   })
 
   test.describe('on the player page', () => {
+    /*
+     * Two clicks now, not one. A card lands on the overview and Play opens the
+     * player — without the second click every test in this block would look
+     * for a `<video>` on a page that deliberately has none.
+     */
     test.beforeEach(async ({ page }) => {
       await visit(page, '/')
       await page.locator('main a[href^="/c/"]').first().click()
-      await page.waitForURL(/\/c\/.+\/.+/)
+      await page.waitForURL(/\/c\/.+/)
+      await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+      await page.waitForURL(/play=1/)
     })
 
     test('the stream actually loads into the element', async ({ page }) => {
@@ -217,7 +298,11 @@ test.describe('viewer', () => {
       const href = await other.getAttribute('href')
       await other.click()
       await page.waitForURL(url => url.pathname === href)
-      await expect(page.locator('video')).toBeVisible()
+
+      // The sidebar links to overviews now, like every other card in the app —
+      // only Continue Watching and "Next episode" go straight into the player.
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+      await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
     })
   })
 

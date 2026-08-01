@@ -63,12 +63,18 @@ useHead({ title: 'My List' })
       v-if="items.length"
       class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4"
     >
+      <!--
+        A saved show opens its collection rather than deep-linking into the next
+        episode. That page carries a Resume button built from the same
+        server-resolved `next`, so getting back in is still one click — via a
+        screen that says what you are about to watch.
+      -->
       <div v-for="item in items" :key="item.id" class="relative group/item">
         <MediaCard
           class="w-full"
           :to="
             item.collection
-              ? (item.next ? overviewPath(item.next.video) : null) ?? collectionPath(item.collection)
+              ? collectionPath(item.collection)
               : overviewPath(item.video!) ?? '/browse'
           "
           :title="item.collection?.title ?? item.video!.title"
