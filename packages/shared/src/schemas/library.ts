@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { pageQuerySchema } from '../pagination.js';
+import { parseYoutubeId } from '../trailers.js';
 import { booleanParam, idSchema, nonEmptyText, optionalText, tagsSchema, yearSchema } from '../primitives.js';
 
 export const publishStateSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED', 'MISSING']);
@@ -11,6 +12,37 @@ export type PublishState = z.infer<typeof publishStateSchema>;
  * link anyone has shared, so regenerating one is an explicit act.
  */
 const regenerateSlug = z.boolean().optional();
+
+/**
+ * A trailer, on the wire.
+ *
+ * Accepts a YouTube URL or a bare id and stores the **id**, so pasting straight
+ * from the address bar works and the column never holds a host that might
+ * change. Omitting the field leaves it alone; `null` or an empty string clears
+ * it, which is how a form reports a field someone emptied.
+ *
+ * Anything that is not a YouTube video is a 400 rather than a stored string.
+ * An unparseable id fails only when the embed renders — on a viewer's screen,
+ * far from whoever typed it, and looking like a broken page rather than a
+ * rejected input.
+ */
+const trailerRef = z
+  .string()
+  .trim()
+  .max(500)
+  .nullish()
+  .transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    if (value === null || value.length === 0) return null;
+
+    const id = parseYoutubeId(value);
+    if (id === null) {
+      ctx.addIssue({ code: 'custom', message: 'Not a YouTube video URL or id' });
+      return z.NEVER;
+    }
+
+    return id;
+  });
 
 export const createCollectionSchema = z.object({
   title: nonEmptyText(200),
@@ -31,6 +63,7 @@ export const updateCollectionSchema = z.object({
   year: yearSchema.optional(),
   tags: tagsSchema.optional(),
   posterKey: optionalText(500),
+  trailerYoutubeId: trailerRef,
   regenerateSlug,
 });
 export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;
@@ -82,6 +115,7 @@ export const updateVideoSchema = z.object({
   orderIndex: z.coerce.number().int().min(0).max(100000).optional(),
   /** `null` moves the video out of its season, which is different from omitting the field. */
   seasonId: idSchema.nullable().optional(),
+  trailerYoutubeId: trailerRef,
   regenerateSlug,
 });
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;
@@ -151,6 +185,20 @@ export type CaptureThumbnailInput = z.infer<typeof captureThumbnailSchema>;
 /** Image formats a browser will render as a poster. */
 export const THUMBNAIL_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
 export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The same formats, and a larger cap.
+ *
+ * A banner is a full-bleed backdrop rather than a card-sized still, so a
+ * reasonable 1920-wide PNG clears the 5 MB poster limit easily — and a refusal
+ * quoting the poster's number is a confusing way to learn that.
+ */
+export const BANNER_EXTENSIONS = THUMBNAIL_EXTENSIONS;
+export const MAX_BANNER_BYTES = 10 * 1024 * 1024;
+
+/** Same `{ atSeconds }` shape as a thumbnail capture, named for its own route. */
+export const captureBannerSchema = captureThumbnailSchema;
+export type CaptureBannerInput = z.infer<typeof captureBannerSchema>;
 
 /** A manually uploaded subtitle track. */
 export const uploadSubtitleSchema = z.object({

@@ -138,6 +138,13 @@ model Collection {
   year        Int?
   tags        String[]     @default([])
   posterKey   String?
+  /// Wide hero backdrop for the overview page, in DERIVED_ROOT. A poster is
+  /// 2:3 and is distorted by a full-bleed hero, so this is a separate picture
+  /// rather than the same one cropped. Never a publish requirement.
+  bannerKey   String?
+  /// A YouTube video id (11 chars), never a URL. A video with none of its own
+  /// inherits this, so a show's trailer is set once for every episode.
+  trailerYoutubeId String?
   folderKey   String       @unique // relative folder path
   state       PublishState @default(DRAFT)
   origin      MediaOrigin  @default(INGEST)
@@ -212,6 +219,14 @@ model Video {
 
   thumbnailKey    String?
   thumbnailSource ThumbnailSource @default(AUTO) // MANUAL is never clobbered by a reprobe
+
+  /// Wide hero backdrop for the overview page, in DERIVED_ROOT. There is no
+  /// AUTO/MANUAL twin to thumbnailSource because nothing generates a banner on
+  /// its own — every one is an explicit choice, so there is nothing a reprobe
+  /// could clobber. Never a publish requirement.
+  bannerKey        String?
+  /// A YouTube video id (11 chars), never a URL. Falls back to the collection's.
+  trailerYoutubeId String?
 
   introStartSec Float? // all four markers are independently optional
   introEndSec   Float?

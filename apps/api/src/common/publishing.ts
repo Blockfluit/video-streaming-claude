@@ -10,7 +10,15 @@ import type { PublishState, Role } from '../prisma/generated/enums';
  * at the publish endpoint means the admin UI has to guess what is still needed.
  */
 
-/** What a publishable video must have. Credits, subtitles and markers never appear here. */
+/**
+ * What a publishable video must have. Credits, subtitles and markers never
+ * appear here — and neither do `bannerKey` or `trailerYoutubeId`.
+ *
+ * That is deliberate rather than an oversight. Both arrived after the library
+ * was already full, so requiring either would un-publish every record in one
+ * migration. A hero falls back to the thumbnail and the poster precisely so
+ * that a video without them is still a finished video.
+ */
 export interface VideoPublishFields {
   title: string | null;
   description: string | null;

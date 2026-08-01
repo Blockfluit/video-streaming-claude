@@ -41,6 +41,8 @@ const VIDEO_SELECT = {
   missingSince: true,
   thumbnailKey: true,
   thumbnailSource: true,
+  bannerKey: true,
+  trailerYoutubeId: true,
   introStartSec: true,
   introEndSec: true,
   outroStartSec: true,
@@ -145,6 +147,8 @@ export class VideosService {
         // Explicit null moves the video out of its season, which is different
         // from omitting the field.
         seasonId: dto.seasonId === undefined ? undefined : dto.seasonId,
+        // Same idiom: undefined leaves the trailer alone, null clears it.
+        trailerYoutubeId: dto.trailerYoutubeId,
         slug,
       },
       select: VIDEO_SELECT,

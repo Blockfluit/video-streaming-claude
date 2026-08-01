@@ -180,6 +180,128 @@ describe('Library (real database)', () => {
 
       expect(updated.body.slug).toBe('the-wizarding-world');
     });
+
+    /**
+     * Only the id is stored. The column means "which video", and a URL carries
+     * a host, a playlist and a start offset that have nothing to do with that.
+     */
+    it('stores the bare id when handed a full YouTube URL', async () => {
+      const collection = await createCollection('Dune');
+
+      const updated = await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s' })
+        .expect(200);
+
+      expect(updated.body.trailerYoutubeId).toBe('dQw4w9WgXcQ');
+    });
+
+    it('takes a bare id unchanged', async () => {
+      const collection = await createCollection('Arrival');
+
+      const updated = await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'dQw4w9WgXcQ' })
+        .expect(200);
+
+      expect(updated.body.trailerYoutubeId).toBe('dQw4w9WgXcQ');
+    });
+
+    it('clears the trailer on null, which is what an emptied field sends', async () => {
+      const collection = await createCollection('Solaris');
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'dQw4w9WgXcQ' })
+        .expect(200);
+
+      const cleared = await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: null })
+        .expect(200);
+
+      expect(cleared.body.trailerYoutubeId).toBeNull();
+    });
+
+    it('leaves the trailer alone when the field is omitted', async () => {
+      const collection = await createCollection('Stalker');
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'dQw4w9WgXcQ' })
+        .expect(200);
+
+      const renamed = await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ title: 'Stalker (1979)' })
+        .expect(200);
+
+      expect(renamed.body.trailerYoutubeId).toBe('dQw4w9WgXcQ');
+    });
+
+    /**
+     * Refused here rather than stored and rendered. An unparseable id fails
+     * only when the embed loads — on a viewer's screen, looking like a broken
+     * page rather than a rejected input.
+     */
+    it('refuses something that is not a YouTube video', async () => {
+      const collection = await createCollection('Annihilation');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://vimeo.com/12345' })
+        .expect(400);
+    });
+  });
+
+  describe('a video trailer', () => {
+    it('stores the bare id from a URL, as a collection does', async () => {
+      const collection = await createCollection('Fargo');
+      const video = await seedVideo(collection.id, 'Pilot');
+
+      const updated = await admin
+        .patch(`/videos/${video.id}`)
+        .send({ trailerYoutubeId: 'https://youtu.be/dQw4w9WgXcQ' })
+        .expect(200);
+
+      expect(updated.body.trailerYoutubeId).toBe('dQw4w9WgXcQ');
+    });
+
+    it('refuses rubbish', async () => {
+      const collection = await createCollection('Severance');
+      const video = await seedVideo(collection.id, 'Good News');
+
+      await admin
+        .patch(`/videos/${video.id}`)
+        .send({ trailerYoutubeId: 'not a link' })
+        .expect(400);
+    });
+
+    it('is admin-only', async () => {
+      const collection = await createCollection('Andor');
+      const video = await seedVideo(collection.id, 'Kassa');
+      const user = await asUser();
+
+      await user
+        .patch(`/videos/${video.id}`)
+        .send({ trailerYoutubeId: 'dQw4w9WgXcQ' })
+        .expect(403);
+    });
+  });
+
+  /**
+   * The invariant worth a test of its own: both columns arrived after the
+   * library was full, so requiring either would un-publish every record.
+   */
+  describe('publishing without a trailer or a banner', () => {
+    it('still publishes a video that has neither', async () => {
+      const collection = await createCollection('Chernobyl');
+      const video = await seedVideo(collection.id, '1:23:45', publishable);
+
+      const published = await admin.post(`/videos/${video.id}/publish`).expect(200);
+
+      expect(published.body).toMatchObject({ state: 'PUBLISHED' });
+      expect(published.body.trailerYoutubeId).toBeNull();
+      expect(published.body.bannerKey).toBeNull();
+    });
   });
 
   describe('slug scoping', () => {

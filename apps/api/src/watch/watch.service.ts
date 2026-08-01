@@ -12,20 +12,38 @@ import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { applyBeat, creditedSeconds } from './progress';
 
-/** Enough to render a continue-watching card and link to the player. */
+/**
+ * Enough to render a continue-watching card and link to the player.
+ *
+ * The artwork and trailer columns are here because the home page's hero is the
+ * top continue-watching item, and a hero paints a banner and plays a trailer.
+ * The collection carries its own pair so the hero can fall back to the show's
+ * artwork when a single episode has none of its own.
+ */
 const HISTORY_VIDEO_SELECT = {
   id: true,
   slug: true,
   title: true,
   durationSec: true,
   thumbnailKey: true,
+  bannerKey: true,
+  trailerYoutubeId: true,
   // The quality badge is rendered from these; without them it is dead code
   // on every card the row draws.
   width: true,
   height: true,
   state: true,
   orderIndex: true,
-  collection: { select: { id: true, slug: true, title: true } },
+  collection: {
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      posterKey: true,
+      bannerKey: true,
+      trailerYoutubeId: true,
+    },
+  },
   season: { select: { id: true, slug: true, number: true } },
 } as const;
 

@@ -33,6 +33,8 @@ const VIDEO_DETAIL = {
   width: true,
   height: true,
   thumbnailKey: true,
+  bannerKey: true,
+  trailerYoutubeId: true,
   introStartSec: true,
   introEndSec: true,
   outroStartSec: true,
@@ -46,7 +48,20 @@ export class ResolveService {
   async resolve(collectionSlug: string, path: string, role: Role): Promise<ResolveResult> {
     const collection = await this.prisma.collection.findFirst({
       where: { slug: collectionSlug, ...whereVisible(role) },
-      select: { id: true, slug: true, title: true, description: true, posterKey: true, state: true },
+      // bannerKey and trailerYoutubeId travel with every shape this returns:
+      // a video's overview inherits its collection's trailer when it has none
+      // of its own, and computing that on the client is what keeps it to one
+      // round trip.
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        description: true,
+        posterKey: true,
+        bannerKey: true,
+        trailerYoutubeId: true,
+        state: true,
+      },
     });
     if (!collection) throw new NotFoundException('No such collection');
 
