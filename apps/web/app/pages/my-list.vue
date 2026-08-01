@@ -68,8 +68,8 @@ useHead({ title: 'My List' })
           class="w-full"
           :to="
             item.collection
-              ? (item.next ? watchPath(item.next.video) : null) ?? collectionPath(item.collection)
-              : watchPath(item.video!) ?? '/browse'
+              ? (item.next ? overviewPath(item.next.video) : null) ?? collectionPath(item.collection)
+              : overviewPath(item.video!) ?? '/browse'
           "
           :title="item.collection?.title ?? item.video!.title"
           :subtitle="item.collection ? item.next?.video.title : item.video!.collection?.title"

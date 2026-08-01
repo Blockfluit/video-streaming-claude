@@ -78,7 +78,7 @@ const hero = computed(() => {
       title: resuming.video.title,
       meta: resuming.video.collection?.title ?? null,
       description: resuming.video.description ?? null,
-      to: watchPath(resuming.video) ?? '/browse',
+      to: overviewPath(resuming.video) ?? '/browse',
       image: `/api/videos/${resuming.video.id}/thumbnail`,
       resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
     }
@@ -111,7 +111,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     return {
       // A saved show points at the episode it would play next, resolved
       // server-side against this viewer's progress.
-      to: (entry.next ? watchPath(entry.next.video) : null) ?? collectionPath(entry.collection),
+      to: (entry.next ? overviewPath(entry.next.video) : null) ?? collectionPath(entry.collection),
       title: entry.collection.title,
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
       imageUrl: `/api/collections/${entry.collection.id}/poster`,
@@ -122,7 +122,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
 
   const video = entry.video as CardVideo
   return {
-    to: watchPath(video) ?? '/browse',
+    to: overviewPath(video) ?? '/browse',
     title: video.title,
     subtitle: video.collection?.title ?? null,
     imageUrl: `/api/videos/${video.id}/thumbnail`,
@@ -201,7 +201,7 @@ useHead({ title: 'Home' })
           v-for="item in continueWatching"
           :key="item.video.id"
           class="w-56 sm:w-64"
-          :to="watchPath(item.video) ?? '/browse'"
+          :to="overviewPath(item.video) ?? '/browse'"
           :title="item.video.title"
           :subtitle="item.video.collection?.title"
           :image-url="`/api/videos/${item.video.id}/thumbnail`"

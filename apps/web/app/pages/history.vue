@@ -36,7 +36,7 @@ useHead({ title: 'History' })
 
     <ul v-if="items.length" class="divide-y divide-(--ui-border)">
       <li v-for="item in items" :key="item.video.id" class="py-3 flex items-center gap-4">
-        <NuxtLink :to="watchPath(item.video) ?? '/browse'" class="grow min-w-0">
+        <NuxtLink :to="overviewPath(item.video) ?? '/browse'" class="grow min-w-0">
           <p class="font-medium truncate">{{ item.video.title }}</p>
           <p class="text-sm text-(--ui-text-muted) truncate">
             {{ item.video.collection?.title }}

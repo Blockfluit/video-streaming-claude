@@ -105,7 +105,7 @@ const ordered = computed(() =>
 /** Every in-collection link goes through here, so none of them can forget the season. */
 function linkTo(entry: { slug: string, seasonId?: string | null }): string {
   const seasonSlug = entry.seasonId ? seasonSlugById.value.get(entry.seasonId) : undefined
-  return watchPath({
+  return overviewPath({
     slug: entry.slug,
     collection: { slug: collection.value.slug },
     season: seasonSlug ? { slug: seasonSlug } : null,

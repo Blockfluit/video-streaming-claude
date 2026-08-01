@@ -15,6 +15,7 @@
 export * from './identity.js';
 export * from './pagination.js';
 export * from './quality.js';
+export * from './trailers.js';
 export * from './primitives.js';
 export * from './schemas/accounts.js';
 export * from './schemas/auth.js';

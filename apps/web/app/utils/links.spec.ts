@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { collectionPath, watchPath } from './links'
+import { collectionPath, overviewPath, playPath } from './links'
 
 describe('collectionPath', () => {
   it('points at the collection page', () => {
@@ -8,16 +8,16 @@ describe('collectionPath', () => {
   })
 })
 
-describe('watchPath', () => {
+describe('overviewPath', () => {
   it('includes the season when there is one', () => {
     expect(
-      watchPath({ slug: 'pilot', collection: { slug: 'the-show' }, season: { slug: 'season-1' } }),
+      overviewPath({ slug: 'pilot', collection: { slug: 'the-show' }, season: { slug: 'season-1' } }),
     ).toBe('/c/the-show/season-1/pilot')
   })
 
   // A film sits directly in its collection, with no season in between.
   it('omits the season when there is none', () => {
-    expect(watchPath({ slug: 'the-film', collection: { slug: 'films' }, season: null })).toBe(
+    expect(overviewPath({ slug: 'the-film', collection: { slug: 'films' }, season: null })).toBe(
       '/c/films/the-film',
     )
   })
@@ -28,11 +28,43 @@ describe('watchPath', () => {
    * 404.
    */
   it('never leaves an empty segment behind', () => {
-    expect(watchPath({ slug: 'the-film', collection: { slug: 'films' } })).not.toContain('//')
+    expect(overviewPath({ slug: 'the-film', collection: { slug: 'films' } })).not.toContain('//')
   })
 
   it('has no link to offer when the collection did not come along', () => {
-    expect(watchPath({ slug: 'orphan' })).toBeNull()
-    expect(watchPath({ slug: 'orphan', collection: null })).toBeNull()
+    expect(overviewPath({ slug: 'orphan' })).toBeNull()
+    expect(overviewPath({ slug: 'orphan', collection: null })).toBeNull()
+  })
+
+  /** The overview is the bare URL — sharing one must not drop someone into the player. */
+  it('carries no play query', () => {
+    expect(overviewPath({ slug: 'pilot', collection: { slug: 'the-show' } })).toBe(
+      '/c/the-show/pilot',
+    )
+  })
+})
+
+describe('playPath', () => {
+  it('is the overview with the player open', () => {
+    expect(
+      playPath({ slug: 'pilot', collection: { slug: 'the-show' }, season: { slug: 'season-1' } }),
+    ).toBe('/c/the-show/season-1/pilot?play=1')
+  })
+
+  it('keeps the season, like the overview does', () => {
+    expect(playPath({ slug: 'the-film', collection: { slug: 'films' }, season: null })).toBe(
+      '/c/films/the-film?play=1',
+    )
+  })
+
+  it('appends the query exactly once', () => {
+    const path = playPath({ slug: 'pilot', collection: { slug: 'the-show' } })
+
+    expect(path?.match(/play=1/g)).toHaveLength(1)
+    expect(path?.match(/\?/g)).toHaveLength(1)
+  })
+
+  it('has no link to offer when the overview has none', () => {
+    expect(playPath({ slug: 'orphan' })).toBeNull()
   })
 })
