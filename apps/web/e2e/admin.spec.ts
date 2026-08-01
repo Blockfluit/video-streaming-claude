@@ -446,6 +446,35 @@ test.describe('admin', () => {
     await expect(page.getByRole('link', { name: /\/setup\?token=/ })).toHaveCount(0)
   })
 
+  test('clicking a column header sorts by it, and again reverses it', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    const table = page.getByRole('table', { name: 'Invites' })
+    const kind = table.getByRole('columnheader', { name: 'Kind' })
+    const kindCells = table.locator('tbody tr td:first-child')
+
+    // The API sends newest-created first, and the page keeps that.
+    await expect(table.getByRole('columnheader', { name: 'Created' }))
+      .toHaveAttribute('aria-sort', 'descending')
+
+    await kind.getByRole('button').click()
+    await expect(kind).toHaveAttribute('aria-sort', 'ascending')
+    const ascending = await kindCells.allInnerTexts()
+    expect(ascending).toEqual([...ascending].sort())
+
+    await kind.getByRole('button').click()
+    await expect(kind).toHaveAttribute('aria-sort', 'descending')
+    // Compared against the same values sorted the other way, not against the
+    // reversed array: ties break on `id` ascending in *both* directions, so a
+    // straight reversal is not what a descending sort produces.
+    const descending = await kindCells.allInnerTexts()
+    expect(descending).toEqual([...ascending].sort((a, b) => b.localeCompare(a)))
+
+    // One column sorted at a time — the previous one goes back to neutral.
+    await expect(table.getByRole('columnheader', { name: 'Created' }))
+      .toHaveAttribute('aria-sort', 'none')
+  })
+
   test('the invite table header stays put while the list scrolls', async ({ page }) => {
     await visit(page, '/admin/users')
 

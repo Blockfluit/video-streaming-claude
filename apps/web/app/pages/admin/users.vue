@@ -73,6 +73,56 @@ const ROLE_OPTIONS = [
   { label: 'Admin', value: 'ADMIN' },
 ]
 
+/**
+ * Sorting Status alphabetically puts VALID last, which is the one state an
+ * admin can still act on. Ranked instead: live first, then the two ways a token
+ * was stopped, then the ones that did their job.
+ */
+const STATE_RANK: Record<string, number> = { VALID: 0, EXPIRED: 1, REVOKED: 2, REDEEMED: 3 }
+
+/**
+ * The header row, and what each column sorts on.
+ *
+ * `value` returns what the cell *means* rather than what it renders: a date
+ * becomes a number so it orders chronologically instead of alphabetically, and
+ * a person becomes their display name. Returning null means "nothing here",
+ * which `compareValues` pins to the bottom whichever way the arrow points.
+ */
+const COLUMNS: { key: string, label: string, value: (invite: Invite) => SortValue }[] = [
+  { key: 'kind', label: 'Kind', value: invite => invite.kind },
+  { key: 'grants', label: 'Grants', value: invite => invite.grantsRole },
+  {
+    key: 'createdBy',
+    label: 'Created by',
+    value: invite => invite.createdBy?.displayName ?? creatorLabel(invite),
+  },
+  { key: 'created', label: 'Created', value: invite => Date.parse(invite.createdAt) },
+  { key: 'status', label: 'Status', value: invite => STATE_RANK[invite.state] ?? 99 },
+  { key: 'redeemedBy', label: 'Used by', value: invite => invite.redeemedUser?.displayName ?? null },
+  {
+    key: 'redeemed',
+    label: 'Redeemed',
+    value: invite => (invite.redeemedAt === null ? null : Date.parse(invite.redeemedAt)),
+  },
+]
+
+// Matching the API's own order, so the first paint is the one the server sent.
+const sortKey = ref('created')
+const sortDirection = ref<SortDirection>('desc')
+
+function sortBy(key: string) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+
+  sortKey.value = key
+  // A fresh column starts ascending, except the dates: asking for "Created"
+  // almost always means the newest, and starting at the oldest invite ever
+  // minted makes every date column take two clicks.
+  sortDirection.value = key === 'created' || key === 'redeemed' ? 'desc' : 'asc'
+}
+
 const api = useApi()
 const toast = useToast()
 const { user } = useSession()
@@ -84,6 +134,32 @@ const { data: users, refresh: refreshUsers } = await useApiData<Page<Account>>(
 const { data: invites, refresh: refreshInvites } = await useApiData<Page<Invite>>(
   'admin-invites',
   '/admin/invites?limit=100',
+)
+
+/**
+ * Sorted in the browser, over the page the API already sent. That is honest
+ * while everything fits in one request and misleading the moment it does not,
+ * which is what the count below the table is for.
+ */
+const sortedInvites = computed(() => {
+  const column = COLUMNS.find(entry => entry.key === sortKey.value)
+  const rows = [...(invites.value?.items ?? [])]
+
+  if (!column) return rows
+
+  return rows.sort(
+    (a, b) =>
+      compareValues(column.value(a), column.value(b), sortDirection.value)
+      // `id` last, so the order is total. Without it, rows that tie are free to
+      // swap places on every re-render, which reads as a rendering bug for
+      // weeks before anyone suspects the sort.
+      || a.id.localeCompare(b.id),
+  )
+})
+
+/** True once the API is holding invites this page never asked for. */
+const truncated = computed(
+  () => (invites.value?.total ?? 0) > (invites.value?.items?.length ?? 0),
 )
 
 /** Held in memory only. Navigating away loses it, which is the point. */
@@ -298,18 +374,51 @@ useHead({ title: 'Accounts' })
         <table aria-label="Invites" class="w-full text-sm">
           <thead class="sticky top-0 z-10 border-b border-(--ui-border) bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
             <tr>
-              <th class="p-3">Kind</th>
-              <th class="p-3">Grants</th>
-              <th class="p-3">Created by</th>
-              <th class="p-3">Created</th>
-              <th class="p-3">Status</th>
-              <th class="p-3">Used by</th>
-              <th class="p-3">Redeemed</th>
+              <!--
+                `aria-sort` on the cell and a real button inside it: the header
+                is the control, and a screen reader announcing "Created,
+                descending" is the only way that state exists for someone not
+                looking at the arrow.
+              -->
+              <th
+                v-for="column in COLUMNS"
+                :key="column.key"
+                :aria-sort="sortKey === column.key
+                  ? (sortDirection === 'asc' ? 'ascending' : 'descending')
+                  : 'none'"
+                class="p-0"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-1 p-3 text-left uppercase transition-colors hover:text-(--ui-text-highlighted)"
+                  @click="sortBy(column.key)"
+                >
+                  {{ column.label }}
+                  <!--
+                    The slot is always there and the arrow only sometimes, so
+                    the labels do not shift by twelve pixels when the sort
+                    moves. Not `opacity-0`: an invisible element that is still
+                    laid out is the thing the contrast audit exists to catch,
+                    and an icon's colour is its background, so a transparent one
+                    measures against itself.
+                  -->
+                  <span class="flex size-3 shrink-0 items-center justify-center">
+                    <UIcon
+                      v-if="sortKey === column.key"
+                      :name="sortDirection === 'asc'
+                        ? 'i-lucide-chevron-up'
+                        : 'i-lucide-chevron-down'"
+                      class="size-3"
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+              </th>
               <th class="p-3" />
             </tr>
           </thead>
           <tbody class="divide-y divide-(--ui-border)">
-            <tr v-for="invite in invites.items" :key="invite.id" class="hover:bg-white/[0.03]">
+            <tr v-for="invite in sortedInvites" :key="invite.id" class="hover:bg-white/[0.03]">
               <td class="p-3">
                 <UBadge color="neutral" variant="subtle" size="sm">{{ invite.kind }}</UBadge>
               </td>
@@ -384,6 +493,16 @@ useHead({ title: 'Accounts' })
         </table>
       </div>
       <p v-else class="text-sm text-(--ui-text-muted)">No invites yet.</p>
+
+      <!--
+        Sorting happens in the browser, over the rows already fetched. Say so
+        when there are more, rather than letting "oldest first" quietly mean
+        "oldest of the hundred most recent".
+      -->
+      <p v-if="truncated" class="mt-3 text-xs text-(--ui-text-muted)">
+        Showing the {{ invites?.items?.length }} most recently created of
+        {{ invites?.total }}. Sorting reorders these, not the rest.
+      </p>
     </UCard>
 
     <UCard>
