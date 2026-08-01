@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { FfmpegError } from './ffmpeg-error';
+import { FfmpegError, NoFrameError } from './ffmpeg-error';
 
 const execFileAsync = promisify(execFile);
 
@@ -239,11 +239,7 @@ export class FfmpegService {
      * an admin to do, so it gets an ordinary answer.
      */
     if (!existsSync(destination)) {
-      throw new FfmpegError(
-        'ffmpeg',
-        0,
-        `No frame at ${atSeconds}s — the video may be shorter than that`,
-      );
+      throw new NoFrameError(atSeconds);
     }
   }
 }

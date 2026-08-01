@@ -1,6 +1,7 @@
 import { extname } from 'node:path';
 
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,6 +10,7 @@ import {
 
 import { StorageService } from '../common/storage.service';
 import { bannerKeyFor } from '../common/image-uploads';
+import { NoFrameError } from './ffmpeg-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { FfmpegService } from './ffmpeg.service';
 import { needsConversion } from './needs-conversion';
@@ -232,7 +234,7 @@ export class MediaService implements OnModuleDestroy {
       // A half-written frame must not be left where the next run might rename
       // it into place.
       await this.storage.delete('derived', temporaryKey);
-      throw error;
+      throw asHttp(error);
     }
   }
 
@@ -261,7 +263,7 @@ export class MediaService implements OnModuleDestroy {
       await this.storage.move('derived', temporaryKey, key);
     } catch (error) {
       await this.storage.delete('derived', temporaryKey);
-      throw error;
+      throw asHttp(error);
     }
   }
 
@@ -417,6 +419,16 @@ export class MediaService implements OnModuleDestroy {
  * 1920 covers every common viewport without storing more than anyone sees.
  */
 const BANNER_WIDTH = 1920;
+
+/**
+ * "There is no frame there" is the caller's mistake, not ours.
+ *
+ * A 500 pages someone and hides the one thing an admin could act on — pick a
+ * different moment. Everything else keeps whatever it already was.
+ */
+function asHttp(error: unknown): unknown {
+  return error instanceof NoFrameError ? new BadRequestException(error.message) : error;
+}
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

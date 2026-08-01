@@ -588,10 +588,13 @@ describe('Media probing (real ffmpeg)', () => {
       await makeVideo('Films/bars.mp4', { seconds: 1 });
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
+      // A 400, not a 500. Picking a moment near the end of a video is an
+      // ordinary thing for an admin to do; answering 500 pages someone and
+      // hides the one thing they could act on.
       const response = await admin
         .post(`/videos/${id}/banner/capture`)
         .send({ atSeconds: 30 })
-        .expect(500);
+        .expect(400);
 
       expect(JSON.stringify(response.body)).not.toContain('rename');
       expect(JSON.stringify(response.body)).not.toContain('/tmp/');

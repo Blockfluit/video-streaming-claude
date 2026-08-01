@@ -25,6 +25,9 @@ interface VideoDetail {
   needsConversion: boolean
   probeError: string | null
   thumbnailSource: string
+  bannerKey: string | null
+  trailerYoutubeId: string | null
+  collection?: { trailerYoutubeId: string | null } | null
   playbackKey: string | null
   storageKey: string
   introStartSec: number | null
@@ -147,6 +150,70 @@ async function captureThumbnail() {
 
 const posterBust = ref(0)
 const posterUrl = computed(() => `/api/videos/${id}/thumbnail?v=${posterBust.value}`)
+
+/*
+ * Banners: the wide backdrop the overview page paints behind its title.
+ *
+ * A separate picture from the poster rather than the same one cropped — a
+ * poster is a 640px frame and a hero is full-bleed — so it gets its own
+ * capture, its own upload and its own cache-buster. The key never changes
+ * when a banner is replaced, so an `<img>` the browser already has would keep
+ * showing the old one; the ETag cannot help something that is never
+ * re-requested.
+ */
+const bannerBust = ref(0)
+const bannerUrl = computed(() => `/api/videos/${id}/banner?v=${bannerBust.value}`)
+
+async function captureBanner() {
+  try {
+    await api(`/videos/${id}/banner/capture`, {
+      method: 'POST',
+      body: { atSeconds: Math.round(previewTime.value * 10) / 10 },
+    })
+    bannerBust.value = Date.now()
+    await refresh()
+    toast.add({ title: 'Banner captured', color: 'success' })
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not capture that frame'), color: 'error' })
+  }
+}
+
+async function uploadBanner(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  const body = new FormData()
+  body.append('file', file)
+  try {
+    await api(`/videos/${id}/banner`, { method: 'POST', body })
+    bannerBust.value = Date.now()
+    await refresh()
+    toast.add({ title: 'Banner uploaded', color: 'success' })
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
+  }
+}
+
+async function clearBanner() {
+  try {
+    await api(`/videos/${id}/banner`, { method: 'DELETE' })
+    bannerBust.value = Date.now()
+    await refresh()
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not remove the banner'), color: 'error' })
+  }
+}
+
+/** Saved on change rather than with the metadata form — one click, one effect. */
+async function saveTrailer(trailerYoutubeId: string | null) {
+  try {
+    await api(`/videos/${id}`, { method: 'PATCH', body: { trailerYoutubeId } })
+    await refresh()
+    toast.add({ title: trailerYoutubeId ? 'Trailer set' : 'Trailer removed', color: 'success' })
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not save the trailer'), color: 'error' })
+  }
+}
 
 async function uploadPoster(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
@@ -395,6 +462,62 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
               Reset to automatic
             </UButton>
           </div>
+        </UCard>
+
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Banner</h2>
+            <p class="text-xs text-(--ui-text-muted)">
+              The wide backdrop behind the overview page
+            </p>
+          </template>
+
+          <img
+            v-if="video.bannerKey"
+            :src="bannerUrl"
+            alt=""
+            class="mb-3 aspect-video w-full rounded bg-(--ui-bg-accented) object-cover"
+          >
+          <p v-else class="mb-3 text-xs text-(--ui-text-muted)">
+            None yet — the overview falls back to the poster.
+          </p>
+
+          <div class="space-y-2">
+            <UButton block color="neutral" variant="subtle" icon="i-lucide-crosshair" @click="captureBanner">
+              Capture at {{ timecode(previewTime) }}
+            </UButton>
+            <label class="block cursor-pointer">
+              <input type="file" accept="image/*" class="hidden" @change="uploadBanner">
+              <span
+                class="flex w-full items-center justify-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
+              >
+                <UIcon name="i-lucide-image" class="size-4" /> Upload image
+              </span>
+            </label>
+            <UButton
+              v-if="video.bannerKey"
+              block
+              variant="ghost"
+              color="neutral"
+              icon="i-lucide-trash-2"
+              @click="clearBanner"
+            >
+              Remove banner
+            </UButton>
+          </div>
+        </UCard>
+
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Trailer</h2>
+            <p class="text-xs text-(--ui-text-muted)">Plays muted over the overview page</p>
+          </template>
+
+          <TrailerPicker
+            :model-value="video.trailerYoutubeId"
+            :inherited="video.collection?.trailerYoutubeId ?? null"
+            @update:model-value="saveTrailer"
+          />
         </UCard>
 
         <UCard>

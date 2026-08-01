@@ -40,6 +40,8 @@ interface CollectionDetail {
   year: number | null
   tags: string[]
   state: string
+  bannerKey: string | null
+  trailerYoutubeId: string | null
   seasons: Season[]
   videos: VideoRow[]
 }
@@ -57,7 +59,59 @@ interface Stats {
 
 const route = useRoute()
 const api = useApi()
+
+/*
+ * The key never changes when a banner is replaced, so an `<img>` the browser
+ * already has keeps showing the old picture — the ETag cannot help something
+ * that is never re-requested.
+ */
+const bannerBust = ref(0)
+
 const toast = useToast()
+
+const bannerUrl = computed(
+  () => `/api/collections/${collection.value!.id}/banner?v=${bannerBust.value}`,
+)
+
+async function uploadBanner(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  const body = new FormData()
+  body.append('file', file)
+  try {
+    await api(`/collections/${collection.value!.id}/banner`, { method: 'POST', body })
+    bannerBust.value = Date.now()
+    await refresh()
+    toast.add({ title: 'Banner uploaded', color: 'success' })
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
+  }
+}
+
+async function clearBanner() {
+  try {
+    await api(`/collections/${collection.value!.id}/banner`, { method: 'DELETE' })
+    bannerBust.value = Date.now()
+    await refresh()
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not remove the banner'), color: 'error' })
+  }
+}
+
+/** Saved on change rather than with the metadata form — one click, one effect. */
+async function saveTrailer(trailerYoutubeId: string | null) {
+  try {
+    await api(`/collections/${collection.value!.id}`, {
+      method: 'PATCH',
+      body: { trailerYoutubeId },
+    })
+    await refresh()
+    toast.add({ title: trailerYoutubeId ? 'Trailer set' : 'Trailer removed', color: 'success' })
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not save the trailer'), color: 'error' })
+  }
+}
 const slug = computed(() => String(route.params.slug))
 
 const { data: collection, refresh } = await useApiData<CollectionDetail>(
@@ -582,9 +636,67 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             class="aspect-2/3 w-full rounded-md bg-(--ui-bg-accented) object-cover"
           >
           <p class="mt-2 text-xs text-(--ui-text-muted)">
-            Taken from the collection folder. There is no upload endpoint for a
-            collection poster yet.
+            Taken from the collection folder. The <em>poster</em> still has no
+            upload endpoint — the banner below does.
           </p>
+        </UCard>
+
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Banner</h2>
+            <p class="text-xs text-(--ui-text-muted)">
+              The wide backdrop behind the collection page
+            </p>
+          </template>
+
+          <img
+            v-if="collection.bannerKey"
+            :src="bannerUrl"
+            alt=""
+            class="mb-3 aspect-video w-full rounded bg-(--ui-bg-accented) object-cover"
+          >
+          <p v-else class="mb-3 text-xs text-(--ui-text-muted)">
+            None yet — the collection page falls back to the poster.
+          </p>
+
+          <div class="space-y-2">
+            <!--
+              Upload only. A collection has no file of its own, so there is no
+              frame to capture the way a video's banner can be.
+            -->
+            <label class="block cursor-pointer">
+              <input type="file" accept="image/*" class="hidden" @change="uploadBanner">
+              <span
+                class="flex w-full items-center justify-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
+              >
+                <UIcon name="i-lucide-image" class="size-4" /> Upload image
+              </span>
+            </label>
+            <UButton
+              v-if="collection.bannerKey"
+              block
+              variant="ghost"
+              color="neutral"
+              icon="i-lucide-trash-2"
+              @click="clearBanner"
+            >
+              Remove banner
+            </UButton>
+          </div>
+        </UCard>
+
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Trailer</h2>
+            <p class="text-xs text-(--ui-text-muted)">
+              Plays muted over this page, and over every episode with none of its own
+            </p>
+          </template>
+
+          <TrailerPicker
+            :model-value="collection.trailerYoutubeId"
+            @update:model-value="saveTrailer"
+          />
         </UCard>
       </div>
     </div>

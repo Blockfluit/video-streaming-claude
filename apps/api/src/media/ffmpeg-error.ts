@@ -104,3 +104,18 @@ export class FfmpegError extends Error {
     this.name = 'FfmpegError';
   }
 }
+
+/**
+ * Asked for a frame at a moment the file does not reach.
+ *
+ * Distinct from `FfmpegError` because it is the **caller's** mistake, not a
+ * failure of ours: picking a timestamp near the end of a video is an ordinary
+ * thing for an admin to do, and answering 500 both pages someone and hides the
+ * one thing they could act on. `MediaService` turns it into a 400.
+ */
+export class NoFrameError extends Error {
+  constructor(readonly atSeconds: number) {
+    super(`No frame at ${atSeconds}s — the video may be shorter than that`);
+    this.name = 'NoFrameError';
+  }
+}
