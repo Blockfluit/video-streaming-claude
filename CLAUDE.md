@@ -43,10 +43,14 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   truncated file for the watcher to ingest.
 - Deleting a collection or season keeps its files unless `?deleteFiles=true`. Without the files gone,
   reconcile rebuilds the rows on the next scan — the default is the recoverable mistake, not the other one.
-  **Creating a season creates a folder in `MEDIA_ROOT`**, so this cuts both ways: a browser test that makes a
-  season and deletes only the row leaves the folder behind, and the suite's own "start a scan" test then
-  resurrects every one of them. Test teardown has to pass `deleteFiles=true`; the admin UI deliberately does
-  not offer it.
+- **Creating a season creates a folder in `MEDIA_ROOT`**, and that folder is what reconcile rebuilds the row
+  from. Deleting a season therefore removes its directory when it is **empty** (`storage.deleteIfEmpty`,
+  which is `rmdir` — the check and the action in one syscall, so there is no race between looking and
+  removing). An empty directory holds nothing anyone can lose, and leaving it was what made a deleted season
+  reappear on the next scan: the screen and the disk disagreed, and the disk won a few minutes later.
+  A directory that still holds something is left alone, so nobody destroys a film with the same button that
+  tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
+  files go rather than asking "are you sure?".
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does

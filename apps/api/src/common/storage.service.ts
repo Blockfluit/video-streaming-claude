@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -154,5 +154,32 @@ export class StorageService implements OnModuleInit {
   /** Deletes a file or directory. Already-gone is success, not an error. */
   async delete(root: StorageRoot, key: string): Promise<void> {
     await rm(this.resolvePath(root, key), { recursive: true, force: true });
+  }
+
+  /**
+   * Removes a directory only when there is nothing in it.
+   *
+   * The distinction matters: `delete` on a season folder takes the films inside
+   * it with it. An empty directory holds nothing anyone can lose, but leaving
+   * one behind is what makes a deleted season reappear on the next scan —
+   * reconcile rebuilds rows from the tree, so an orphaned folder is a season
+   * that comes back.
+   *
+   * Returns whether it went, so the caller can tell the difference between
+   * "cleaned up" and "left alone because it still holds something".
+   */
+  async deleteIfEmpty(root: StorageRoot, key: string): Promise<boolean> {
+    const path = this.resolvePath(root, key);
+
+    try {
+      // rmdir refuses a non-empty directory, which is the check and the action
+      // in one syscall — no race between looking and removing.
+      await rmdir(path);
+      return true;
+    } catch {
+      // ENOTEMPTY, or it was never there. Either way nothing was removed and
+      // nothing was lost.
+      return false;
+    }
   }
 }

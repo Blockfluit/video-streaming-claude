@@ -259,6 +259,64 @@ describe('Library (real database)', () => {
     });
   });
 
+  describe('the folder a season leaves behind', () => {
+    /**
+     * A season's folder is what reconcile rebuilds its row from, so leaving an
+     * empty one behind meant deleting a season did not stick: the next scan
+     * found the directory and created the season again. The screen and the disk
+     * disagreed, and the disk won a few minutes later.
+     */
+    it('removes the folder when nothing is in it', async () => {
+      const show = await createCollection('A Show');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: show.id, number: 1 })
+        .expect(201);
+
+      expect(await storage.exists('media', season.body.folderKey)).toBe(true);
+
+      await admin.delete(`/seasons/${season.body.id}`).expect(204);
+
+      expect(await storage.exists('media', season.body.folderKey)).toBe(false);
+    });
+
+    /**
+     * The other half, and the one that matters more: an empty directory holds
+     * nothing anyone can lose, but a directory with films in it must survive a
+     * delete that did not ask for `deleteFiles`. Nobody loses a film by
+     * pressing the same button that tidies up an empty folder.
+     */
+    it('keeps a folder that still holds something', async () => {
+      const show = await createCollection('A Show');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: show.id, number: 1 })
+        .expect(201);
+
+      await storage.save('media', `${season.body.folderKey}/episode.mp4`, Buffer.from('film'));
+
+      await admin.delete(`/seasons/${season.body.id}`).expect(204);
+
+      expect(await storage.exists('media', season.body.folderKey)).toBe(true);
+      expect(await storage.exists('media', `${season.body.folderKey}/episode.mp4`)).toBe(true);
+    });
+
+    /** deleteFiles is still the destructive opt-in it always was. */
+    it('takes the whole folder when deleteFiles is asked for', async () => {
+      const show = await createCollection('A Show');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: show.id, number: 1 })
+        .expect(201);
+
+      await storage.save('media', `${season.body.folderKey}/episode.mp4`, Buffer.from('film'));
+
+      await admin.delete(`/seasons/${season.body.id}?deleteFiles=true`).expect(204);
+
+      expect(await storage.exists('media', season.body.folderKey)).toBe(false);
+    });
+  });
+
   describe('reordering a collection\'s videos', () => {
     /**
      * One request rewrites a whole season's contents and their order. A PATCH

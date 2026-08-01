@@ -142,16 +142,52 @@ async function addSeason() {
   }
 }
 
-async function removeSeason(season: Season) {
-  // Files are kept unless asked otherwise — reconcile rebuilds the rows on the
-  // next scan, so the default is the recoverable mistake.
+/**
+ * The season a destructive delete is being confirmed for.
+ *
+ * An empty season goes straight away: the API removes the empty folder with it,
+ * so the screen and the disk agree. One that still holds episodes cannot —
+ * deleting it would leave the films behind, reconcile would rebuild the season
+ * from that folder on the next scan, and the deletion would appear to undo
+ * itself. Saying so beats letting someone discover it.
+ */
+const confirming = ref<{ season: Season, episodes: number } | null>(null)
+const deleting = ref(false)
+
+/** UModal writes its own open state, so it needs a boolean of its own. */
+const confirmingOpen = computed({
+  get: () => confirming.value !== null,
+  set: (open: boolean) => { if (!open) confirming.value = null },
+})
+
+function askToRemove(group: Group) {
+  if (!group.season) return
+
+  if (group.videos.length === 0) {
+    void removeSeason(group.season, false)
+    return
+  }
+  confirming.value = { season: group.season, episodes: group.videos.length }
+}
+
+async function removeSeason(season: Season, deleteFiles: boolean) {
+  deleting.value = true
   try {
-    await api(`/seasons/${season.id}`, { method: 'DELETE' })
+    await api(`/seasons/${season.id}${deleteFiles ? '?deleteFiles=true' : ''}`, {
+      method: 'DELETE',
+    })
+    confirming.value = null
     await refresh()
-    toast.add({ title: 'Season removed', color: 'success' })
+    toast.add({
+      title: deleteFiles ? 'Season and its files deleted' : 'Season removed',
+      color: 'success',
+    })
   }
   catch (error) {
     toast.add({ title: apiMessage(error, 'Could not remove it'), color: 'error' })
+  }
+  finally {
+    deleting.value = false
   }
 }
 
@@ -330,6 +366,48 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <!--
+      Only shown for a season that still holds episodes. The wording names the
+      real consequence — the films go — rather than asking "are you sure?",
+      which tells nobody anything.
+    -->
+    <UModal v-model:open="confirmingOpen" title="This season still has episodes">
+      <template #body>
+        <div v-if="confirming" class="space-y-3 text-sm">
+          <p>
+            <strong>{{ seasonLabel(confirming.season) }}</strong> holds
+            {{ confirming.episodes }}
+            {{ confirming.episodes === 1 ? 'episode' : 'episodes' }}.
+          </p>
+          <p class="text-(--ui-text-muted)">
+            Deleting the season on its own leaves its folder and those files on
+            the drive, and the next scan of the media folder will find them and
+            recreate the season. To remove it for good, either drag the episodes
+            out first, or delete the video files with it.
+          </p>
+          <p class="text-(--ui-text-muted)">
+            Deleting the files cannot be undone.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full gap-2">
+          <UButton color="neutral" variant="subtle" @click="confirming = null">
+            Cancel
+          </UButton>
+          <UButton
+            class="ml-auto"
+            color="error"
+            :loading="deleting"
+            @click="confirming && removeSeason(confirming.season, true)"
+          >
+            Delete the season and {{ confirming?.episodes }}
+            {{ confirming?.episodes === 1 ? 'file' : 'files' }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
       <div class="space-y-6">
         <UCard>
           <template #header><h2 class="font-semibold">Details</h2></template>
@@ -409,7 +487,7 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
                   variant="subtle"
                   :aria-label="`Remove ${seasonLabel(group.season)}`"
                   icon="i-lucide-trash-2"
-                  @click="removeSeason(group.season)"
+                  @click="askToRemove(group)"
                 />
               </div>
 
