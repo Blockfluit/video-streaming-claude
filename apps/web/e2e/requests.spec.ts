@@ -1,4 +1,5 @@
 import {
+  USERNAME,
   expect,
   expectApiRejection,
   expectsRequest,
@@ -89,9 +90,10 @@ test.describe('requests', () => {
 
     const row = page.locator('article').filter({ hasText: wanted })
     await expect(row).toBeVisible()
-    // The whole reason the admin screen is separate.
+    // The whole reason the admin screen is separate. `USERNAME` rather than a
+    // literal — the suite runs against whatever account E2E_USERNAME names.
     await expect(row.getByText(/Asked by/)).toBeVisible()
-    await expect(row.getByText('ada')).toBeVisible()
+    await expect(row.getByText(USERNAME, { exact: false })).toBeVisible()
 
     /*
      * `USelect` is a Reka UI listbox, not a native `<select>` — `selectOption`
@@ -105,6 +107,40 @@ test.describe('requests', () => {
     })
 
     await expect(toast(page, /Marked processing/i)).toBeVisible()
+  })
+
+  /**
+   * The viewer page shows the requester **to an admin**, and to nobody else.
+   *
+   * This shipped wrong the first time: the API had it right — `requestedBy` is
+   * null for everyone but an admin — but the page never rendered the field, so
+   * an admin browsing Requests saw an anonymised list and had to know that the
+   * names lived on another screen entirely.
+   *
+   * The suite signs in as an admin, so what it can assert directly is the half
+   * that was broken. The other half — that a USER is never sent a name at all —
+   * is asserted at the API in `requests.db-spec.ts`, which is the layer that
+   * actually decides it.
+   */
+  test('an admin sees who asked on the viewer page too', async ({ page }) => {
+    const wanted = title()
+
+    await visit(page, '/requests')
+    await fillStable(page, 'input[placeholder="What would you like to watch?"]', wanted)
+    await expectsRequest(page, /\/api\/requests$/, 'POST', async () => {
+      await page.getByRole('button', { name: 'Request it' }).click()
+    })
+
+    const row = page.locator('article').filter({ hasText: wanted })
+    await expect(row.getByText(/asked by/i)).toBeVisible()
+
+    // The name rendered is the one the API supplied, not a guess from the session.
+    const requester = await page.evaluate(async () => {
+      const page = await (await fetch('/api/requests?limit=1')).json()
+      return page.items[0].requestedBy?.displayName ?? null
+    })
+    expect(requester).not.toBeNull()
+    await expect(row.getByText(requester!, { exact: false })).toBeVisible()
   })
 
   test('the admin queue is reachable from the sidebar', async ({ page }) => {

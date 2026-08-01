@@ -16,6 +16,12 @@ import {
  */
 const api = useApi()
 const toast = useToast()
+/*
+ * Used for the wording only. Whether a name actually appears is decided by the
+ * API — `requestedBy` is null for everyone but an admin — so this being wrong
+ * would misdescribe the page, never expose anything.
+ */
+const { isAdmin } = useSession()
 
 const title = ref('')
 const year = ref<string>('')
@@ -136,7 +142,14 @@ useHead({ title: 'Requests' })
   <div class="page-shell space-y-8 pt-24 pb-16">
     <div>
       <h1 class="text-2xl font-semibold">Requests</h1>
-      <p class="mt-1 text-sm text-(--ui-text-muted)">
+      <p v-if="isAdmin" class="mt-1 text-sm text-(--ui-text-muted)">
+        Ask for something that is not here yet. Everyone else sees these without
+        the names —
+        <NuxtLink to="/admin/requests" class="underline hover:text-(--ui-text-highlighted)">
+          manage them here
+        </NuxtLink>.
+      </p>
+      <p v-else class="mt-1 text-sm text-(--ui-text-muted)">
         Ask for something that is not here yet. Requests are shown to everyone
         without names.
       </p>
@@ -243,6 +256,17 @@ useHead({ title: 'Requests' })
             </UBadge>
 
             <span class="text-sm text-(--ui-text-dimmed)">{{ when(request.createdAt) }}</span>
+
+            <!--
+              Only an admin ever has this: the API sends `requestedBy: null` to
+              everyone else, so the presence of the field *is* the permission.
+              Rendering it behind `isAdmin` instead would put the rule in two
+              places and let them disagree — and the one that decides is the API.
+            -->
+            <span v-if="request.requestedBy" class="text-sm text-(--ui-text-muted)">
+              asked by
+              <span class="text-(--ui-text)">{{ request.requestedBy.displayName }}</span>
+            </span>
 
             <UButton
               v-if="request.mine"
