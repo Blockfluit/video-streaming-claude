@@ -70,7 +70,7 @@ describe('Media probing (real ffmpeg)', () => {
     const { size } = await storage.statOf('media', relPath).then((s) => s ?? { size: 0 });
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId } },
         slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         title,
         storageKey: relPath,

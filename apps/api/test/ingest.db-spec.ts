@@ -74,7 +74,7 @@ describe('Ingest (real database)', () => {
 
     await startApp();
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "IngestIssue" RESTART IDENTITY CASCADE',
+      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "CollectionVideo", "IngestIssue" RESTART IDENTITY CASCADE',
     );
     await app.close();
     await rm(tokenFile, { force: true });
@@ -97,16 +97,16 @@ describe('Ingest (real database)', () => {
   });
 
   const videos = () =>
-    prisma.video.findMany({ orderBy: { storageKey: 'asc' } });
+    prisma.video.findMany({ orderBy: { storageKey: 'asc' }, include: { collections: true } });
 
   const openIssues = () =>
     prisma.ingestIssue.findMany({ where: { resolvedAt: null }, orderBy: { path: 'asc' } });
 
   describe('the plan checkpoint — drop a South Park folder', () => {
     beforeEach(async () => {
-      await put('South Park/Season 01/01 - Cartman Gets an Anal Probe.mp4');
-      await put('South Park/Season 01/02 - Weight Gain 4000.mp4');
-      await put('South Park/Season 02/01 - Terrance and Phillip.mp4');
+      await put('disk1/South Park/Season 01/01 - Cartman Gets an Anal Probe.mp4');
+      await put('disk1/South Park/Season 01/02 - Weight Gain 4000.mp4');
+      await put('disk1/South Park/Season 02/01 - Terrance and Phillip.mp4');
       await reconcile.run();
     });
 
@@ -116,7 +116,7 @@ describe('Ingest (real database)', () => {
       expect(collection).toMatchObject({
         title: 'South Park',
         slug: 'south-park',
-        folderKey: 'South Park',
+        folderKey: 'disk1/South Park',
         state: 'DRAFT',
         origin: 'INGEST',
       });
@@ -132,10 +132,15 @@ describe('Ingest (real database)', () => {
     });
 
     it('creates every episode as a draft, with its order and title', async () => {
-      const all = await videos();
+      const all = await prisma.video.findMany({
+        orderBy: { storageKey: 'asc' },
+        // Running order belongs to the membership now: it says where the video
+        // sits in *this* collection, and it may sit in others.
+        include: { collections: true },
+      });
 
       expect(all).toHaveLength(3);
-      expect(all.map((video) => [video.orderIndex, video.title])).toEqual([
+      expect(all.map((video) => [video.collections[0].orderIndex, video.title])).toEqual([
         [1, 'Cartman Gets an Anal Probe'],
         [2, 'Weight Gain 4000'],
         [1, 'Terrance and Phillip'],
@@ -145,7 +150,9 @@ describe('Ingest (real database)', () => {
 
     it('files each episode under the right season', async () => {
       const seasonOne = await prisma.season.findFirstOrThrow({ where: { number: 1 } });
-      const episodes = await prisma.video.findMany({ where: { seasonId: seasonOne.id } });
+      const episodes = await prisma.video.findMany({
+        where: { collections: { some: { seasonId: seasonOne.id } } },
+      });
 
       expect(episodes).toHaveLength(2);
     });
@@ -155,7 +162,7 @@ describe('Ingest (real database)', () => {
     // The property that stops an upload writing into the watched tree from
     // creating a second row for a file that is already known.
     it('changes nothing when run twice over the same tree', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
 
       const first = await reconcile.run();
       const before = await videos();
@@ -168,7 +175,7 @@ describe('Ingest (real database)', () => {
     });
 
     it('keeps the row id across scans, so nothing pointing at it breaks', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
       const [before] = await videos();
 
@@ -186,54 +193,67 @@ describe('Ingest (real database)', () => {
      * one video and creating another.
      */
     it('follows the file and keeps the same row', async () => {
-      await put('Inception/Inception.mp4', 'the-same-bytes');
+      await put('disk1/Inception/Inception.mp4', 'the-same-bytes');
       await reconcile.run();
       const [before] = await videos();
 
-      await move('Inception/Inception.mp4', 'Christopher Nolan/Inception.mp4');
+      await move('disk1/Inception/Inception.mp4', 'disk1/Christopher Nolan/Inception.mp4');
       const summary = await reconcile.run();
 
       const all = await videos();
       expect(summary).toMatchObject({ moved: 1, created: 0, markedMissing: 0 });
       expect(all).toHaveLength(1);
       expect(all[0].id).toBe(before.id);
-      expect(all[0].storageKey).toBe('Christopher Nolan/Inception.mp4');
+      expect(all[0].storageKey).toBe('disk1/Christopher Nolan/Inception.mp4');
     });
 
-    it('re-derives the collection it now lives in', async () => {
-      await put('Inception/Inception.mp4', 'the-same-bytes');
+    /**
+     * The folder layout is a suggestion, and it is only ever taken once.
+     *
+     * These two used to assert the opposite — that a move re-derived the
+     * collection, season and order from the new path. That is the behaviour
+     * this change deliberately reverses: an admin who has arranged the library
+     * must not have it rearranged by someone tidying up a disk, and reconcile
+     * cannot tell those two apart.
+     */
+    it('does not re-parent a video that moved between folders', async () => {
+      await put('disk1/Show/Season 01/01 - Pilot.mp4', 'the-same-bytes');
+      await reconcile.run();
+      const [before] = await videos();
+      const membershipBefore = before.collections[0];
+
+      await move('disk1/Show/Season 01/01 - Pilot.mp4', 'disk1/Show/Season 02/05 - Pilot.mp4');
       await reconcile.run();
 
-      await move('Inception/Inception.mp4', 'Christopher Nolan/Inception.mp4');
-      await reconcile.run();
-
-      const [video] = await videos();
-      const collection = await prisma.collection.findUniqueOrThrow({
-        where: { id: video.collectionId },
+      const [after] = await videos();
+      expect(after.collections).toHaveLength(1);
+      expect(after.collections[0]).toMatchObject({
+        collectionId: membershipBefore.collectionId,
+        seasonId: membershipBefore.seasonId,
+        orderIndex: membershipBefore.orderIndex,
       });
-      expect(collection.folderKey).toBe('Christopher Nolan');
     });
 
-    it('re-derives the season and order when moved between seasons', async () => {
-      await put('Show/Season 01/01 - Pilot.mp4', 'the-same-bytes');
+    it('does not put a moved video into a collection it was never in', async () => {
+      await put('disk1/Inception/Inception.mp4', 'the-same-bytes');
       await reconcile.run();
 
-      await move('Show/Season 01/01 - Pilot.mp4', 'Show/Season 02/05 - Pilot.mp4');
+      // A lone film in a folder is a standalone video, so it starts in nothing.
+      expect((await videos())[0].collections).toEqual([]);
+
+      await move('disk1/Inception/Inception.mp4', 'disk1/Christopher Nolan/Inception.mp4');
       await reconcile.run();
 
-      const [video] = await videos();
-      const season = await prisma.season.findUniqueOrThrow({ where: { id: video.seasonId! } });
-      expect(season.number).toBe(2);
-      expect(video.orderIndex).toBe(5);
+      expect((await videos())[0].collections).toEqual([]);
     });
 
     // Same name, different bytes: two files, not a move.
     it('does not mistake a different file with the same name for a move', async () => {
-      await put('A/film.mp4', 'first-bytes');
+      await put('disk1/A/film.mp4', 'first-bytes');
       await reconcile.run();
 
-      await remove('A/film.mp4');
-      await put('B/film.mp4', 'completely-different-bytes');
+      await remove('disk1/A/film.mp4');
+      await put('disk1/B/film.mp4', 'completely-different-bytes');
       const summary = await reconcile.run();
 
       expect(summary).toMatchObject({ moved: 0, created: 1, markedMissing: 1 });
@@ -242,11 +262,11 @@ describe('Ingest (real database)', () => {
 
   describe('a file that goes away', () => {
     it('marks the row MISSING rather than deleting it', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
       const [before] = await videos();
 
-      await remove('Inception/Inception.mp4');
+      await remove('disk1/Inception/Inception.mp4');
       const summary = await reconcile.run();
 
       const all = await videos();
@@ -262,7 +282,7 @@ describe('Ingest (real database)', () => {
      * in the library to draft.
      */
     it('restores the state it had when the file comes back', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
       const [video] = await videos();
       await prisma.video.update({
@@ -270,13 +290,13 @@ describe('Ingest (real database)', () => {
         data: { state: 'PUBLISHED', description: 'd', durationSec: 10, thumbnailKey: 't.jpg' },
       });
 
-      await remove('Inception/Inception.mp4');
+      await remove('disk1/Inception/Inception.mp4');
       await reconcile.run();
       await expect(prisma.video.findUniqueOrThrow({ where: { id: video.id } })).resolves.toMatchObject(
         { state: 'MISSING', stateBeforeMissing: 'PUBLISHED' },
       );
 
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       const summary = await reconcile.run();
 
       expect(summary.restored).toBe(1);
@@ -286,9 +306,9 @@ describe('Ingest (real database)', () => {
     });
 
     it('does not keep re-marking something already missing', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
-      await remove('Inception/Inception.mp4');
+      await remove('disk1/Inception/Inception.mp4');
       await reconcile.run();
 
       const summary = await reconcile.run();
@@ -302,7 +322,7 @@ describe('Ingest (real database)', () => {
      * freeing disk space would mark half the library MISSING.
      */
     it('exempts a source that was reclaimed after conversion', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
       const [video] = await videos();
       await prisma.video.update({
@@ -314,7 +334,7 @@ describe('Ingest (real database)', () => {
         },
       });
 
-      await remove('Inception/Inception.mp4');
+      await remove('disk1/Inception/Inception.mp4');
       const summary = await reconcile.run();
 
       expect(summary.markedMissing).toBe(0);
@@ -326,7 +346,7 @@ describe('Ingest (real database)', () => {
     // Half an exemption is no exemption: without a playbackKey there is nothing
     // to play, so the video really is missing.
     it('does not exempt a reclaimed source with no converted file', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await reconcile.run();
       const [video] = await videos();
       await prisma.video.update({
@@ -334,7 +354,7 @@ describe('Ingest (real database)', () => {
         data: { sourceDeletedAt: new Date(), playbackKey: null },
       });
 
-      await remove('Inception/Inception.mp4');
+      await remove('disk1/Inception/Inception.mp4');
       const summary = await reconcile.run();
 
       expect(summary.markedMissing).toBe(1);
@@ -354,7 +374,7 @@ describe('Ingest (real database)', () => {
     });
 
     it('records something buried too deep', async () => {
-      await put('A/B/C/D/film.mp4');
+      await put('disk1/A/B/C/D/film.mp4');
 
       await reconcile.run();
 
@@ -366,13 +386,13 @@ describe('Ingest (real database)', () => {
     // Still ingested — the episode is watchable, the season label just needs a
     // human. Refusing it would be worse.
     it('flags a season folder it could not read, without refusing the video', async () => {
-      await put('Show/Specials/01 - Behind the Scenes.mp4');
+      await put('disk1/Show/Specials/01 - Behind the Scenes.mp4');
 
       await reconcile.run();
 
       expect(await videos()).toHaveLength(1);
       expect(await openIssues()).toEqual([
-        expect.objectContaining({ kind: 'UNREADABLE_SEASON', path: 'Show/Specials' }),
+        expect.objectContaining({ kind: 'UNREADABLE_SEASON', path: 'disk1/Show/Specials' }),
       ]);
     });
 
@@ -415,10 +435,10 @@ describe('Ingest (real database)', () => {
 
   describe('what it skips', () => {
     it('ignores dotfiles, partial downloads and unknown extensions', async () => {
-      await put('Show/.DS_Store');
-      await put('Show/film.mp4.part');
-      await put('Show/notes.txt');
-      await put('Show/poster.jpg');
+      await put('disk1/Show/.DS_Store');
+      await put('disk1/Show/film.mp4.part');
+      await put('disk1/Show/notes.txt');
+      await put('disk1/Show/poster.jpg');
 
       const summary = await reconcile.run();
 
@@ -427,7 +447,7 @@ describe('Ingest (real database)', () => {
     });
 
     it('does not descend into hidden directories', async () => {
-      await put('.hidden/Show/film.mp4');
+      await put('disk1/.hidden/Show/film.mp4');
 
       await reconcile.run();
 
@@ -437,7 +457,7 @@ describe('Ingest (real database)', () => {
 
   describe('the admin endpoints', () => {
     it('runs a scan on demand and reports what it did', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
 
       const response = await admin.post('/admin/ingest/scan').expect(200);
 
@@ -445,7 +465,7 @@ describe('Ingest (real database)', () => {
     });
 
     it('reports status a dashboard can render', async () => {
-      await put('Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.mp4');
       await put('loose.mp4');
       await admin.post('/admin/ingest/scan').expect(200);
 

@@ -49,11 +49,13 @@ describe('Library (real database)', () => {
     collectionId: string,
     title: string,
     overrides: Record<string, unknown> = {},
+    /** Membership fields — where the video sits in *this* collection. */
+    membership: Record<string, unknown> = {},
   ): Promise<{ id: string; slug: string }> {
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     return prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId, ...membership } },
         slug,
         title,
         storageKey: `${collectionId}/${title}-${Math.round(performance.now() * 1000)}.mp4`,
@@ -184,22 +186,22 @@ describe('Library (real database)', () => {
 
   describe('slug scoping', () => {
     // The plan's manual check: two collections may both contain a `pilot`.
-    it('lets two collections each hold a video with the same slug', async () => {
+    /**
+     * Video slugs are library-wide now, where they used to be scoped to a
+     * collection so two shows could each have a `pilot`.
+     *
+     * A video is addressed at `/v/<slug>` on its own — it may be in several
+     * collections, so there is no one collection for a scope to mean. The
+     * numbering that has always deduplicated within a scope now does it across
+     * the library, and the second `pilot` becomes `pilot-2`.
+     */
+    it('refuses the same video slug anywhere in the library', async () => {
       const south = await createCollection('South Park');
       const simpsons = await createCollection('The Simpsons');
 
       await seedVideo(south.id, 'Pilot');
-      await seedVideo(simpsons.id, 'Pilot');
 
-      const bySlug = await prisma.video.findMany({ where: { slug: 'pilot' } });
-      expect(bySlug).toHaveLength(2);
-    });
-
-    it('refuses the same slug twice inside one collection', async () => {
-      const south = await createCollection('South Park');
-      await seedVideo(south.id, 'Pilot');
-
-      await expect(seedVideo(south.id, 'Pilot')).rejects.toThrow();
+      await expect(seedVideo(simpsons.id, 'Pilot')).rejects.toThrow();
     });
 
     it('deduplicates when regenerating a video slug into a taken one', async () => {
@@ -250,12 +252,16 @@ describe('Library (real database)', () => {
         .post('/seasons')
         .send({ collectionId: south.id, number: 1 })
         .expect(201);
-      const video = await seedVideo(south.id, 'Pilot', { seasonId: season.body.id });
+      const video = await seedVideo(south.id, 'Pilot', {}, { seasonId: season.body.id });
 
       await admin.delete(`/seasons/${season.body.id}`).expect(204);
 
-      const survivor = await prisma.video.findUnique({ where: { id: video.id } });
-      expect(survivor).toMatchObject({ seasonId: null, collectionId: south.id });
+      // The membership survives with no season: the video is still in the
+      // collection, just not in a season of it.
+      const survivor = await prisma.collectionVideo.findUniqueOrThrow({
+        where: { collectionId_videoId: { collectionId: south.id, videoId: video.id } },
+      });
+      expect(survivor).toMatchObject({ seasonId: null });
     });
   });
 
@@ -340,11 +346,13 @@ describe('Library (real database)', () => {
         .send({ seasonId: season.body.id, videoIds: [c.id, a.id, b.id] })
         .expect(200);
 
-      const rows = await prisma.video.findMany({
+      // Read from the membership: season and order say where a video sits in
+      // *this* collection, and the video may sit in others.
+      const rows = await prisma.collectionVideo.findMany({
         where: { collectionId: show.id },
-        select: { id: true, seasonId: true, orderIndex: true },
+        select: { videoId: true, seasonId: true, orderIndex: true },
       });
-      const byId = new Map(rows.map((row) => [row.id, row]));
+      const byId = new Map(rows.map((row) => [row.videoId, row]));
 
       expect(byId.get(c.id)).toMatchObject({ seasonId: season.body.id, orderIndex: 0 });
       expect(byId.get(a.id)).toMatchObject({ seasonId: season.body.id, orderIndex: 1 });
@@ -358,14 +366,16 @@ describe('Library (real database)', () => {
         .post('/seasons')
         .send({ collectionId: show.id, number: 1 })
         .expect(201);
-      const video = await seedVideo(show.id, 'Ep A', { seasonId: season.body.id });
+      const video = await seedVideo(show.id, 'Ep A', {}, { seasonId: season.body.id });
 
       await admin
         .patch(`/collections/${show.id}/videos/order`)
         .send({ seasonId: null, videoIds: [video.id] })
         .expect(200);
 
-      const after = await prisma.video.findUniqueOrThrow({ where: { id: video.id } });
+      const after = await prisma.collectionVideo.findUniqueOrThrow({
+        where: { collectionId_videoId: { collectionId: show.id, videoId: video.id } },
+      });
       expect(after).toMatchObject({ seasonId: null, orderIndex: 0 });
     });
 
@@ -384,8 +394,11 @@ describe('Library (real database)', () => {
         .send({ seasonId: null, videoIds: [elsewhere.id] })
         .expect(400);
 
-      const untouched = await prisma.video.findUniqueOrThrow({ where: { id: elsewhere.id } });
-      expect(untouched.collectionId).toBe(theirs.id);
+      const untouched = await prisma.collectionVideo.findMany({
+        where: { videoId: elsewhere.id },
+        select: { collectionId: true },
+      });
+      expect(untouched).toEqual([{ collectionId: theirs.id }]);
     });
 
     it('refuses a season belonging to another collection', async () => {
@@ -436,7 +449,7 @@ describe('Library (real database)', () => {
         .expect(201);
       seasonId = season.body.id;
 
-      await seedVideo(south.id, 'Cartman Gets an Anal Probe', { seasonId, ...publishable });
+      await seedVideo(south.id, 'Cartman Gets an Anal Probe', { ...publishable }, { seasonId });
       await seedVideo(south.id, 'Standalone', publishable);
     });
 
@@ -673,7 +686,16 @@ describe('Library (real database)', () => {
       expect(response.body.sizeBytes).toBe('9007199254740993');
     });
 
-    it('refuses to move a video into another collection\'s season', async () => {
+    /**
+     * The guard moved with the field.
+     *
+     * A video no longer carries a season — a *membership* does — so this is no
+     * longer something `PATCH /videos/:id` could get wrong. The endpoint that
+     * puts a video in a collection is where a foreign season has to be refused,
+     * and it names the collection it is acting on, which is what makes the check
+     * possible at all.
+     */
+    it("refuses a season belonging to another collection when adding a video", async () => {
       const south = await createCollection('South Park');
       const simpsons = await createCollection('The Simpsons');
       const foreign = await admin
@@ -682,7 +704,10 @@ describe('Library (real database)', () => {
         .expect(201);
       const video = await seedVideo(south.id, 'Pilot');
 
-      await admin.patch(`/videos/${video.id}`).send({ seasonId: foreign.body.id }).expect(400);
+      await admin
+        .post(`/collections/${south.id}/videos`)
+        .send({ videoId: video.id, seasonId: foreign.body.id })
+        .expect(400);
     });
 
     // The other half of the intersection: narrowing must still work for the
@@ -838,15 +863,27 @@ describe('Library (real database)', () => {
       await expect(storage.exists('media', 'harry-potter')).resolves.toBe(false);
     });
 
-    it('takes the seasons and videos with it', async () => {
+    /**
+     * A collection is a shelf, and emptying a shelf does not burn the books.
+     *
+     * This used to delete the videos, which followed from a video having exactly
+     * one parent. It no longer does: a video stands on its own, may sit in other
+     * collections, and carries watch history and comments that deleting it would
+     * take with it. The seasons go, because a season only exists inside its
+     * collection, and the memberships go with them.
+     */
+    it('takes its seasons and memberships, and leaves the videos standing', async () => {
       const collection = await createCollection('Harry Potter');
       await admin.post('/seasons').send({ collectionId: collection.id, number: 1 }).expect(201);
-      await seedVideo(collection.id, 'Philosophers Stone');
+      const video = await seedVideo(collection.id, 'Philosophers Stone');
 
       await admin.delete(`/collections/${collection.id}`).expect(204);
 
-      await expect(prisma.video.count()).resolves.toBe(0);
       await expect(prisma.season.count()).resolves.toBe(0);
+      await expect(prisma.collectionVideo.count()).resolves.toBe(0);
+
+      const survivor = await prisma.video.findUnique({ where: { id: video.id } });
+      expect(survivor).not.toBeNull();
     });
   });
 });

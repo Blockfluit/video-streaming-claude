@@ -188,10 +188,20 @@ export class UploadsService {
       return `${basename}/${name}`;
     }
 
+    /**
+     * Traversal is dropped **before** sanitising, not after.
+     *
+     * `sanitizeFilename` gives an unusable name a fallback rather than an empty
+     * string, so `..` sanitises to a real folder name — filtering afterwards
+     * turned `../../escaped` into two directories called `upload` and let the
+     * path grow instead of shrinking. Caught by the traversal test, which is
+     * the only reason it is not still doing that.
+     */
     const segments = file.relativePath
       .split('/')
-      .map((segment) => sanitizeFilename(segment.trim()))
-      .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+      .map((segment) => sanitizeFilename(segment));
 
     if (segments.length < 2) {
       // A folder upload whose path collapsed to a bare filename is still a file
@@ -212,11 +222,24 @@ export class UploadsService {
    * because the containment check is lexical.
    */
   private async requireDrive(name: string): Promise<string> {
-    const drive = sanitizeFilename(name.trim());
+    const raw = name.trim();
 
-    if (drive.length === 0 || drive.startsWith('.') || drive.includes('/')) {
+    /**
+     * Judged before sanitising, for the same reason as the path segments above:
+     * a name that sanitises to something usable would otherwise be accepted as
+     * a drive nobody named. A drive is one plain segment.
+     */
+    if (
+      raw.length === 0 ||
+      raw.startsWith('.') ||
+      raw.includes('/') ||
+      raw.includes('\\') ||
+      raw.includes('\0')
+    ) {
       throw new BadRequestException('Choose a drive to upload to');
     }
+
+    const drive = sanitizeFilename(raw);
 
     const drives = await this.storage.listDirectories('media', '');
     if (!drives.includes(drive)) throw new NotFoundException('No such drive');

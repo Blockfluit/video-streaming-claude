@@ -85,7 +85,7 @@ describe('Transcoding (real ffmpeg)', () => {
 
     const video = await prisma.video.create({
       data: {
-        collectionId: collection.id,
+        collections: { create: { collectionId: collection.id } },
         slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         title,
         storageKey: relPath,

@@ -110,6 +110,20 @@ export const reorderCollectionVideosSchema = z.object({
 });
 export type ReorderCollectionVideosInput = z.infer<typeof reorderCollectionVideosSchema>;
 
+/**
+ * Putting an existing video into a collection.
+ *
+ * `seasonId` is optional and must belong to the collection in the URL — the
+ * service checks that, because Prisma cannot express a constraint across a
+ * relation. Omitted means the video sits directly in the collection, which is
+ * where films live.
+ */
+export const addCollectionVideoSchema = z.object({
+  videoId: idSchema,
+  seasonId: idSchema.nullable().optional(),
+});
+export type AddCollectionVideoInput = z.infer<typeof addCollectionVideoSchema>;
+
 export const resolveQuerySchema = z.object({
   path: z.string().max(500).default(''),
 });

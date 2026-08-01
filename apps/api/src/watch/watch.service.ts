@@ -24,9 +24,16 @@ const HISTORY_VIDEO_SELECT = {
   width: true,
   height: true,
   state: true,
-  orderIndex: true,
-  collection: { select: { id: true, slug: true, title: true } },
-  season: { select: { id: true, slug: true, number: true } },
+  // Where a video sits, per collection it belongs to. Continue Watching
+  // shows which show an episode came from, and it may have come from more
+  // than one.
+  collections: {
+    select: {
+      orderIndex: true,
+      collection: { select: { id: true, slug: true, title: true } },
+      season: { select: { id: true, slug: true, number: true } },
+    },
+  },
 } as const;
 
 const PROGRESS_SELECT = {
@@ -111,7 +118,12 @@ export class WatchService {
       userId,
       ...(query.completed === undefined ? {} : { completed: query.completed }),
       video: {
-        ...(query.collectionId ? { collectionId: query.collectionId } : {}),
+        // Narrowed through the membership — "is this video in that collection".
+        ...(query.collectionId
+          ? { collections: { some: { collectionId: query.collectionId } } }
+          : {}),
+        // Spread last: the visibility rule is what nothing else may overwrite,
+        // so a history filtered by collection still cannot reach a draft.
         ...whereVisible(role),
       },
     };

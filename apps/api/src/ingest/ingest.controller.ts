@@ -4,6 +4,7 @@ import { listIngestIssuesSchema, toPage, type ListIngestIssuesQuery, type Page }
 import { Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { PrismaService } from '../prisma/prisma.service';
+import { MediaBrowserService, type BrowseResult } from './media-browser.service';
 import { ReconcileService, type ReconcileSummary } from './reconcile.service';
 import { WatcherService } from './watcher.service';
 import { ThrottleExpensive } from '../common/throttling';
@@ -14,6 +15,7 @@ export class IngestController {
   constructor(
     private readonly reconcile: ReconcileService,
     private readonly watcher: WatcherService,
+    private readonly browser: MediaBrowserService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -29,6 +31,18 @@ export class IngestController {
   @HttpCode(HttpStatus.OK)
   scan(): Promise<ReconcileSummary> {
     return this.reconcile.run();
+  }
+
+  /**
+   * The drives as they are on disk, with what the library makes of each folder.
+   *
+   * Read-only, and deliberately so: there is no import button behind this that
+   * creates rows another way. `POST scan` is the one path, and it is idempotent
+   * on storageKey.
+   */
+  @Get('browse')
+  browse(@Query('path') path?: string): Promise<BrowseResult> {
+    return this.browser.browse(path ?? '');
   }
 
   @Get('status')

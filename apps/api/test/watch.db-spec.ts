@@ -53,7 +53,7 @@ describe('Watch tracking (real database)', () => {
     seeded += 1;
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId, orderIndex: seeded } },
         slug: `film-${seeded}`,
         title: `Film ${seeded}`,
         storageKey: `Films/film-${seeded}.mkv`,
@@ -64,7 +64,6 @@ describe('Watch tracking (real database)', () => {
         fileMtime: new Date(),
         durationSec: 600,
         state: 'PUBLISHED',
-        orderIndex: seeded,
         ...overrides,
       },
       select: { id: true },
@@ -377,7 +376,14 @@ describe('Watch tracking (real database)', () => {
 
       expect(response.body).toMatchObject({ total: 1, limit: 50, offset: 0, hasMore: false });
       expect(response.body.items[0]).toMatchObject({
-        video: { id: videoId, title: 'Film 1', durationSec: 600, collection: { slug: 'films' } },
+        video: {
+          id: videoId,
+          title: 'Film 1',
+          durationSec: 600,
+          // Through the membership: a card names the collections a video is
+          // in, and it may be in several or in none.
+          collections: [{ collection: { slug: 'films' } }],
+        },
         progress: { lastPositionSec: 10, completed: false },
       });
     });
@@ -433,7 +439,11 @@ describe('Watch tracking (real database)', () => {
         data: { slug: 'shows', title: 'Shows', folderKey: 'Shows', state: 'PUBLISHED' },
         select: { id: true },
       });
-      const elsewhere = await seedVideo({ collectionId: other.id });
+      // Seeded straight into the other collection: which collection a video
+      // is in is a membership, not a column on the video.
+      const elsewhere = await seedVideo({
+        collections: { create: { collectionId: other.id } },
+      });
       await beat(viewer, { playSessionId: randomUUID(), positionSec: 10, deltaSec: 10 }).expect(200);
       await beat(
         viewer,

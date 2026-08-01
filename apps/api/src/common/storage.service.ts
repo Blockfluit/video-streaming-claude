@@ -77,6 +77,19 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  /**
+   * Like `resolvePath`, but `''` means the root directory itself.
+   *
+   * `resolveWithinRoot` rejects the root deliberately — a *storage key* is a
+   * file or folder inside a root, never the root, and letting one resolve there
+   * would make an empty key a way to address the whole tree. Listing is the one
+   * operation that legitimately starts at the top, so it says so here rather
+   * than by loosening the containment rule for everything.
+   */
+  private listingPath(root: StorageRoot, key: string): string {
+    return key === '' ? this.roots[root] : this.resolvePath(root, key);
+  }
+
   /** Relative key for an absolute path inside a root — the inverse of `resolvePath`. */
   toKey(root: StorageRoot, absolutePath: string): string {
     const key = relative(this.roots[root], absolutePath);
@@ -112,7 +125,7 @@ export class StorageService implements OnModuleInit {
    * housekeeping, never content.
    */
   async listDirectories(root: StorageRoot, key: string): Promise<string[]> {
-    const path = this.resolvePath(root, key);
+    const path = this.listingPath(root, key);
 
     let entries;
     try {
@@ -138,6 +151,21 @@ export class StorageService implements OnModuleInit {
     );
 
     return directories.filter((name): name is string => name !== null).sort();
+  }
+
+  /** The file names directly inside `key`, sorted. Dotfiles are never content. */
+  async listFiles(root: StorageRoot, key: string): Promise<string[]> {
+    const path = this.listingPath(root, key);
+
+    try {
+      const entries = await readdir(path, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
+        .map((entry) => entry.name)
+        .sort();
+    } catch {
+      return [];
+    }
   }
 
   /** Creates a directory (and its parents) at `key`. */
