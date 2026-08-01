@@ -81,6 +81,8 @@ describe('Artwork (real database)', () => {
 
     await storage.save('derived', 'thumbnails/film.png', PIXEL);
     await storage.save('derived', 'posters/films.png', PIXEL);
+    await storage.save('derived', 'banners/videos/film.png', PIXEL);
+    await storage.save('derived', 'banners/collections/films.png', PIXEL);
 
     const collection = await prisma.collection.create({
       data: {
@@ -89,6 +91,7 @@ describe('Artwork (real database)', () => {
         folderKey: 'Films',
         state: 'PUBLISHED',
         posterKey: 'posters/films.png',
+        bannerKey: 'banners/collections/films.png',
       },
       select: { id: true },
     });
@@ -107,6 +110,7 @@ describe('Artwork (real database)', () => {
         fileMtime: new Date(),
         state: 'PUBLISHED',
         thumbnailKey: 'thumbnails/film.png',
+        bannerKey: 'banners/videos/film.png',
       },
       select: { id: true },
     });
@@ -209,6 +213,115 @@ describe('Artwork (real database)', () => {
 
       await viewer.get(`/collections/${collectionId}/poster`).expect(404);
       await admin.get(`/collections/${collectionId}/poster`).expect(200);
+    });
+  });
+
+  /**
+   * The banner goes through the same `send()` as the other two, so these check
+   * that it really does rather than restating the contract. A second copy of
+   * the ETag block would pass its own tests while diverging from the poster.
+   */
+  describe('a video banner', () => {
+    it('serves the image with a type taken from the key', async () => {
+      const response = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+
+      expect(response.headers['content-type']).toBe('image/png');
+      expect(response.body).toEqual(PIXEL);
+    });
+
+    it('revalidates rather than carrying a lifetime', async () => {
+      const response = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+
+      expect(response.headers['cache-control']).toBe('private, no-cache');
+      expect(response.headers.etag).toBeDefined();
+    });
+
+    it('answers 304 when the browser already has it', async () => {
+      const first = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+
+      await viewer
+        .get(`/videos/${videoId}/banner`)
+        .set('If-None-Match', first.headers.etag)
+        .expect(304);
+    });
+
+    it('changes its tag when the picture is replaced', async () => {
+      const before = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+
+      await storage.save('derived', 'banners/videos/film.png', Buffer.concat([PIXEL, PIXEL]));
+
+      const after = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+      expect(after.headers.etag).not.toBe(before.headers.etag);
+    });
+
+    it('is never cached publicly', async () => {
+      const response = await viewer.get(`/videos/${videoId}/banner`).expect(200);
+
+      expect(response.headers['cache-control']).toContain('private');
+    });
+
+    /**
+     * The common case, not an edge one: almost nothing has a banner, and the
+     * hero falls back to the thumbnail on this 404.
+     */
+    it('404s a video with no banner', async () => {
+      await prisma.video.update({ where: { id: videoId }, data: { bannerKey: null } });
+
+      await viewer.get(`/videos/${videoId}/banner`).expect(404);
+    });
+
+    it('404s when the row points at a file that is gone', async () => {
+      await storage.delete('derived', 'banners/videos/film.png');
+
+      await viewer.get(`/videos/${videoId}/banner`).expect(404);
+    });
+
+    it('404s a draft for a viewer but serves it to an admin', async () => {
+      await prisma.video.update({ where: { id: videoId }, data: { state: 'DRAFT' } });
+
+      await viewer.get(`/videos/${videoId}/banner`).expect(404);
+      await admin.get(`/videos/${videoId}/banner`).expect(200);
+    });
+
+    it('needs a session', async () => {
+      await request(app.getHttpServer()).get(`/videos/${videoId}/banner`).expect(401);
+    });
+  });
+
+  describe('a collection banner', () => {
+    it('serves the image', async () => {
+      const response = await viewer.get(`/collections/${collectionId}/banner`).expect(200);
+
+      expect(response.headers['content-type']).toBe('image/png');
+      expect(response.body).toEqual(PIXEL);
+    });
+
+    it('revalidates rather than carrying a lifetime', async () => {
+      const response = await viewer.get(`/collections/${collectionId}/banner`).expect(200);
+
+      expect(response.headers['cache-control']).toBe('private, no-cache');
+      expect(response.headers.etag).toBeDefined();
+    });
+
+    it('404s a collection with no banner', async () => {
+      await prisma.collection.update({ where: { id: collectionId }, data: { bannerKey: null } });
+
+      await viewer.get(`/collections/${collectionId}/banner`).expect(404);
+    });
+
+    it('404s a draft for a viewer but serves it to an admin', async () => {
+      await prisma.collection.update({ where: { id: collectionId }, data: { state: 'DRAFT' } });
+
+      await viewer.get(`/collections/${collectionId}/banner`).expect(404);
+      await admin.get(`/collections/${collectionId}/banner`).expect(200);
+    });
+
+    /** The banner is a different picture from the poster, not an alias for it. */
+    it('does not fall back to the poster', async () => {
+      await prisma.collection.update({ where: { id: collectionId }, data: { bannerKey: null } });
+
+      await viewer.get(`/collections/${collectionId}/poster`).expect(200);
+      await viewer.get(`/collections/${collectionId}/banner`).expect(404);
     });
   });
 });

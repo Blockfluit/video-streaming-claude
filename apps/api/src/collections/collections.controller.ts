@@ -72,6 +72,17 @@ export class CollectionsController {
     return this.images.collectionPoster(id, user.role, response);
   }
 
+  /** Same rules as the poster: keyed by id, two segments, never throttled. */
+  @SkipThrottle()
+  @Get(':id/banner')
+  banner(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.collectionBanner(id, user.role, response);
+  }
+
   @Get()
   list(
     @Query(validate(listCollectionsSchema)) query: ListCollectionsQuery,

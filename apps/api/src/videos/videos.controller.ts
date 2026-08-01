@@ -110,6 +110,22 @@ export class VideosController {
     return this.images.videoThumbnail(id, user.role, response);
   }
 
+  /**
+   * The wide backdrop behind the overview page.
+   *
+   * Exempt from throttling for the same reason as the thumbnail: a shelf of
+   * heroes is one request per card, and a limit there protects nothing.
+   */
+  @SkipThrottle()
+  @Get(':id/banner')
+  banner(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.videoBanner(id, user.role, response);
+  }
+
   @Patch(':id')
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body(validate(updateVideoSchema)) dto: UpdateVideoInput) {

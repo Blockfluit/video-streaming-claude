@@ -53,6 +53,33 @@ export class ImagesService {
   }
 
   /**
+   * The wide backdrop behind an overview page.
+   *
+   * A separate picture rather than the thumbnail scaled up: a thumbnail is a
+   * 640px frame ffmpeg picked on its own, which is fine on a card and soft and
+   * arbitrary across a full-bleed hero.
+   */
+  async videoBanner(id: string, role: Role, response: Response): Promise<void> {
+    const video = await this.prisma.video.findFirst({
+      where: { id, ...whereVisible(role) },
+      select: { bannerKey: true },
+    });
+    if (!video?.bannerKey) throw new NotFoundException('No banner');
+
+    await this.send(video.bannerKey, response);
+  }
+
+  async collectionBanner(id: string, role: Role, response: Response): Promise<void> {
+    const collection = await this.prisma.collection.findFirst({
+      where: { id, ...whereVisible(role) },
+      select: { bannerKey: true },
+    });
+    if (!collection?.bannerKey) throw new NotFoundException('No banner');
+
+    await this.send(collection.bannerKey, response);
+  }
+
+  /**
    * Sends the file, with an ETag rather than a lifetime.
    *
    * The storage key is stable across replacements — a new poster overwrites

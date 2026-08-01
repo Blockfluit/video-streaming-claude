@@ -121,6 +121,8 @@ describe('Rate limiting', () => {
       ['a video stream', '/videos/whatever/stream'],
       ['a video poster', '/videos/whatever/thumbnail'],
       ['a collection poster', '/collections/whatever/poster'],
+      ['a video banner', '/videos/whatever/banner'],
+      ['a collection banner', '/collections/whatever/banner'],
       ['a subtitle track', '/videos/whatever/subtitles/track.vtt'],
       ['the session probe', '/auth/me'],
     ])('never rate-limits %s', async (_label, path) => {
