@@ -42,11 +42,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
 <template>
   <section v-if="!empty" class="group/row space-y-2">
     <div class="flex items-baseline gap-3 px-1">
-      <h2 class="text-lg font-semibold tracking-tight text-white/90">{{ title }}</h2>
+      <h2 class="text-lg font-semibold tracking-tight text-(--ui-text-highlighted)">{{ title }}</h2>
       <ULink
         v-if="to"
         :to="to"
-        class="text-xs text-white/70 transition-colors hover:text-white"
+        class="text-xs text-(--ui-text-muted) transition-colors hover:text-white"
       >
         See all →
       </ULink>

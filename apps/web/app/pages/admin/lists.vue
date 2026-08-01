@@ -84,13 +84,15 @@ async function remove(row: CuratedRow) {
   await api(`/lists/${row.id}`, { method: 'DELETE' })
   await refresh()
 }
+
+useHead({ title: 'Curated rows' })
 </script>
 
 <template>
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Curated rows</h1>
-      <p class="text-sm text-white/65">The shelves on the home page, in order.</p>
+      <p class="text-sm text-(--ui-text-muted)">The shelves on the home page, in order.</p>
     </div>
 
     <div class="flex gap-2">
@@ -98,12 +100,12 @@ async function remove(row: CuratedRow) {
       <UButton icon="i-lucide-plus" @click="create">Add row</UButton>
     </div>
 
-    <div v-for="row in data?.items ?? []" :key="row.id" class="rounded-lg border border-white/12 p-4">
+    <div v-for="row in data?.items ?? []" :key="row.id" class="rounded-lg border border-(--ui-border) p-4">
       <div class="mb-3 flex flex-wrap items-center gap-3">
         <h2 class="font-semibold">{{ row.title }}</h2>
         <UBadge v-if="!row.isVisible" color="neutral" variant="subtle" size="sm">hidden</UBadge>
         <div class="ml-auto flex gap-2">
-          <UButton size="xs" variant="subtle" @click="toggleVisible(row)">
+          <UButton size="xs" color="neutral" variant="subtle" @click="toggleVisible(row)">
             {{ row.isVisible ? 'Hide' : 'Show' }}
           </UButton>
           <UButton size="xs" color="error" variant="subtle" @click="remove(row)">Delete</UButton>
@@ -114,7 +116,7 @@ async function remove(row: CuratedRow) {
         <li
           v-for="(item, index) in row.items"
           :key="item.id"
-          class="flex items-center gap-2 rounded bg-white/5 px-3 py-2 text-sm"
+          class="flex items-center gap-2 rounded bg-(--ui-bg-elevated) px-3 py-2 text-sm"
         >
           <span class="grow truncate">
             {{ item.collection?.title ?? item.video?.title }}
@@ -147,7 +149,7 @@ async function remove(row: CuratedRow) {
           />
         </li>
       </ul>
-      <p v-else class="mb-3 text-sm text-white/70">Empty.</p>
+      <p v-else class="mb-3 text-sm text-(--ui-text-muted)">Empty.</p>
 
       <USelect
         :items="(collections?.items ?? []).map(c => ({ label: c.title, value: c.id }))"
@@ -157,7 +159,7 @@ async function remove(row: CuratedRow) {
       />
     </div>
 
-    <p v-if="!data?.items?.length" class="py-20 text-center text-white/70">
+    <p v-if="!data?.items?.length" class="py-20 text-center text-(--ui-text-muted)">
       No curated rows yet.
     </p>
   </div>

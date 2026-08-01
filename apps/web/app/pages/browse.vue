@@ -42,10 +42,12 @@ watch(q, (value) => {
 })
 
 const collections = computed(() => data.value?.items ?? [])
+
+useHead({ title: 'Browse' })
 </script>
 
 <template>
-  <UContainer class="py-8 space-y-6">
+  <div class="page-shell space-y-6 pt-24 pb-16">
     <div class="flex items-center gap-4 flex-wrap">
       <h1 class="text-2xl font-semibold grow">Browse</h1>
       <UInput
@@ -78,5 +80,5 @@ const collections = computed(() => data.value?.items ?? [])
     <p v-else-if="status !== 'pending'" class="py-20 text-center text-(--ui-text-muted)">
       {{ q ? `Nothing matches “${q}”.` : 'The library is empty.' }}
     </p>
-  </UContainer>
+  </div>
 </template>

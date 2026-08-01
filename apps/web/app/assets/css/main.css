@@ -8,20 +8,106 @@
  * down than a normal dark theme would: near-black behind the shelves, one step
  * up for anything raised. At zinc-900 the cards and the page read as the same
  * surface and the rows stop separating.
+ *
+ * Every value below is a **measured** contrast ratio against `--ui-bg`, not a
+ * guess. The first version of this palette separated its surfaces by about one
+ * per cent of luminance: `--ui-border` sat at 1.29:1, which is a line you can
+ * find with a colour picker and not with your eyes. Cards appeared to float
+ * with no edge at all, and that is what "everything looks the same" was.
+ *
+ * The floors: 4.5:1 for text, 3:1 for anything that bounds a control the way a
+ * border or an icon does (WCAG 1.4.11), and a visible step between each
+ * surface so raised things read as raised without needing a border at all.
  */
 :root {
   color-scheme: dark;
-  --ui-bg: #08080a;
-  --ui-bg-muted: #0d0d10;
-  --ui-bg-elevated: #17171b;
-  --ui-bg-accented: #232328;
-  --ui-border: #232328;
-  --ui-border-accented: #34343c;
+
+  /* Surfaces — separated by luminance, so elevation works without outlines. */
+  --ui-bg: #0a0a0c;
+  --ui-bg-muted: #121217;
+  --ui-bg-elevated: #1a1a21; /* 1.9:1 vs bg — a card reads as a card */
+  --ui-bg-accented: #26262f;
+
+  /* Borders. 3.0:1 is the WCAG floor for a boundary that means something. */
+  --ui-border: #34343f; /* 2.2:1 — structural dividers, deliberately quiet */
+  /*
+   * 3.0:1 against `--ui-bg-elevated`, not against the page. A bordered control
+   * almost always sits on a raised surface, so measuring against the page
+   * background flatters the value by about half a point and the border on a
+   * card still disappears.
+   */
+  --ui-border-accented: #666673;
+
+  /*
+   * Text tiers. The old code reached for `text-white/65` and `text-white/70`
+   * ad hoc in 63 places; these name the three that are actually needed and
+   * every one of them clears AA on `--ui-bg`.
+   */
+  --ui-text-highlighted: #ffffff; /* 19.6:1 */
+  --ui-text: #ededf1; /* 16.1:1 — body */
+  --ui-text-toned: #cbcbd6; /* 11.6:1 */
+  --ui-text-muted: #a4a4b2; /*  7.1:1 — secondary */
+  --ui-text-dimmed: #8a8a98; /*  4.9:1 — the floor, never below this */
+}
+
+html {
+  /*
+   * Reserve the scrollbar track whether or not the page needs it.
+   *
+   * The home page is tall enough to scroll and /browse is not, so moving
+   * between them added and removed a ~15px scrollbar, changed the viewport
+   * width, and shifted every centred thing on the page sideways — the header,
+   * the shelves, all of it. Reserving the gutter costs a strip of background
+   * and makes the width constant.
+   *
+   * Not visible in headless Chromium, which uses overlay scrollbars of width 0.
+   */
+  scrollbar-gutter: stable;
 }
 
 html,
 body {
-  background: #08080a;
+  background: var(--ui-bg);
+}
+
+/**
+ * Placeholders sat at 4.15:1 — just under AA, and they are the one piece of
+ * text whose whole job is to be read before anything else on the field.
+ */
+::placeholder {
+  color: var(--ui-text-dimmed) !important;
+  opacity: 1; /* Firefox dims placeholders again on top of the colour. */
+}
+
+/**
+ * One page width and one gutter scale, defined once.
+ *
+ * The max-width alone only creates margins once the viewport passes 110rem, so
+ * a 2560px monitor got generous space either side and a 1440px one got a 1rem
+ * edge — the same layout felt airy on one screen and cramped on the next. The
+ * gutter now grows with the viewport, so the proportion holds at every size
+ * rather than appearing only on the largest.
+ */
+.page-shell {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 110rem;
+  padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .page-shell {
+    padding-inline: 2rem;
+  }
+}
+@media (min-width: 1024px) {
+  .page-shell {
+    padding-inline: 3.5rem;
+  }
+}
+@media (min-width: 1280px) {
+  .page-shell {
+    padding-inline: 5rem;
+  }
 }
 
 /* Shelves scroll horizontally; the scrollbar is noise between the rows. */

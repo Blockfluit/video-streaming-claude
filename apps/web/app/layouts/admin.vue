@@ -35,9 +35,9 @@ async function signOut() {
 
 <template>
   <div class="min-h-screen bg-(--ui-bg)">
-    <div class="mx-auto flex max-w-[110rem] gap-8 px-4 py-6 sm:px-8">
+    <div class="page-shell flex gap-8 pt-10 pb-16">
       <aside class="sticky top-6 hidden h-fit w-56 shrink-0 space-y-1 lg:block">
-        <NuxtLink to="/" class="mb-4 flex items-center gap-2 px-3 text-sm text-white/65 hover:text-white">
+        <NuxtLink to="/" class="mb-4 flex items-center gap-2 px-3 text-sm text-(--ui-text-muted) hover:text-(--ui-text-highlighted)">
           <UIcon name="i-lucide-arrow-left" class="size-4" />
           Back to the library
         </NuxtLink>
@@ -48,9 +48,19 @@ async function signOut() {
           :to="section.to"
           class="flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors"
           :class="isActive(section.to)
-            ? 'bg-(--ui-primary)/15 font-medium text-(--ui-primary)'
-            : 'text-white/70 hover:bg-white/5 hover:text-white'"
+            ? 'bg-(--ui-bg-accented) font-medium text-(--ui-text-highlighted)'
+            : 'text-(--ui-text-muted) hover:bg-(--ui-bg-elevated) hover:text-(--ui-text-highlighted)'"
         >
+          <!--
+            The selected row is marked by a rule and a raised surface, not by
+            colouring the label red. Red-on-black clears WCAG and still reads
+            badly at 14px, which is what made the whole sidebar feel dim.
+          -->
+          <span
+            aria-hidden="true"
+            class="-ml-1 h-4 w-0.5 rounded-full transition-colors"
+            :class="isActive(section.to) ? 'bg-(--ui-primary)' : 'bg-transparent'"
+          />
           <UIcon :name="section.icon" class="size-4 shrink-0" />
           {{ section.label }}
         </NuxtLink>
@@ -58,7 +68,7 @@ async function signOut() {
         <USeparator class="my-3" />
         <button
           type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-white/65 hover:bg-white/5 hover:text-white"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-elevated) hover:text-(--ui-text-highlighted)"
           @click="signOut"
         >
           <UIcon name="i-lucide-log-out" class="size-4" />

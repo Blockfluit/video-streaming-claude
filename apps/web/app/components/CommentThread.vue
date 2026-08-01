@@ -79,7 +79,7 @@ const canDelete = (comment: CommentView) =>
   <section class="space-y-5">
     <h2 class="text-lg font-semibold">
       Comments
-      <span class="text-white/70">{{ data?.total ?? 0 }}</span>
+      <span class="text-(--ui-text-muted)">{{ data?.total ?? 0 }}</span>
     </h2>
 
     <div class="space-y-2">
@@ -102,13 +102,13 @@ const canDelete = (comment: CommentView) =>
       <li v-for="comment in data?.items ?? []" :key="comment.id" class="group flex gap-3">
         <div
           class="grid size-9 shrink-0 place-items-center rounded-full text-xs font-semibold"
-          :class="comment.deleted ? 'bg-white/5 text-white/65' : 'bg-(--ui-bg-accented) text-white/80'"
+          :class="comment.deleted ? 'bg-(--ui-bg-elevated) text-(--ui-text-muted)' : 'bg-(--ui-bg-accented) text-(--ui-text)'"
         >
           {{ comment.deleted ? '—' : comment.user?.displayName.slice(0, 2).toUpperCase() }}
         </div>
 
         <div class="min-w-0 grow">
-          <p v-if="comment.deleted" class="text-sm text-white/55 italic">
+          <p v-if="comment.deleted" class="text-sm text-(--ui-text-dimmed) italic">
             This comment was removed.
           </p>
 
@@ -123,7 +123,7 @@ const canDelete = (comment: CommentView) =>
               >
                 {{ timecode(comment.timestampSec) }}
               </button>
-              <span v-if="comment.editedAt" class="text-xs text-white/55">edited</span>
+              <span v-if="comment.editedAt" class="text-xs text-(--ui-text-dimmed)">edited</span>
 
               <UButton
                 v-if="canDelete(comment)"
@@ -136,13 +136,13 @@ const canDelete = (comment: CommentView) =>
                 @click="remove(comment)"
               />
             </div>
-            <p class="text-sm whitespace-pre-wrap text-white/80">{{ comment.body }}</p>
+            <p class="text-sm whitespace-pre-wrap text-(--ui-text)">{{ comment.body }}</p>
           </template>
         </div>
       </li>
     </ul>
 
-    <p v-if="(data?.items?.length ?? 0) === 0" class="text-sm text-white/70">
+    <p v-if="(data?.items?.length ?? 0) === 0" class="text-sm text-(--ui-text-muted)">
       Nothing yet. Say the first thing.
     </p>
   </section>

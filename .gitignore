@@ -45,3 +45,7 @@ coverage/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Playwright run artifacts — a per-run file that changes on every invocation.
+test-results/
+playwright-report/

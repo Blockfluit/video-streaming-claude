@@ -41,9 +41,9 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
   <div class="min-h-screen bg-(--ui-bg)">
     <header
       class="fixed inset-x-0 top-0 z-50 transition-colors duration-300"
-      :class="scrolled ? 'bg-[#08080a]/95 backdrop-blur border-b border-white/12' : 'bg-gradient-to-b from-black/80 to-transparent'"
+      :class="scrolled ? 'bg-[#08080a]/95 backdrop-blur border-b border-(--ui-border)' : 'bg-gradient-to-b from-black/80 to-transparent'"
     >
-      <div class="mx-auto flex h-16 max-w-[110rem] items-center gap-8 px-4 sm:px-8">
+      <div class="page-shell flex h-16 items-center gap-8">
         <NuxtLink to="/" class="shrink-0 text-xl font-bold tracking-tight text-(--ui-primary)">
           LIBRARY
         </NuxtLink>
@@ -54,7 +54,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
             :key="link.to"
             :to="link.to"
             class="text-sm transition-colors"
-            :class="isActive(link.to) ? 'font-semibold text-white' : 'text-white/70 hover:text-white'"
+            :class="isActive(link.to) ? 'font-semibold text-white' : 'text-(--ui-text-muted) hover:text-(--ui-text-highlighted)'"
           >
             {{ link.label }}
           </NuxtLink>
@@ -67,7 +67,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
             { label: 'Sign out', icon: 'i-lucide-log-out', onSelect: signOut },
           ]]"
         >
-          <button type="button" class="flex items-center gap-2 text-sm text-white/80 hover:text-white">
+          <button type="button" class="flex items-center gap-2 text-sm text-(--ui-text) hover:text-(--ui-text-highlighted)">
             <span
               class="grid size-8 place-items-center rounded bg-red-700 text-xs font-bold text-white"
             >

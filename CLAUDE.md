@@ -311,6 +311,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Browser tests live in `apps/web/e2e` (`npm run test:e2e -w @video/web`). They assert controls **do
   something** — `expectsRequest` waits for the API call — because a button with no handler renders
   perfectly. Needs both dev servers plus `npx playwright install --with-deps chromium`.
+- **`locator.count()` does not retry.** A guard written as `if (await x.count() === 0) test.skip(...)` runs
+  before a client-side route has rendered and is therefore always true: the sidebar-navigation test skipped
+  on every run since it was written, announcing "only one video in this collection" about a collection
+  holding five. A skip that never runs reports green, which is worse than no test. Decide a skip from the
+  **data** (fetch it) and wait for the DOM with `expect`, which retries.
+- `waitForLoadState('networkidle')` is not a substitute either — after a client-side navigation it can
+  resolve *before* the route's data request has even started.
 - `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
   clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
   ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
@@ -324,8 +331,38 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `GET /videos/:id/subtitles` returns a `Page` like every other list endpoint. It returned a bare array
   until the player's `<track>` list silently came back empty — the frontend read `.items` because
   everything else does, which is the whole point of the convention.
+- `GET /videos/:id/credits` and `/collections/:id/credits` were the **same bug**, found the same way: both
+  returned bare arrays and neither was caught, because no frontend called them until step 17b. A whole cast
+  arrives in one response rather than a paged window — a credits panel that arrives in pages is not a credits
+  panel — but it is still wrapped in a `Page`, capped at `MAX_CREDITS`. **An endpoint nothing calls has not
+  been proven to honour any convention.**
 - **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
   A frontend change is verified in a browser or it is not verified.
+- **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every control
+  on the page cleared AA — the worst was 5.78:1 and the `Edit` buttons measured 6.19:1. The formula weights
+  red at 0.2126, so saturated red text on near-black scores well and reads badly at 12–14px. The fix was to
+  stop using accent-coloured *text* for controls at all: `variant="subtle"` with no `color` renders the
+  primary colour as text, so it gets `color="neutral"` (white on a raised surface) and the one real call to
+  action on a screen gets `variant="solid"`. Accent colour marks things — a rule beside the active nav item,
+  a bar under the eyebrow — and never sets type.
+- Colour lives in five named tiers in `main.css` (`--ui-text` → `--ui-text-dimmed`, plus `--ui-border` and
+  `--ui-border-accented`), each annotated with its measured ratio. They replaced 96 ad-hoc `white/N`
+  utilities, two of which (`text-white/35` at 2.8:1 and `/40` at 3.5:1) were below AA. `--ui-border-accented`
+  is measured against `--ui-bg-elevated`, **not** the page: a bordered control almost always sits on a raised
+  surface, and measuring against the page flatters the value by half a point while the border still vanishes.
+- `bg-white/N` is deliberately *not* part of that sweep — those are scrims over artwork and progress-bar
+  tracks, where the alpha is the point.
+- Gradients over artwork interpolate to `var(--ui-bg)`, never a hardcoded hex. The hero faded to `#08080a`
+  after the page moved to `#0a0a0c`, so the scrim stopped landing on the colour behind it.
+- **Reka UI teleports popovers to `<body>`.** An audit scoped to `main *, header *, aside *` therefore never
+  sees a single dropdown, select or modal. `visible.spec.ts` walks the whole document for this reason.
+- A `mask-image` icon's colour **is** its `background-color`, so an audit that treats the element's own
+  background as the backdrop compares the colour against itself and reports a flat ~1:1 for every icon on
+  the page. Text and borders paint *on top of* their own background and must include it; icons must not.
+  Getting this wrong reported 56 fake problems out of 70.
+- **`@nuxt/ui` control triggers carry their own `aria-label`, which shadows the visible text.** `USelectMenu`
+  ships `aria-label="Show popup"` — so the accessible name of the control that picks a person was "Show
+  popup". Pass an explicit `aria-label` naming the *job*, not the mechanism. (Same bug as `AddToListButton`.)
 
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.

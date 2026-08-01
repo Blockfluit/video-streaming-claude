@@ -41,6 +41,8 @@ async function submit() {
     pending.value = false
   }
 }
+
+useHead({ title: 'Set up' })
 </script>
 
 <template>

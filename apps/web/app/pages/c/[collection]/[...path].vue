@@ -122,19 +122,21 @@ const nextTo = computed(() => {
 const player = ref<{ seek?: (s: number) => void } | null>(null)
 const currentTime = ref(0)
 
+const { isAdmin } = useSession()
+
 useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Library' }))
 </script>
 
 <template>
-  <div class="mx-auto max-w-[110rem] px-4 pt-24 pb-24 sm:px-8">
+  <div class="page-shell pt-24 pb-24">
     <!-- A video: the player, its details, and the rest of the collection. -->
     <template v-if="video">
-      <nav class="mb-4 flex items-center gap-2 text-sm text-white/65">
+      <nav class="mb-4 flex items-center gap-2 text-sm text-(--ui-text-muted)">
         <NuxtLink :to="`/c/${collection.slug}`" class="hover:text-white">
           {{ collection.title }}
         </NuxtLink>
         <span>/</span>
-        <span class="text-white/80">{{ video.title }}</span>
+        <span class="text-(--ui-text)">{{ video.title }}</span>
       </nav>
 
       <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -156,13 +158,31 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
               <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
                 {{ video.state }}
               </UBadge>
-              <span v-if="runtime(video.durationSec)" class="text-sm text-white/65">
+              <span v-if="runtime(video.durationSec)" class="text-sm text-(--ui-text-muted)">
                 {{ runtime(video.durationSec) }}
               </span>
-              <AddToListButton :video-id="video.id" label class="ml-auto" />
+              <div class="ml-auto flex items-center gap-2">
+                <AddToListButton :video-id="video.id" label />
+                <!--
+                  Straight to this video's editor, so fixing a title or a
+                  marker does not mean walking back through the admin library
+                  to find the row you were just looking at. Admins only — the
+                  API refuses either way, but offering a button that 403s is
+                  not an interface.
+                -->
+                <UButton
+                  v-if="isAdmin"
+                  :to="`/admin/videos/${video.id}`"
+                  color="neutral"
+                  variant="subtle"
+                  icon="i-lucide-pencil"
+                >
+                  Edit
+                </UButton>
+              </div>
             </div>
 
-            <p v-if="video.description" class="max-w-3xl text-white/70">{{ video.description }}</p>
+            <p v-if="video.description" class="max-w-3xl text-(--ui-text-muted)">{{ video.description }}</p>
 
             <div v-if="video.tags?.length" class="flex flex-wrap gap-2">
               <UBadge
@@ -179,6 +199,10 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
 
           <USeparator />
 
+          <CreditsPanel :video-id="video.id" />
+
+          <USeparator />
+
           <CommentThread
             :video-id="video.id"
             :current-time="currentTime"
@@ -188,7 +212,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
 
         <!-- The rest of the collection, so the next thing is one click away. -->
         <aside v-if="ordered.length > 1" class="space-y-3">
-          <h2 class="text-sm font-semibold tracking-wide text-white/70 uppercase">
+          <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
             More from {{ collection.title }}
           </h2>
           <ul class="space-y-2">
@@ -196,7 +220,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
               <NuxtLink
                 :to="linkTo(entry)"
                 class="flex gap-3 rounded-md p-2 transition-colors"
-                :class="entry.id === video.id ? 'bg-white/10' : 'hover:bg-white/5'"
+                :class="entry.id === video.id ? 'bg-(--ui-bg-accented)' : 'hover:bg-(--ui-bg-elevated)'"
               >
                 <img
                   :src="`/api/videos/${entry.id}/thumbnail`"
@@ -206,7 +230,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
                 >
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium">{{ entry.title }}</p>
-                  <p class="text-xs text-white/70">{{ runtime(entry.durationSec) }}</p>
+                  <p class="text-xs text-(--ui-text-muted)">{{ runtime(entry.durationSec) }}</p>
                 </div>
               </NuxtLink>
             </li>
@@ -221,11 +245,11 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
         <img
           :src="`/api/collections/${collection.id}/poster`"
           alt=""
-          class="aspect-2/3 w-44 shrink-0 rounded-lg object-cover bg-(--ui-bg-elevated) ring-1 ring-white/10"
+          class="aspect-2/3 w-44 shrink-0 rounded-lg object-cover bg-(--ui-bg-elevated) ring-1 ring-(--ui-border)"
         >
         <div class="space-y-3">
           <h1 class="text-4xl font-bold tracking-tight">{{ collection.title }}</h1>
-          <p v-if="collectionView?.description" class="max-w-2xl text-white/70">
+          <p v-if="collectionView?.description" class="max-w-2xl text-(--ui-text-muted)">
             {{ collectionView.description }}
           </p>
           <AddToListButton :collection-id="collection.id" label />
@@ -247,7 +271,7 @@ useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Librar
         />
       </div>
 
-      <p v-if="ordered.length === 0" class="py-20 text-center text-white/70">
+      <p v-if="ordered.length === 0" class="py-20 text-center text-(--ui-text-muted)">
         Nothing in this collection yet.
       </p>
     </template>

@@ -77,6 +77,8 @@ const FIELD_LABELS: Record<string, string> = {
   durationSec: 'not probed',
   thumbnailKey: 'no poster',
 }
+
+useHead({ title: 'Drafts' })
 </script>
 
 <template>
@@ -84,7 +86,7 @@ const FIELD_LABELS: Record<string, string> = {
     <div class="flex flex-wrap items-end gap-4">
       <div class="grow">
         <h1 class="text-2xl font-bold tracking-tight">Drafts</h1>
-        <p class="text-sm text-white/65">
+        <p class="text-sm text-(--ui-text-muted)">
           {{ data?.total ?? 0 }} waiting · {{ ready.length }} ready to publish
         </p>
       </div>
@@ -100,16 +102,16 @@ const FIELD_LABELS: Record<string, string> = {
       <UButton
         v-if="selected.size"
         :loading="busy"
-        variant="subtle"
+        color="neutral" variant="subtle"
         @click="publish([...selected])"
       >
         Publish {{ selected.size }} selected
       </UButton>
     </div>
 
-    <div v-if="drafts.length" class="overflow-hidden rounded-lg border border-white/12">
+    <div v-if="drafts.length" class="overflow-hidden rounded-lg border border-(--ui-border)">
       <table class="w-full text-sm">
-        <thead class="bg-white/5 text-left text-xs text-white/65 uppercase">
+        <thead class="bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
           <tr>
             <th class="w-10 p-3" />
             <th class="p-3">Video</th>
@@ -117,7 +119,7 @@ const FIELD_LABELS: Record<string, string> = {
             <th class="w-32 p-3" />
           </tr>
         </thead>
-        <tbody class="divide-y divide-white/10">
+        <tbody class="divide-y divide-(--ui-border)">
           <tr v-for="video in drafts" :key="video.id" class="hover:bg-white/[0.03]">
             <td class="p-3">
               <UCheckbox
@@ -137,7 +139,7 @@ const FIELD_LABELS: Record<string, string> = {
                 >
                 <div class="min-w-0">
                   <p class="truncate font-medium">{{ video.title }}</p>
-                  <div class="flex items-center gap-2 text-xs text-white/70">
+                  <div class="flex items-center gap-2 text-xs text-(--ui-text-muted)">
                     <span>{{ runtime(video.durationSec) ?? 'unprobed' }}</span>
                     <QualityBadge :width="video.width" :height="video.height" />
                     <UBadge v-if="video.needsConversion" color="warning" variant="subtle" size="sm">
@@ -169,14 +171,14 @@ const FIELD_LABELS: Record<string, string> = {
             </td>
 
             <td class="p-3 text-right">
-              <UButton :to="`/admin/videos/${video.id}`" size="xs" variant="subtle">Edit</UButton>
+              <UButton :to="`/admin/videos/${video.id}`" size="xs" color="neutral" variant="subtle">Edit</UButton>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <p v-else-if="status !== 'pending'" class="py-20 text-center text-white/70">
+    <p v-else-if="status !== 'pending'" class="py-20 text-center text-(--ui-text-muted)">
       No drafts. Everything in the library has been dealt with.
     </p>
   </div>
