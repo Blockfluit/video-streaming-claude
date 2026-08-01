@@ -100,7 +100,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   the filename for the same reason. stderr and the structured message **overlap without containing each
   other** — stderr adds the specific cause (`moov atom not found`) that the structured message lacks — so
   the shared part is dropped and both halves are kept.
-- Thumbnails are written to `DERIVED_ROOT`, never the watched media tree.
+- Thumbnails are written to `DERIVED_ROOT`, never the watched media tree, and they are **renamed into place**
+  from `derived/tmp/` like a transcode. ffmpeg truncates its output the moment it opens it, so capturing
+  straight to `thumbnails/<id>.jpg` left the live poster missing for as long as the capture took — every card
+  in the app requests that URL, so a routine re-probe made artwork flicker to a **404**, not a stale picture.
+  Testing this needs a failure that happens *after* the output is opened: pointing ffmpeg at an unreadable
+  source fails during input parsing, never touches the destination, and passes against the broken code too.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
 - `needsConversion` does **not** fire on nulls from a failed probe — that would queue CPU-saturating work on
