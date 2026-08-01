@@ -291,6 +291,30 @@ describe('Library (real database)', () => {
    * The invariant worth a test of its own: both columns arrived after the
    * library was full, so requiring either would un-publish every record.
    */
+  /**
+   * The search proxy, with no key configured — which is the default, and the
+   * state CI always runs in. Paste is the path that always works, so being
+   * unconfigured has to be an explainable answer rather than a 500.
+   */
+  describe('GET /trailers/search', () => {
+    it('tells an admin it is not configured, and how to proceed', async () => {
+      const response = await admin.get('/trailers/search?q=dune').expect(503);
+
+      expect(response.body.message).toContain('YOUTUBE_API_KEY');
+      expect(response.body.message).toMatch(/paste/i);
+    });
+
+    it('403s a USER, because the quota is shared and the picker is admin-only', async () => {
+      const user = await asUser();
+
+      await user.get('/trailers/search?q=dune').expect(403);
+    });
+
+    it('400s a search with no query', async () => {
+      await admin.get('/trailers/search').expect(400);
+    });
+  });
+
   describe('publishing without a trailer or a banner', () => {
     it('still publishes a video that has neither', async () => {
       const collection = await createCollection('Chernobyl');

@@ -196,6 +196,19 @@ export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
 export const BANNER_EXTENSIONS = THUMBNAIL_EXTENSIONS;
 export const MAX_BANNER_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Searching YouTube for a trailer.
+ *
+ * Its own limit rather than `pageQuerySchema`: the upstream pages by opaque
+ * token, so there is no offset to honour, and a low cap is the point. Each
+ * search spends 100 quota units of a 10,000/day default.
+ */
+export const trailerSearchSchema = z.object({
+  q: nonEmptyText(200),
+  limit: z.coerce.number().int().min(1).max(25).default(10),
+});
+export type TrailerSearchQuery = z.infer<typeof trailerSearchSchema>;
+
 /** Same `{ atSeconds }` shape as a thumbnail capture, named for its own route. */
 export const captureBannerSchema = captureThumbnailSchema;
 export type CaptureBannerInput = z.infer<typeof captureBannerSchema>;

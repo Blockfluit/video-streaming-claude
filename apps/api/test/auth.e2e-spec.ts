@@ -154,6 +154,15 @@ describe('Auth (e2e)', () => {
     it('401s on /auth/me without a session', async () => {
       await request(app.getHttpServer()).get('/auth/me').expect(401);
     });
+
+    /**
+     * The search proxy is ADMIN-only because it spends a shared, metered quota
+     * — 100 units a call against a 10,000/day default. `SessionGuard` is global
+     * and fail-closed, so an anonymous caller never reaches the handler at all.
+     */
+    it('401s on /trailers/search without a session', async () => {
+      await request(app.getHttpServer()).get('/trailers/search?q=dune').expect(401);
+    });
   });
 
   describe('POST /auth/login', () => {

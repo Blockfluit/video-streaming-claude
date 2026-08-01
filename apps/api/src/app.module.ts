@@ -12,6 +12,7 @@ import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
 import { ListsModule } from './lists/lists.module';
+import { TrailersModule } from './trailers/trailers.module';
 import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -49,6 +50,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     CommentsModule,
     WatchlistModule,
     ListsModule,
+    TrailersModule,
   ],
   controllers: [AppController],
   providers: [
