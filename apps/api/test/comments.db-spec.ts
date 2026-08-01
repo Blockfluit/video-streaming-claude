@@ -249,6 +249,71 @@ describe('Comments (real database)', () => {
     });
   });
 
+  describe('the moderation queue', () => {
+    it('is admin-only', async () => {
+      await ada.get('/admin/comments').expect(403);
+      await admin.get('/admin/comments').expect(200);
+    });
+
+    it('returns a Page, like every other list endpoint', async () => {
+      await post(ada, { body: 'One' }).expect(201);
+
+      const response = await admin.get('/admin/comments').expect(200);
+
+      expect(response.body).toMatchObject({ total: 1, limit: 50, offset: 0 });
+      expect(response.body.items).toHaveLength(1);
+    });
+
+    /**
+     * The deliberate difference from the thread endpoint. A comment worth
+     * removing is most likely on a video nobody is watching, so the moderation
+     * listing does *not* apply the visibility filter — otherwise the one place
+     * that can find it is the one place that hides it.
+     */
+    it('reaches comments on a draft, which the thread endpoint hides', async () => {
+      const draftId = await seedVideo({ state: 'DRAFT' });
+      await admin.post(`/videos/${draftId}/comments`).send({ body: 'On a draft' }).expect(201);
+
+      // A viewer cannot even see the video.
+      await ada.get(`/videos/${draftId}/comments`).expect(404);
+
+      const response = await admin.get('/admin/comments').expect(200);
+      const bodies = response.body.items.map((c: { body: string | null }) => c.body);
+      expect(bodies).toContain('On a draft');
+    });
+
+    it('hides removed comments by default and never returns their text', async () => {
+      const created = await post(ada, { body: 'Regrettable' }).expect(201);
+      await admin.delete(`/comments/${created.body.id}`).expect(204);
+
+      const byDefault = await admin.get('/admin/comments').expect(200);
+      expect(byDefault.body.items).toHaveLength(0);
+
+      const withDeleted = await admin.get('/admin/comments?includeDeleted=true').expect(200);
+      expect(withDeleted.body.items).toHaveLength(1);
+      // toCommentView is the only thing between a deleted comment and its text.
+      expect(withDeleted.body.items[0]).toMatchObject({ deleted: true, body: null });
+    });
+
+    /** booleanParam, not z.coerce.boolean() — the latter makes "false" true. */
+    it('treats includeDeleted=false as false', async () => {
+      const created = await post(ada, { body: 'Gone' }).expect(201);
+      await admin.delete(`/comments/${created.body.id}`).expect(204);
+
+      const response = await admin.get('/admin/comments?includeDeleted=false').expect(200);
+      expect(response.body.items).toHaveLength(0);
+    });
+
+    it('searches the body', async () => {
+      await post(ada, { body: 'A remark about herons' }).expect(201);
+      await post(ada, { body: 'Something else entirely' }).expect(201);
+
+      const response = await admin.get('/admin/comments?q=HERONS').expect(200);
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0].body).toMatch(/herons/);
+    });
+  });
+
   describe('deleting', () => {
     let commentId: string;
 

@@ -193,6 +193,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   hold "ada lovelace" and "Ada Lovelace" as two people.
 - A filmography is filtered by the caller's visibility, or a director's page becomes a way to read the draft
   library.
+- `GET /admin/comments` is the moderation queue and deliberately does **not** apply `whereVisible`. A
+  comment worth removing is most likely on a video nobody is watching, so filtering it would mean the one
+  screen that can find it is the one screen that hides it. It is ADMIN-only, which is what makes that safe.
+  Removed comments are excluded by default — a tombstone is noise when you are looking for something to act
+  on — and `includeDeleted` goes through `booleanParam`, so `?includeDeleted=false` is false.
 - Comment deletion is **soft**, so `toCommentView` is the only thing between a deleted comment and its text.
   It builds the tombstone from nothing rather than spreading the row and overwriting — a column added later
   would otherwise ride along unnoticed. The tombstone keeps `createdAt` (its place in the thread is the only
@@ -293,7 +298,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Artwork is `GET /videos/:id/thumbnail` and `GET /collections/:id/poster`, which **revalidate** (`ETag` +
   `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
   any `max-age` above zero serves the poster an admin has just replaced.
-- A nav link to a route with no page is a broken app, not a placeholder — links land with their pages.
+- A nav link to a route with no page is a broken app, not a placeholder — links land with their pages. The
+  reverse is just as bad: `/admin/collections/[slug]` and `/admin/comments` are unreachable without their
+  sidebar entries, and a page nobody can navigate to gets no use and no bug reports.
+- The admin layout has a real `<main>`. It had none — only `<aside>` and a bare `<div>` — so there was no
+  landmark to skip the nav to, and `main a[…]` (which every viewer-side test uses) matched nothing there.
+- `refDebounced` is VueUse and **not a dependency**. Debounce with a `setTimeout` cleared in `watch`, the way
+  `browse.vue` does; without one, every keystroke is a request and the answers can land out of order, so the
+  list settles on whatever the *slowest* one returned.
+- Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
+  `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
+  did the server actually say" is how one screen ends up silently swallowing errors.
 - `packages/shared` emits **both** CJS and ESM, and needs to. NestJS and ts-jest `require()` the CJS half;
   Vite serves the package to the *browser* as a native ES module, where a CJS file exposes **no named
   exports at all** and `import { loginSchema }` fails at parse time. SSR hides this completely — Nitro can

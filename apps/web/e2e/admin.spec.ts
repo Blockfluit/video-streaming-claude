@@ -208,6 +208,78 @@ test.describe('admin', () => {
     await expect(page.getByText(name)).toHaveCount(0)
   })
 
+  /**
+   * The collection editor. Before it existed the admin screens could edit a
+   * video and nothing else — a show's title, state, seasons and shared cast
+   * were reachable only through the API.
+   */
+  test('a collection can be edited, and its seasons managed', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.locator('main a[href^="/admin/collections/"]').first().click()
+    await page.waitForURL(/\/admin\/collections\//)
+
+    await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible()
+
+    // Saving has to reach the API — a form that only updates itself is the
+    // exact failure this suite exists to catch.
+    const description = `Edited by the tests ${Date.now()}`
+    await fillStable(page, 'textarea', description)
+    await expectsRequest(page, /\/collections\/[^/]+$/, 'PATCH', () =>
+      page.getByRole('button', { name: 'Save changes' }).click())
+    await expect(toast(page, 'Saved')).toBeVisible()
+
+    // Aggregate figures are ADMIN-only and had no reader anywhere in the app.
+    await expect(page.getByText('Viewers')).toBeVisible()
+    await expect(page.getByText('Avg. completion')).toBeVisible()
+
+    // A season, then the same season away again — otherwise repeated runs pile
+    // up seasons on the one collection the fixtures have.
+    const seasons = page.locator('h3').filter({ hasText: /^Season \d+$/ })
+    const before = await seasons.count()
+
+    await fillStable(page, 'input[placeholder="Number"]', String(90 + before))
+    await expectsRequest(page, /\/seasons$/, 'POST', () =>
+      page.getByRole('button', { name: 'Add', exact: true }).click())
+    await expect(seasons).toHaveCount(before + 1)
+
+    await expectsRequest(page, /\/seasons\//, 'DELETE', () =>
+      page.getByRole('button', { name: `Remove Season ${90 + before}` }).click())
+    await expect(seasons).toHaveCount(before)
+  })
+
+  /**
+   * The moderation queue. Removal is the only power an admin has over someone
+   * else's comment — the API refuses an edit even for them, because rewriting
+   * someone's words and leaving their name on it is not moderation.
+   */
+  test('a comment can be removed from the moderation queue', async ({ page }) => {
+    // Post one through the real UI so there is something to moderate, and so
+    // the test does not depend on what a previous run left behind.
+    const body = `Moderate me ${Date.now()}`
+    await visit(page, '/')
+    await page.locator('main a[href^="/c/"]').first().click()
+    await page.waitForURL(/\/c\/.+\/.+/)
+    await fillStable(page, 'textarea', body)
+    await expectsRequest(page, /\/comments$/, 'POST', () =>
+      page.getByRole('button', { name: 'Post' }).click())
+
+    await visit(page, '/admin/comments')
+    const row = page.locator('article').filter({ hasText: body })
+    await expect(row).toHaveCount(1)
+
+    await expectsRequest(page, /\/comments\//, 'DELETE', () =>
+      row.getByRole('button', { name: /^Remove/ }).click())
+
+    // Gone from the default view, because a tombstone is noise when you are
+    // looking for something to act on.
+    await expect(page.locator('article').filter({ hasText: body })).toHaveCount(0)
+
+    // And still reachable, without its text, when asked for.
+    await page.getByRole('checkbox', { name: 'Show removed' }).check()
+    await expect(page.getByText('This comment was removed.').first()).toBeVisible()
+    await expect(page.getByText(body)).toHaveCount(0)
+  })
+
   test('minting an invite shows a token exactly once', async ({ page }) => {
     await visit(page, '/admin/users')
 

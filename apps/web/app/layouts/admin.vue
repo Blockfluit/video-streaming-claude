@@ -19,6 +19,7 @@ const sections = [
   { label: 'Jobs', to: '/admin/jobs', icon: 'i-lucide-cpu' },
   { label: 'Ingest', to: '/admin/ingest', icon: 'i-lucide-folder-sync' },
   { label: 'Curated rows', to: '/admin/lists', icon: 'i-lucide-rows-3' },
+  { label: 'Comments', to: '/admin/comments', icon: 'i-lucide-message-square' },
   { label: 'People', to: '/admin/people', icon: 'i-lucide-users' },
   { label: 'Accounts', to: '/admin/users', icon: 'i-lucide-key-round' },
 ]
@@ -76,7 +77,13 @@ async function signOut() {
         </button>
       </aside>
 
-      <div class="min-w-0 grow">
+      <!--
+        A real landmark, not a bare div. The admin screens had no <main>
+        at all, so assistive technology offered no way to skip the nav and
+        "the main content" was not addressable — the viewer layout has had
+        one all along.
+      -->
+      <main class="min-w-0 grow">
         <!-- The sidebar is hidden below lg; this is the way back on a phone. -->
         <div class="mb-4 flex gap-2 overflow-x-auto lg:hidden">
           <UButton
@@ -92,7 +99,7 @@ async function signOut() {
         </div>
 
         <slot />
-      </div>
+      </main>
     </div>
   </div>
 </template>

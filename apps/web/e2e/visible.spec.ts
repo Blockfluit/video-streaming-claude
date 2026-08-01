@@ -180,6 +180,7 @@ const PAGES = [
   '/admin/people',
   '/admin/users',
   '/admin/upload',
+  '/admin/comments',
 ]
 
 test.describe('legibility', () => {
