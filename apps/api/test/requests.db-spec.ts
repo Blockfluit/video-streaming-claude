@@ -237,11 +237,16 @@ describe('Requests (real database)', () => {
      * Proves `titleData` is actually wired into the collection service. The
      * derived column is only worth having while the write path maintains it, and
      * that cannot be shown by seeding the column by hand.
+     *
+     * Asked **as the admin**, because `POST /collections` creates a DRAFT and a
+     * viewer is deliberately never refused on the strength of one — the test
+     * two above this pins that. Asking as `ada` here would be asserting the
+     * opposite of the rule, which is exactly what it did until it was noticed.
      */
     it('sees a collection created through the API', async () => {
       await admin.post('/collections').send({ title: 'Berlin Alexanderplatz' }).expect(201);
 
-      const response = await ask(ada, { title: 'berlin alexanderplatz' }).expect(409);
+      const response = await ask(admin, { title: 'berlin alexanderplatz' }).expect(409);
       expect(response.body.match).toMatchObject({ kind: 'collection' });
     });
 
@@ -256,11 +261,19 @@ describe('Requests (real database)', () => {
       await ask(ada, { title: 'Working Title' }).expect(201);
     });
 
+    /**
+     * A film is a collection holding one video of the same name, so both match.
+     * The collection wins, because it is the page a person wants to land on.
+     *
+     * Also asked as the admin: the collection is a DRAFT, and to a viewer only
+     * the video would be visible — which would make this assert the preference
+     * while only one of the two candidates existed.
+     */
     it('prefers the collection when a film matches both', async () => {
       await admin.post('/collections').send({ title: 'Stalker' }).expect(201);
       await seedVideo('Stalker');
 
-      const response = await ask(ada, { title: 'Stalker' }).expect(409);
+      const response = await ask(admin, { title: 'Stalker' }).expect(409);
       expect(response.body.match.kind).toBe('collection');
     });
   });
