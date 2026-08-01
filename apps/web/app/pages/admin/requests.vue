@@ -99,10 +99,6 @@ function matchPath(match: RequestView['libraryMatch']): string | null {
     : watchPath({ slug: match.slug, collection: match.collection, season: match.season })
 }
 
-function when(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
 useHead({ title: 'Requests' })
 </script>
 
@@ -170,11 +166,11 @@ useHead({ title: 'Requests' })
         <p class="mt-1 text-sm text-(--ui-text-muted)">
           Asked by
           <span class="text-(--ui-text)">{{ request.requestedBy?.displayName ?? 'a deleted account' }}</span>
-          on {{ when(request.createdAt) }}
+          on {{ dateTime(request.createdAt) }}
           <template v-if="request.statusChangedBy && request.statusChangedAt">
             · last changed by
             <span class="text-(--ui-text)">{{ request.statusChangedBy.displayName }}</span>
-            on {{ when(request.statusChangedAt) }}
+            on {{ dateTime(request.statusChangedAt) }}
           </template>
         </p>
 

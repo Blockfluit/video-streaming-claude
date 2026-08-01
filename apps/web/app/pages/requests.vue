@@ -131,10 +131,6 @@ async function withdraw(request: RequestView) {
   }
 }
 
-function when(iso: string): string {
-  return new Date(iso).toLocaleDateString()
-}
-
 useHead({ title: 'Requests' })
 </script>
 
@@ -255,7 +251,10 @@ useHead({ title: 'Requests' })
               yours
             </UBadge>
 
-            <span class="text-sm text-(--ui-text-dimmed)">{{ when(request.createdAt) }}</span>
+            <!-- `shortDate`, not toLocaleDateString: the locale and time zone are
+                 pinned there, because this renders once in Nitro and again in the
+                 browser and an hour's drift lands an evening on the previous day. -->
+            <span class="text-sm text-(--ui-text-dimmed)">{{ shortDate(request.createdAt) }}</span>
 
             <!--
               Only an admin ever has this: the API sends `requestedBy: null` to
