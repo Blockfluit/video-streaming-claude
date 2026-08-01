@@ -1,4 +1,14 @@
-import { expect, expectApiRejection, expectsRequest, fillStable, signIn, test, toast, visit } from './fixtures'
+import {
+  expect,
+  expectApiRejection,
+  expectsRequest,
+  fillStable,
+  removeSeasonWithFolder,
+  signIn,
+  test,
+  toast,
+  visit,
+} from './fixtures'
 
 /** The management screens: every control that changes something. */
 test.describe('admin', () => {
@@ -245,6 +255,67 @@ test.describe('admin', () => {
     await expectsRequest(page, /\/seasons\//, 'DELETE', () =>
       page.getByRole('button', { name: `Remove Season ${90 + before}` }).click())
     await expect(seasons).toHaveCount(before)
+
+    /*
+     * The row is gone but the folder is not — creating a season creates one in
+     * MEDIA_ROOT, and the UI deliberately does not offer deleteFiles. The scan
+     * this suite runs a few tests later would rebuild the row from that folder,
+     * so the season has to be removed properly or it comes back and shifts the
+     * page under whatever runs next.
+     */
+    await removeSeasonWithFolder(page, 90 + before)
+  })
+
+  /**
+   * Dragging an episode into a season, and the drop position becoming the
+   * playing order.
+   *
+   * Asserts the **request**, not just the rearranged DOM: a list that reorders
+   * under the cursor and never tells the server is exactly the kind of control
+   * that looks like it works and does nothing.
+   */
+  test('an episode can be dragged into a season, and the order sticks', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.locator('main a[href^="/admin/collections/"]').first().click()
+    await page.waitForURL(/\/admin\/collections\//)
+
+    // A season of its own, so this does not fight the other tests over one.
+    const number = 70 + (Date.now() % 20)
+    await fillStable(page, 'input[placeholder="Number"]', String(number))
+    await expectsRequest(page, /\/seasons$/, 'POST', () =>
+      page.getByRole('button', { name: 'Add', exact: true }).click())
+
+    const season = page.getByRole('region', { name: `Season ${number}` })
+    await expect(season.getByText('Drop an episode here.')).toBeVisible()
+
+    // Scoped to the loose group, not "the first draggable row on the page" —
+    // with a season above it that is a different episode.
+    const loose = page.getByRole('region', { name: 'Not in a season' })
+    const episode = loose.locator('li[draggable="true"]').first()
+    const title = (await episode.innerText()).split('\n').filter(Boolean)[1]
+
+    // Playwright's dragTo issues the real HTML5 drag events the handlers use.
+    await expectsRequest(page, /\/videos\/order$/, 'PATCH', () =>
+      episode.dragTo(season))
+
+    // It is in the season now, and numbered from one.
+    const moved = season.locator('li[draggable="true"]')
+    await expect(moved).toHaveCount(1)
+    await expect(moved.first()).toContainText(title as string)
+
+    // And it survives a reload, which is the part a purely local reorder fails.
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    const after = page.getByRole('region', { name: `Season ${number}` })
+    await expect(after.locator('li[draggable="true"]')).toHaveCount(1)
+
+    // Put the episode back where it started.
+    await expectsRequest(page, /\/videos\/order$/, 'PATCH', () =>
+      after.locator('li[draggable="true"]').first()
+        .dragTo(page.getByRole('region', { name: 'Not in a season' })))
+
+    // Removes the folder too, or the scan later in this suite rebuilds the row.
+    await removeSeasonWithFolder(page, number)
   })
 
   /**

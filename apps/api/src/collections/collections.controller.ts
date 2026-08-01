@@ -17,12 +17,14 @@ import {
   listCollectionsSchema,
   publishCollectionSchema,
   resolveQuerySchema,
+  reorderCollectionVideosSchema,
   updateCollectionSchema,
   type CreateCollectionInput,
   type DeleteWithFilesQuery,
   type ListCollectionsQuery,
   type PublishCollectionQuery,
   type ResolveQuery,
+  type ReorderCollectionVideosInput,
   type UpdateCollectionInput,
 } from '@video/shared';
 
@@ -116,6 +118,21 @@ export class CollectionsController {
     @Query(validate(deleteWithFilesSchema)) query: DeleteWithFilesQuery,
   ): Promise<void> {
     return this.collections.remove(id, query.deleteFiles);
+  }
+
+  /**
+   * Which season a set of videos sits in, and their order within it.
+   *
+   * Declared before `:id/publish` only for readability — both are literal
+   * suffixes and cannot shadow each other.
+   */
+  @Patch(':id/videos/order')
+  @Roles('ADMIN')
+  reorderVideos(
+    @Param('id') id: string,
+    @Body(validate(reorderCollectionVideosSchema)) dto: ReorderCollectionVideosInput,
+  ) {
+    return this.collections.reorderVideos(id, dto);
   }
 
   @Post(':id/publish')

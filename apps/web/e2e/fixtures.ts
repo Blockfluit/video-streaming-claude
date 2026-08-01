@@ -147,4 +147,49 @@ export async function expectsRequest(
   await waiting
 }
 
+/**
+ * Removes a season **and its folder**.
+ *
+ * Creating a season creates a directory under MEDIA_ROOT, and deleting the row
+ * alone leaves it there — reconcile then rebuilds the row on the next scan, and
+ * this suite runs a scan. A test that tidies up with the UI's own Remove button
+ * therefore leaves a season that reappears part-way through the run and shifts
+ * the page under whatever comes next. The UI deliberately does not offer
+ * `deleteFiles`, because for a real admin the recoverable mistake is the right
+ * default; a test is the one caller that wants the other one.
+ */
+export async function removeSeasonWithFolder(page: Page, number: number): Promise<void> {
+  await page.evaluate(async (seasonNumber) => {
+    const collections = await (await fetch('/api/collections?limit=1')).json()
+    const collection = collections.items?.[0]
+    if (!collection) return
+
+    const find = async () => {
+      const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+      return (detail.seasons ?? []).find(
+        (candidate: { number: number | null }) => candidate.number === seasonNumber,
+      )
+    }
+
+    /*
+     * The row may already be gone — a test that exercised the UI's own Remove
+     * button deleted it, and that button deliberately keeps the folder. The
+     * folder is the thing that has to go, and the only way to reach it is
+     * through a season row, so one is recreated over the same folder purely to
+     * delete it properly.
+     */
+    let season = await find()
+    if (!season) {
+      await fetch('/api/seasons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionId: collection.id, number: seasonNumber }),
+      })
+      season = await find()
+    }
+
+    if (season) await fetch(`/api/seasons/${season.id}?deleteFiles=true`, { method: 'DELETE' })
+  }, number)
+}
+
 export { expect }

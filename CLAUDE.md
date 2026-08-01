@@ -43,6 +43,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   truncated file for the watcher to ingest.
 - Deleting a collection or season keeps its files unless `?deleteFiles=true`. Without the files gone,
   reconcile rebuilds the rows on the next scan — the default is the recoverable mistake, not the other one.
+  **Creating a season creates a folder in `MEDIA_ROOT`**, so this cuts both ways: a browser test that makes a
+  season and deletes only the row leaves the folder behind, and the suite's own "start a scan" test then
+  resurrects every one of them. Test teardown has to pass `deleteFiles=true`; the admin UI deliberately does
+  not offer it.
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
@@ -273,7 +277,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
   duplicates. Enforce those in the service layer.
-- `ListItem.position` is deliberately not unique — a unique index collides during drag-reordering.
+- `ListItem.position` is deliberately not unique — a unique index collides during drag-reordering. `Video.orderIndex`
+  is not unique for the same reason, which is why `PATCH /collections/:id/videos/order` rewrites a season's
+  whole sequence in one transaction rather than swapping pairs. It sets `seasonId` **and** `orderIndex`
+  together, because dragging an episode into a season changes both at once; `seasonId: null` is a real value
+  meaning "directly in the collection", which is where films live. Like `credits/reorder` it names both
+  parents — the collection in the URL, the season in the body — and refuses ids belonging to anything else,
+  or a reorder becomes a way to pull episodes out of a show nobody mentioned.
 
 **Frontend**
 - During SSR, `useFetch`/`$fetch` run in Nitro and do **not** forward the browser cookie. Pass

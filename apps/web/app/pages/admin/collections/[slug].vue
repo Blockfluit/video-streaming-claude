@@ -155,18 +155,132 @@ async function removeSeason(season: Season) {
   }
 }
 
-/** Videos grouped under their season, with loose ones last. */
-const grouped = computed(() => {
-  const detail = collection.value
-  if (!detail) return []
+/**
+ * Videos grouped under their season, with loose ones last.
+ *
+ * Held in a ref rather than computed straight off the fetch so a drag can
+ * rearrange it immediately. Reordering is a direct-manipulation gesture: the
+ * card has to follow the cursor and stay where it is dropped, not vanish and
+ * reappear a round trip later. The server is then told, and a failure puts the
+ * list back.
+ */
+interface Group { season: Season | null, videos: VideoRow[] }
 
-  const bySeason = detail.seasons.map(season => ({
+const groups = ref<Group[]>([])
+
+function regroup(): void {
+  const detail = collection.value
+  if (!detail) {
+    groups.value = []
+    return
+  }
+
+  const ordered = (list: VideoRow[]) =>
+    [...list].sort(
+      (a, b) =>
+        // A null orderIndex means "ingest could not tell" and sorts last;
+        // treating it as zero would put an unnumbered extra ahead of episode one.
+        (a.orderIndex ?? Number.POSITIVE_INFINITY) - (b.orderIndex ?? Number.POSITIVE_INFINITY)
+        || a.title.localeCompare(b.title),
+    )
+
+  const bySeason: Group[] = detail.seasons.map(season => ({
     season,
-    videos: detail.videos.filter(v => v.seasonId === season.id),
+    videos: ordered(detail.videos.filter(v => v.seasonId === season.id)),
   }))
-  const loose = detail.videos.filter(v => v.seasonId === null)
-  return loose.length > 0 ? [...bySeason, { season: null, videos: loose }] : bySeason
-})
+
+  // Always present, even when empty — it is a drop target for pulling an
+  // episode back out of a season, and you cannot drop onto something absent.
+  bySeason.push({ season: null, videos: ordered(detail.videos.filter(v => v.seasonId === null)) })
+  groups.value = bySeason
+}
+
+watch(collection, regroup, { immediate: true })
+
+/* --- dragging -------------------------------------------------------- */
+
+const dragging = ref<{ videoId: string, from: string } | null>(null)
+const dropTarget = ref<string | null>(null)
+
+/** A stable key per group, since a season id can be null. */
+const keyOf = (season: Season | null) => season?.id ?? 'loose'
+
+function onDragStart(event: DragEvent, video: VideoRow, group: Group) {
+  dragging.value = { videoId: video.id, from: keyOf(group.season) }
+  // Firefox refuses to start a drag at all without data on the transfer.
+  event.dataTransfer?.setData('text/plain', video.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragEnd() {
+  dragging.value = null
+  dropTarget.value = null
+}
+
+/**
+ * Moves the dragged card to `index` within `group`, in place.
+ *
+ * Runs on dragover rather than on drop so the list rearranges under the cursor
+ * and you can see where it will land. `index` of -1 means the end of the list,
+ * which is what dropping on the container itself means.
+ */
+function reorderPreview(group: Group, index: number) {
+  const drag = dragging.value
+  if (!drag) return
+
+  const source = groups.value.find(g => g.videos.some(v => v.id === drag.videoId))
+  if (!source) return
+
+  const from = source.videos.findIndex(v => v.id === drag.videoId)
+  const target = index === -1 ? group.videos.length : index
+  if (source === group && (from === target || from === target - 1)) return
+
+  const [moved] = source.videos.splice(from, 1)
+  if (!moved) return
+  group.videos.splice(source === group && from < target ? target - 1 : target, 0, moved)
+}
+
+/**
+ * Dragging over the group's own box, rather than over one of its rows.
+ *
+ * This has to move the card too, not just highlight — the rows carry `.stop`
+ * on their own handler, so this fires for the gaps and, crucially, for an
+ * empty season, which has no rows at all. Without it dropping onto a new
+ * season sent the server that season's contents unchanged: an empty list,
+ * which is a request that succeeds and does nothing.
+ */
+function onGroupDragOver(group: Group) {
+  dropTarget.value = keyOf(group.season)
+  if (!dragging.value) return
+  // Already here: the row handlers own the position within a group.
+  if (group.videos.some(v => v.id === dragging.value!.videoId)) return
+  reorderPreview(group, -1)
+}
+
+async function commit(group: Group) {
+  const drag = dragging.value
+  onDragEnd()
+  if (!drag) return
+
+  try {
+    // The whole season in one request. A PATCH per video is a dozen calls that
+    // can half-fail, leaving an order nobody chose.
+    await api(`/collections/${collection.value!.id}/videos/order`, {
+      method: 'PATCH',
+      body: {
+        seasonId: group.season?.id ?? null,
+        videoIds: group.videos.map(v => v.id),
+      },
+    })
+    await refresh()
+  }
+  catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not move that'), color: 'error' })
+    // Put the list back rather than leaving the screen showing an order the
+    // server does not have.
+    regroup()
+  }
+}
 
 function seasonLabel(season: Season | null): string {
   if (!season) return 'Not in a season'
@@ -259,8 +373,29 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             <UButton color="neutral" variant="subtle" @click="addSeason">Add</UButton>
           </div>
 
-          <div v-if="grouped.length" class="space-y-4">
-            <div v-for="group in grouped" :key="group.season?.id ?? 'loose'">
+          <p class="mb-3 text-xs text-(--ui-text-muted)">
+            Drag an episode onto a season to move it. Where you drop it is the
+            order it plays in.
+          </p>
+
+          <div class="space-y-4">
+            <!--
+              A named region, not a bare div. Each season is an independent drop
+              target, and without a name a screen reader announces a run of
+              identical unlabelled groups.
+            -->
+            <section
+              v-for="group in groups"
+              :key="keyOf(group.season)"
+              :aria-label="seasonLabel(group.season)"
+              class="rounded-lg border p-3 transition-colors"
+              :class="dropTarget === keyOf(group.season)
+                ? 'border-(--ui-primary) bg-(--ui-bg-accented)'
+                : 'border-(--ui-border)'"
+              @dragover.prevent="onGroupDragOver(group)"
+              @dragenter.prevent="onGroupDragOver(group)"
+              @drop.prevent="commit(group)"
+            >
               <div class="mb-2 flex items-center gap-2">
                 <h3 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
                   {{ seasonLabel(group.season) }}
@@ -278,16 +413,36 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
                 />
               </div>
 
-              <ul v-if="group.videos.length" class="divide-y divide-(--ui-border)">
+              <ul v-if="group.videos.length" class="space-y-1">
                 <li
-                  v-for="video in group.videos"
+                  v-for="(video, index) in group.videos"
                   :key="video.id"
-                  class="flex items-center gap-3 py-2"
+                  draggable="true"
+                  class="flex cursor-grab items-center gap-3 rounded-md p-2 transition-opacity active:cursor-grabbing"
+                  :class="dragging?.videoId === video.id
+                    ? 'opacity-40'
+                    : 'hover:bg-(--ui-bg-elevated)'"
+                  @dragstart="onDragStart($event, video, group)"
+                  @dragend="onDragEnd"
+                  @dragover.prevent.stop="reorderPreview(group, index)"
+                  @drop.prevent.stop="commit(group)"
                 >
+                  <!-- The handle is decorative: the whole row is draggable, and
+                       a grip you must hit exactly is worse than one you cannot
+                       miss. -->
+                  <UIcon
+                    name="i-lucide-grip-vertical"
+                    aria-hidden="true"
+                    class="size-4 shrink-0 text-(--ui-text-dimmed)"
+                  />
+                  <span class="w-6 shrink-0 text-right text-xs tabular-nums text-(--ui-text-dimmed)">
+                    {{ index + 1 }}
+                  </span>
                   <img
                     :src="`/api/videos/${video.id}/thumbnail`"
                     alt=""
                     loading="lazy"
+                    draggable="false"
                     class="aspect-video w-16 shrink-0 rounded bg-(--ui-bg-accented) object-cover"
                   >
                   <span class="min-w-0 grow truncate text-sm">{{ video.title }}</span>
@@ -309,12 +464,12 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
                   </UButton>
                 </li>
               </ul>
-              <p v-else class="py-2 text-sm text-(--ui-text-muted)">Nothing here yet.</p>
-            </div>
+              <p v-else class="py-3 text-center text-sm text-(--ui-text-dimmed)">
+                Drop an episode here.
+              </p>
+            </section>
           </div>
-          <p v-else class="text-sm text-(--ui-text-muted)">
-            No seasons. Films sit directly in the collection.
-          </p>
+
         </UCard>
       </div>
 

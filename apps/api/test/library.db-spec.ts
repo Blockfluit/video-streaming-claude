@@ -259,6 +259,113 @@ describe('Library (real database)', () => {
     });
   });
 
+  describe('reordering a collection\'s videos', () => {
+    /**
+     * One request rewrites a whole season's contents and their order. A PATCH
+     * per video is a dozen calls that can half-fail, leaving an order nobody
+     * chose — and `orderIndex` is deliberately not unique, so the sequence has
+     * to be rewritten wholesale rather than swapped pairwise.
+     */
+    it('sets the season and the order in one call', async () => {
+      const show = await createCollection('A Show');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: show.id, number: 1 })
+        .expect(201);
+
+      const a = await seedVideo(show.id, 'Ep A');
+      const b = await seedVideo(show.id, 'Ep B');
+      const c = await seedVideo(show.id, 'Ep C');
+
+      await admin
+        .patch(`/collections/${show.id}/videos/order`)
+        .send({ seasonId: season.body.id, videoIds: [c.id, a.id, b.id] })
+        .expect(200);
+
+      const rows = await prisma.video.findMany({
+        where: { collectionId: show.id },
+        select: { id: true, seasonId: true, orderIndex: true },
+      });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+
+      expect(byId.get(c.id)).toMatchObject({ seasonId: season.body.id, orderIndex: 0 });
+      expect(byId.get(a.id)).toMatchObject({ seasonId: season.body.id, orderIndex: 1 });
+      expect(byId.get(b.id)).toMatchObject({ seasonId: season.body.id, orderIndex: 2 });
+    });
+
+    /** null is a real value: it means "directly in the collection", where films live. */
+    it('moves videos back out of a season with a null seasonId', async () => {
+      const show = await createCollection('A Show');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: show.id, number: 1 })
+        .expect(201);
+      const video = await seedVideo(show.id, 'Ep A', { seasonId: season.body.id });
+
+      await admin
+        .patch(`/collections/${show.id}/videos/order`)
+        .send({ seasonId: null, videoIds: [video.id] })
+        .expect(200);
+
+      const after = await prisma.video.findUniqueOrThrow({ where: { id: video.id } });
+      expect(after).toMatchObject({ seasonId: null, orderIndex: 0 });
+    });
+
+    /**
+     * Both parents are checked. Taking ids on trust would make a reorder a way
+     * to pull episodes out of a show the caller never named — the same reason
+     * `PATCH /credits/reorder` names its parent explicitly.
+     */
+    it('refuses a video belonging to another collection', async () => {
+      const mine = await createCollection('Mine');
+      const theirs = await createCollection('Theirs');
+      const elsewhere = await seedVideo(theirs.id, 'Not Mine');
+
+      await admin
+        .patch(`/collections/${mine.id}/videos/order`)
+        .send({ seasonId: null, videoIds: [elsewhere.id] })
+        .expect(400);
+
+      const untouched = await prisma.video.findUniqueOrThrow({ where: { id: elsewhere.id } });
+      expect(untouched.collectionId).toBe(theirs.id);
+    });
+
+    it('refuses a season belonging to another collection', async () => {
+      const mine = await createCollection('Mine');
+      const theirs = await createCollection('Theirs');
+      const foreign = await admin
+        .post('/seasons')
+        .send({ collectionId: theirs.id, number: 1 })
+        .expect(201);
+      const video = await seedVideo(mine.id, 'Ep A');
+
+      await admin
+        .patch(`/collections/${mine.id}/videos/order`)
+        .send({ seasonId: foreign.body.id, videoIds: [video.id] })
+        .expect(400);
+    });
+
+    it('refuses the same video twice', async () => {
+      const show = await createCollection('A Show');
+      const video = await seedVideo(show.id, 'Ep A');
+
+      await admin
+        .patch(`/collections/${show.id}/videos/order`)
+        .send({ seasonId: null, videoIds: [video.id, video.id] })
+        .expect(400);
+    });
+
+    it('is admin-only', async () => {
+      const show = await createCollection('A Show');
+      const user = await asUser();
+
+      await user
+        .patch(`/collections/${show.id}/videos/order`)
+        .send({ seasonId: null, videoIds: [] })
+        .expect(403);
+    });
+  });
+
   describe('GET /collections/:slug/resolve', () => {
     let south: { id: string; slug: string };
     let seasonId: string;
