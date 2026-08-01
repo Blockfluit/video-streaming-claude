@@ -31,6 +31,7 @@ import {
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { ImagesService } from '../common/images.service';
 import { validate } from '../common/zod-validation.pipe';
 import { MediaService } from '../media/media.service';
 import { JobsService } from '../transcode/jobs.service';
@@ -44,6 +45,7 @@ export class VideosController {
     private readonly streaming: StreamingService,
     private readonly media: MediaService,
     private readonly jobs: JobsService,
+    private readonly images: ImagesService,
   ) {}
 
   @Get()
@@ -76,6 +78,21 @@ export class VideosController {
     @Res() response: Response,
   ): Promise<void> {
     return this.streaming.stream(id, user.role, request, response);
+  }
+
+  /**
+   * The poster frame. Every card in the app asks for one of these, which is
+   * why it revalidates with an ETag rather than carrying a lifetime: the
+   * storage key is stable across replacements, so a cached copy would outlive
+   * the picture it shows.
+   */
+  @Get(':id/thumbnail')
+  thumbnail(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.videoThumbnail(id, user.role, response);
   }
 
   @Patch(':id')

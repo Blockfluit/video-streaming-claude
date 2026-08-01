@@ -1,0 +1,15 @@
+{
+  // The browser build. Vite serves this file to the browser as a native ES
+  // module, and a CommonJS file has no statically analysable named exports —
+  // `import { loginSchema }` fails at parse time with "does not provide an
+  // export named". SSR hides it completely, because Nitro can require CJS.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "outDir": "dist/esm",
+    // The CJS build already emits them, and two copies would disagree.
+    "declaration": false,
+    "declarationMap": false
+  }
+}

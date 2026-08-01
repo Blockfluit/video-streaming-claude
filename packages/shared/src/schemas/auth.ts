@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { passwordSchema, usernameSchema } from '../identity';
+import { passwordSchema, usernameSchema } from '../identity.js';
 
 /**
  * Login is deliberately looser than signup: it bounds the length and nothing

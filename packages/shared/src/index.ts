@@ -12,14 +12,14 @@
  * import from either app.
  */
 
-export * from './identity';
-export * from './pagination';
-export * from './quality';
-export * from './primitives';
-export * from './schemas/accounts';
-export * from './schemas/auth';
-export * from './schemas/comments';
-export * from './schemas/library';
-export * from './schemas/lists';
-export * from './schemas/people';
-export * from './schemas/watch';
+export * from './identity.js';
+export * from './pagination.js';
+export * from './quality.js';
+export * from './primitives.js';
+export * from './schemas/accounts.js';
+export * from './schemas/auth.js';
+export * from './schemas/comments.js';
+export * from './schemas/library.js';
+export * from './schemas/lists.js';
+export * from './schemas/people.js';
+export * from './schemas/watch.js';

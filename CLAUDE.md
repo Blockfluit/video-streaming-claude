@@ -121,6 +121,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   stays on one filesystem (across two mounts it fails with `EXDEV`), and dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion.
 - multer uses `diskStorage`, never memory: a 2 GB file buffered in the heap takes the process with it.
+- An upload is accepted on its **extension alone**. The `mimetype` a browser attaches comes from the OS
+  registry, not the file — Windows reports `.mkv` as `video/x-matroska`, `video/mkv`, or nothing depending
+  on what claimed the extension — so ANDing it with the extension check refused real MKVs with a message
+  nobody could act on. ffprobe is the only thing that can say whether a file is playable, and it records
+  `probeError` on the next pass; a mislabelled upload becomes a draft with a diagnosis. (Shipped as a bug.)
 - multer 2.2 strips **both** slash and backslash paths from `originalname`, but **not** a leading dot.
   `.hidden.mp4` arrives intact and would become a file the scanner skips, so `sanitizeFilename` doing that
   is load-bearing rather than belt-and-braces. Verified by mutation, not assumed.
@@ -271,6 +276,56 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Everything is same-origin via the Nuxt `/api/**` proxy. Keep it that way: a cross-origin `<track>` fails
   silently, and `<video>`/`<track>` cannot send `Authorization` headers (this is why auth is cookie-based).
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
+
+**Frontend** (`apps/web`, in addition to the notes above)
+- **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
+  bare `$fetch` runs in Nitro with no cookie jar, so a call that works in the browser 401s the moment the
+  same page renders on the server. One place that can forget is the point.
+- `useApiData` is built on `useAsyncData`, **not** `useFetch`. `useFetch` is the obvious choice and was the
+  first attempt: its generics do not survive being wrapped — the payload type collapses to `unknown` and
+  every call site loses `.items`. The price is an explicit cache key per call.
+- `auth.global.ts` is **navigation, not access control**. The API authorises every request; the middleware
+  only spares someone a page of failed calls. Nothing there is a security boundary.
+- The `?redirect=` a sign-in carries goes through `safeRedirect` — it arrives through the URL, so anyone can
+  write it, and following it after authenticating is an open redirect. A leading `/` is not enough:
+  `//evil.example` is protocol-relative and off-site, and some browsers normalise `/\evil.example` the same
+  way.
+- Artwork is `GET /videos/:id/thumbnail` and `GET /collections/:id/poster`, which **revalidate** (`ETag` +
+  `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
+  any `max-age` above zero serves the poster an admin has just replaced.
+- A nav link to a route with no page is a broken app, not a placeholder — links land with their pages.
+- `packages/shared` emits **both** CJS and ESM, and needs to. NestJS and ts-jest `require()` the CJS half;
+  Vite serves the package to the *browser* as a native ES module, where a CJS file exposes **no named
+  exports at all** and `import { loginSchema }` fails at parse time. SSR hides this completely — Nitro can
+  require CJS — so it only appears when a page is opened in a browser. Relative imports in `src` carry
+  explicit `.js` extensions so one source tree emits both, and `dist/esm/package.json` marks that half as
+  `type: module`.
+- Nuxt Icon's runtime endpoint defaults to **`/api/_nuxt_icon`**, which the `/api/**` proxy swallows whole
+  and forwards to NestJS. Moved to `/_icons` via `icon.localApiEndpoint`; otherwise any icon resolved at
+  runtime silently fails to draw.
+- The `/api/**` proxy owns that prefix entirely, so anything else wanting a server route has to move off
+  it — Nuxt Icon's default `/api/_nuxt_icon` was the first casualty and will not be the last.
+- A poster's storage key never changes, so replacing one leaves the browser showing the old picture. The
+  admin screens append a cache-busting query after a capture or upload; the ETag alone cannot help an
+  `<img>` that was never re-requested.
+- Browser tests live in `apps/web/e2e` (`npm run test:e2e -w @video/web`). They assert controls **do
+  something** — `expectsRequest` waits for the API call — because a button with no handler renders
+  perfectly. Needs both dev servers plus `npx playwright install --with-deps chromium`.
+- `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
+  clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
+  ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
+  measured by painting the colours on a canvas — Chromium returns `oklab()` for anything from the Tailwind
+  palette, and parsing that as `rgb()` silently reports every ratio as ~1.
+- Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
+  silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
+  the first character typed into a search box.
+- **Never give a `USelect` an option whose value is `''`.** Reka UI reserves the empty string for "cleared"
+  and throws during render — which takes the whole page down, not just the select. Use a sentinel.
+- `GET /videos/:id/subtitles` returns a `Page` like every other list endpoint. It returned a bare array
+  until the player's `<track>` list silently came back empty — the frontend read `.items` because
+  everything else does, which is the whole point of the convention.
+- **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
+  A frontend change is verified in a browser or it is not verified.
 
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.

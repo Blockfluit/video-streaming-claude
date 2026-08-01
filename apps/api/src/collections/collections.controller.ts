@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   createCollectionSchema,
@@ -25,9 +26,12 @@ import {
   type UpdateCollectionInput,
 } from '@video/shared';
 
+import type { Response } from 'express';
+
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
+import { ImagesService } from '../common/images.service';
 import { CollectionsService } from './collections.service';
 import { ResolveService, type ResolveResult } from './resolve.service';
 
@@ -41,7 +45,27 @@ export class CollectionsController {
   constructor(
     private readonly collections: CollectionsService,
     private readonly resolver: ResolveService,
+    private readonly images: ImagesService,
   ) {}
+
+  /**
+   * The shelf artwork.
+   *
+   * Keyed by **id**, not slug, unlike the pages around it: a card already holds
+   * the id it is rendering, and the plan's API surface names it that way.
+   *
+   * Route order does not matter here, unlike `:slug/resolve` — this pattern is
+   * two segments and `:slug` is one, so Express cannot confuse them. Checked
+   * rather than assumed: moving it below `:slug` fails nothing.
+   */
+  @Get(':id/poster')
+  poster(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.collectionPoster(id, user.role, response);
+  }
 
   @Get()
   list(

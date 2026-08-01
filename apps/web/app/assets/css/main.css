@@ -1,2 +1,80 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/**
+ * A darker base than @nuxt/ui's stock zinc-900.
+ *
+ * Artwork is the only bright thing on the page, so the chrome goes further
+ * down than a normal dark theme would: near-black behind the shelves, one step
+ * up for anything raised. At zinc-900 the cards and the page read as the same
+ * surface and the rows stop separating.
+ */
+:root {
+  color-scheme: dark;
+  --ui-bg: #08080a;
+  --ui-bg-muted: #0d0d10;
+  --ui-bg-elevated: #17171b;
+  --ui-bg-accented: #232328;
+  --ui-border: #232328;
+  --ui-border-accented: #34343c;
+}
+
+html,
+body {
+  background: #08080a;
+}
+
+/* Shelves scroll horizontally; the scrollbar is noise between the rows. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/**
+ * The card lift. Transform and opacity only — both are composited, so a row of
+ * twenty cards animates on the GPU instead of forcing layout every frame.
+ */
+.card-lift {
+  transition:
+    transform 220ms cubic-bezier(0.2, 0, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+.card-lift:hover {
+  transform: scale(1.06);
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.8);
+  z-index: 1;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Rows arrive in sequence rather than all at once; the delay is set inline. */
+.rise {
+  animation: rise 460ms cubic-bezier(0.2, 0, 0.2, 1) both;
+}
+
+/* Honour the setting. Vestibular disorders are not a preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .card-lift:hover {
+    transform: none;
+  }
+}

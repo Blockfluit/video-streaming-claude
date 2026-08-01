@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { pageQuerySchema } from '../pagination';
-import { booleanParam, idSchema, nonEmptyText, optionalText, tagsSchema, yearSchema } from '../primitives';
+import { pageQuerySchema } from '../pagination.js';
+import { booleanParam, idSchema, nonEmptyText, optionalText, tagsSchema, yearSchema } from '../primitives.js';
 
 export const publishStateSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED', 'MISSING']);
 export type PublishState = z.infer<typeof publishStateSchema>;

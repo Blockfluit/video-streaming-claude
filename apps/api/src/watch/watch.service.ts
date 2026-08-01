@@ -19,6 +19,10 @@ const HISTORY_VIDEO_SELECT = {
   title: true,
   durationSec: true,
   thumbnailKey: true,
+  // The quality badge is rendered from these; without them it is dead code
+  // on every card the row draws.
+  width: true,
+  height: true,
   state: true,
   orderIndex: true,
   collection: { select: { id: true, slug: true, title: true } },

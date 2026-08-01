@@ -1,11 +1,16 @@
 import { readFile } from 'node:fs/promises';
 
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { toPage, type Page } from '@video/shared';
+
 import { isKnownLanguage } from '../common/language';
 import { StorageService } from '../common/storage.service';
 import { FfmpegService } from '../media/ffmpeg.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isProbablyUtf8, isWebVtt } from './vtt';
+
+/** A video with more tracks than this has a problem the picker cannot fix. */
+const MAX_SUBTITLE_TRACKS = 100;
 
 /**
  * Sidecar subtitles: binding them to videos, converting them to WebVTT, and
@@ -56,13 +61,26 @@ export class SubtitlesService {
     private readonly ffmpeg: FfmpegService,
   ) {}
 
-  list(videoId: string) {
-    return this.prisma.subtitle.findMany({
+  /**
+   * A `Page`, like every other list endpoint, even though a video's tracks are
+   * few. This returned a bare array until a `<track>` list silently came back
+   * empty in the player, which reads `.items` because everything else does —
+   * the convention exists precisely so no caller has to check which shape a
+   * given endpoint chose.
+   *
+   * Unpaged in practice: the whole set comes back in one page, because a track
+   * picker showing half the languages is worse than a long list.
+   */
+  async list(videoId: string): Promise<Page<unknown>> {
+    const subtitles = await this.prisma.subtitle.findMany({
       where: { videoId },
       select: SUBTITLE_SELECT,
       // Default first, then alphabetically — the order a track picker reads best.
       orderBy: [{ isDefault: 'desc' }, { language: 'asc' }, { label: 'asc' }],
+      take: MAX_SUBTITLE_TRACKS,
     });
+
+    return toPage(subtitles, subtitles.length, { limit: MAX_SUBTITLE_TRACKS, offset: 0 });
   }
 
   /** The WebVTT bytes to serve, or a 404. */

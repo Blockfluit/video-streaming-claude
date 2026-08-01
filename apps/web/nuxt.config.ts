@@ -6,6 +6,17 @@ export default defineNuxtConfig({
   modules: ['@nuxt/ui'],
   css: ['~/assets/css/main.css'],
 
+  // Nuxt Icon serves its runtime bundle from `/api/_nuxt_icon` by default,
+  // which the proxy below swallows whole and forwards to NestJS — where it is
+  // a 404, and any icon resolved at runtime silently fails to draw. Moved off
+  // `/api` so the two do not fight over the prefix.
+  icon: { localApiEndpoint: '/_icons' },
+
+  // A video library is watched in the dark. There is no light theme to fall
+  // back to, so the class is fixed rather than left to a system preference
+  // that would otherwise flash white on first paint.
+  colorMode: { preference: 'dark', fallback: 'dark' },
+
   devServer: { port: 3000 },
 
   routeRules: {
