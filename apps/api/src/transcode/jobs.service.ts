@@ -1,6 +1,12 @@
 import { basename, extname } from 'node:path';
 
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { StorageService } from '../common/storage.service';
@@ -23,7 +29,7 @@ import { CancelledError, Transcoder } from './transcoder';
  * conversion and stops there; an admin decides when to spend the CPU.
  */
 @Injectable()
-export class JobsService {
+export class JobsService implements OnModuleInit {
   private readonly logger = new Logger(JobsService.name);
 
   /** One at a time — the whole point of a separate queue. */
@@ -39,6 +45,38 @@ export class JobsService {
     private readonly media: MediaService,
     private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Clears jobs the previous process was in the middle of.
+   *
+   * A job's RUNNING state lives in a database row and its actual work lives in
+   * a child process. Restart the API — a crash, a deploy, a file change in dev
+   * — and the child dies while the row does not, leaving a job that claims to
+   * be running forever, a progress bar frozen mid-encode, and a Cancel button
+   * that resolves against a `cancellations` map the new process knows nothing
+   * about.
+   *
+   * They are marked FAILED rather than requeued, because **nothing transcodes
+   * on its own** here: an admin decides when to spend the CPU, and that applies
+   * just as much to work the machine has already thrown away once. The message
+   * says what happened so Retry is an obvious next step. The half-written
+   * output is already unreachable — transcoding writes to derived/tmp/ and only
+   * renames into place on success.
+   */
+  async onModuleInit(): Promise<void> {
+    const { count } = await this.prisma.mediaJob.updateMany({
+      where: { status: { in: ['RUNNING', 'QUEUED'] } },
+      data: {
+        status: 'FAILED',
+        error: 'The server restarted while this job was running. Retry to start it again.',
+        finishedAt: new Date(),
+      },
+    });
+
+    if (count > 0) {
+      this.logger.warn(`Failed ${count} job(s) left running by a previous process`);
+    }
+  }
 
   /** Queues a job and starts the pump. Returns immediately — the work is long. */
   async enqueue(videoId: string, type: JobType, createdById: string | null) {

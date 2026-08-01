@@ -14,6 +14,7 @@ import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { MediaService } from '../src/media/media.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { JobsService } from '../src/transcode/jobs.service';
 
 const run = promisify(execFile);
 
@@ -463,6 +464,54 @@ describe('Transcoding (real ffmpeg)', () => {
 
       await admin.post(`/videos/${videoId}/convert`).expect(400);
     }, 180_000);
+  });
+
+  describe('jobs left behind by a restart', () => {
+    /**
+     * A job's RUNNING state lives in a row; its work lives in a child process.
+     * A restart kills the child and leaves the row, so the queue shows a job
+     * running forever and Cancel resolves against a map the new process knows
+     * nothing about. This shipped as a real bug and was hit by hand.
+     *
+     * Calls the lifecycle hook directly: the alternative is restarting a Nest
+     * app mid-suite, which proves the same thing far more slowly.
+     */
+    it('fails them on boot so they can be retried', async () => {
+      const videoId = await seedVideo('Films/show.mkv', 'Show');
+
+      const stranded = await prisma.mediaJob.create({
+        data: { videoId, type: 'TRANSCODE', status: 'RUNNING', progress: 0.42 },
+      });
+      const queued = await prisma.mediaJob.create({
+        data: { videoId, type: 'SUBTITLE_EXTRACT', status: 'QUEUED' },
+      });
+
+      await app.get(JobsService).onModuleInit();
+
+      const after = await prisma.mediaJob.findMany({
+        where: { id: { in: [stranded.id, queued.id] } },
+        select: { id: true, status: true, error: true, finishedAt: true },
+      });
+
+      for (const job of after) {
+        expect(job.status).toBe('FAILED');
+        expect(job.error).toMatch(/restarted/i);
+        expect(job.finishedAt).not.toBeNull();
+      }
+    });
+
+    it('leaves finished jobs alone', async () => {
+      const videoId = await seedVideo('Films/show.mkv', 'Show');
+      const done = await prisma.mediaJob.create({
+        data: { videoId, type: 'TRANSCODE', status: 'SUCCEEDED', progress: 1 },
+      });
+
+      await app.get(JobsService).onModuleInit();
+
+      const after = await prisma.mediaJob.findUniqueOrThrow({ where: { id: done.id } });
+      expect(after.status).toBe('SUCCEEDED');
+      expect(after.error).toBeNull();
+    });
   });
 
   describe('access control', () => {
