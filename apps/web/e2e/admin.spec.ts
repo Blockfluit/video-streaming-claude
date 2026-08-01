@@ -434,9 +434,32 @@ test.describe('admin', () => {
     await expect(token).toBeVisible()
     expect((await token.innerText()).length).toBeGreaterThan(20)
 
+    // The same secret as something sendable. The link carries the token to
+    // /setup, which prefills it — that pairing is asserted below.
+    const link = page.getByRole('link', { name: /\/setup\?token=/ })
+    await expect(link).toBeVisible()
+    expect(await link.getAttribute('href')).toContain(`/setup?token=${await token.innerText()}`)
+
     // Held in memory only — a reload must not show it again.
     await page.reload()
     await expect(page.getByText('Copy this now')).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /\/setup\?token=/ })).toHaveCount(0)
+  })
+
+  test('the invite table header stays put while the list scrolls', async ({ page }) => {
+    await visit(page, '/admin/users')
+
+    const scroller = page.locator('div', { has: page.getByRole('table', { name: 'Invites' }) }).last()
+    const heading = page.getByRole('table', { name: 'Invites' }).getByRole('columnheader', { name: 'Kind' })
+
+    const before = await heading.boundingBox()
+    await scroller.evaluate(node => node.scrollBy(0, 400))
+    // A header that scrolls away leaves the viewport; a sticky one does not
+    // move at all, which is the difference worth asserting.
+    await expect(async () => {
+      const after = await heading.boundingBox()
+      expect(after?.y).toBeCloseTo(before?.y ?? 0, 0)
+    }).toPass()
   })
 
   test('the invite list names who minted a token and what state it is in', async ({ page }) => {
@@ -532,5 +555,29 @@ test.describe('admin', () => {
     if (await blocked.count() > 0) {
       await expect(blocked.first().getByRole('checkbox')).toBeDisabled()
     }
+  })
+})
+
+/**
+ * The receiving end of an invite link.
+ *
+ * Signed out on purpose: `auth.global.ts` bounces an authenticated visitor off
+ * `/setup` to the home page, so the shared `storageState` would never reach the
+ * page under test.
+ */
+test.describe('redeeming by link', () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test('the token in the URL arrives in the form', async ({ page }) => {
+    await visit(page, '/setup?token=not-a-real-token-just-a-string')
+
+    await expect(page.getByRole('textbox', { name: 'Token' }))
+      .toHaveValue('not-a-real-token-just-a-string')
+  })
+
+  test('the field is still empty and usable without a link', async ({ page }) => {
+    await visit(page, '/setup')
+
+    await expect(page.getByRole('textbox', { name: 'Token' })).toHaveValue('')
   })
 })

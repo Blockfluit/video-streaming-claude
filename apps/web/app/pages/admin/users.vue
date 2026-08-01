@@ -89,6 +89,22 @@ const { data: invites, refresh: refreshInvites } = await useApiData<Page<Invite>
 /** Held in memory only. Navigating away loses it, which is the point. */
 const freshToken = ref<string | null>(null)
 
+/**
+ * The token as something you can send someone. `/setup` reads this parameter
+ * and prefills the field, so the recipient has one thing to click rather than a
+ * 43-character string to copy out of a message without clipping an edge.
+ *
+ * Built from `window.location.origin` rather than a configured base URL,
+ * because whichever hostname the admin reached this page on is the one that
+ * will work for them to share. Client-only by construction: the alert only
+ * exists after a mint, which only happens in the browser.
+ */
+const inviteLink = computed(() =>
+  freshToken.value && import.meta.client
+    ? `${window.location.origin}/setup?token=${encodeURIComponent(freshToken.value)}`
+    : null,
+)
+
 const expiresInHours = ref<number>(DEFAULT_INVITE_TTL_HOURS)
 const grantsRole = ref<string>('USER')
 const minting = ref(false)
@@ -142,10 +158,10 @@ async function mint() {
   }
 }
 
-async function copy() {
-  if (!freshToken.value) return
-  await navigator.clipboard.writeText(freshToken.value)
-  toast.add({ title: 'Copied', color: 'success' })
+async function copy(value: string | null, what: string) {
+  if (!value) return
+  await navigator.clipboard.writeText(value)
+  toast.add({ title: `${what} copied`, color: 'success' })
 }
 
 async function revoke(invite: Invite) {
@@ -222,19 +238,65 @@ useHead({ title: 'Accounts' })
         title="Copy this now — it is not shown again"
       >
         <template #description>
-          <div class="mt-2 flex items-center gap-2">
-            <code class="grow rounded bg-black/40 px-2 py-1 font-mono text-xs break-all">
-              {{ freshToken }}
-            </code>
-            <UButton size="xs" icon="i-lucide-copy" @click="copy">Copy</UButton>
+          <div class="mt-2 space-y-3">
+            <div>
+              <p class="mb-1 text-xs">Invite link — send this</p>
+              <div class="flex items-center gap-2">
+                <!--
+                  An anchor, not a second `<code>`: the mint test locates the
+                  token with a bare `page.locator('code')`, which is strict, so
+                  a second one fails it with a strict violation rather than a
+                  readable assertion.
+                -->
+                <a
+                  :href="inviteLink ?? '#'"
+                  class="grow rounded bg-black/40 px-2 py-1 font-mono text-xs break-all underline underline-offset-2"
+                >{{ inviteLink }}</a>
+                <UButton
+                  size="xs"
+                  icon="i-lucide-copy"
+                  aria-label="Copy the invite link"
+                  @click="copy(inviteLink, 'Invite link')"
+                >
+                  Copy
+                </UButton>
+              </div>
+            </div>
+
+            <div>
+              <p class="mb-1 text-xs">Or the token on its own</p>
+              <div class="flex items-center gap-2">
+                <code class="grow rounded bg-black/40 px-2 py-1 font-mono text-xs break-all">
+                  {{ freshToken }}
+                </code>
+                <UButton
+                  size="xs"
+                  icon="i-lucide-copy"
+                  aria-label="Copy the token"
+                  @click="copy(freshToken, 'Token')"
+                >
+                  Copy
+                </UButton>
+              </div>
+            </div>
           </div>
         </template>
       </UAlert>
 
-      <!-- Eight columns will not fit a narrow viewport; the nowrap cells arm the scroll. -->
-      <div v-if="invites?.items?.length" class="overflow-x-auto">
+      <!--
+        Eight columns will not fit a narrow viewport; the nowrap cells arm the
+        horizontal scroll.
+
+        The height cap is what makes the sticky header work rather than a
+        flourish on top of it. Setting `overflow-x` to anything but `visible`
+        makes `overflow-y` compute to `auto` as well, so this div was already a
+        vertical scroll container — just an unbounded one, which scrolled with
+        the page and left a sticky header nothing to stick to. Capping it gives
+        the header a scrollport of its own.
+      -->
+      <div v-if="invites?.items?.length" class="max-h-[65vh] overflow-auto">
         <table aria-label="Invites" class="w-full text-sm">
-          <thead class="bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
+          <thead class="sticky top-0 z-10 border-b border-(--ui-border) bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
             <tr>
               <th class="p-3">Kind</th>
               <th class="p-3">Grants</th>
