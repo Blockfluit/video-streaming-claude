@@ -130,6 +130,8 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     height: video.height ?? null,
   }
 }
+
+useHead({ title: 'Home' })
 </script>
 
 <template>
@@ -137,20 +139,40 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     <!-- Full-bleed, and it runs under the transparent header on purpose. -->
     <section v-if="hero" class="relative h-[58vh] min-h-100 w-full overflow-hidden">
       <img :src="hero.image" alt="" class="size-full object-cover">
-      <!-- Two gradients: one to lift the text off the art, one to hand the
-           page over to the first shelf without a visible seam. -->
-      <div class="absolute inset-0 bg-gradient-to-r from-[#08080a] via-[#08080a]/70 to-transparent" />
-      <div class="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#08080a] to-transparent" />
+      <!--
+        Three scrims, written as real gradients rather than utilities so they
+        interpolate to `--ui-bg` itself. The first pass hardcoded #08080a, so
+        when the page background moved the fade stopped landing on it and the
+        artwork ended on a visible horizontal seam.
+
+        Bottom fade is half the hero rather than a fixed 10rem: on a short
+        viewport a fixed height leaves the seam above the fold, which is
+        exactly where it is most obvious.
+      -->
+      <div
+        class="absolute inset-0"
+        style="background: linear-gradient(to right, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 78%, transparent) 42%, transparent 72%)"
+      />
+      <div
+        class="absolute inset-x-0 bottom-0 h-1/2"
+        style="background: linear-gradient(to top, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 55%, transparent) 55%, transparent 100%)"
+      />
 
       <div class="absolute inset-0 flex items-center">
-        <div class="mx-auto w-full max-w-[110rem] px-4 sm:px-8">
+        <div class="page-shell">
           <div class="rise max-w-xl space-y-4">
-            <p class="text-xs font-semibold tracking-[0.2em] text-(--ui-primary) uppercase">
+            <!--
+              The eyebrow is set in muted text with a red rule beside it rather
+              than in red type. Red on near-black passes WCAG and still reads
+              poorly at 12px, which is the whole reason this pass exists.
+            -->
+            <p class="flex items-center gap-2 text-xs font-semibold tracking-[0.2em] text-(--ui-text-muted) uppercase">
+              <span aria-hidden="true" class="h-3 w-0.5 rounded-full bg-(--ui-primary)" />
               {{ hero.eyebrow }}
             </p>
             <h1 class="text-4xl font-bold tracking-tight text-white sm:text-6xl">{{ hero.title }}</h1>
-            <p v-if="hero.meta" class="text-sm text-white/70">{{ hero.meta }}</p>
-            <p v-if="hero.description" class="line-clamp-3 text-white/70">{{ hero.description }}</p>
+            <p v-if="hero.meta" class="text-sm text-(--ui-text-muted)">{{ hero.meta }}</p>
+            <p v-if="hero.description" class="line-clamp-3 text-(--ui-text-muted)">{{ hero.description }}</p>
 
             <div class="flex items-center gap-3 pt-2">
               <UButton :to="hero.to" size="lg" icon="i-lucide-play" class="font-semibold">
@@ -166,7 +188,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     </section>
 
     <div
-      class="mx-auto max-w-[110rem] space-y-8 px-4 pb-24 sm:px-8"
+      class="page-shell space-y-8 pb-24"
       :class="hero ? 'relative z-1 -mt-16' : 'pt-24'"
     >
       <MediaRow
@@ -214,10 +236,10 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     <!-- A new library is empty, and that is a state worth designing for. -->
     <div v-if="isEmpty" class="grid min-h-screen place-items-center px-6 text-center">
       <div class="space-y-4">
-        <UIcon name="i-lucide-clapperboard" class="size-12 text-white/40" />
+        <UIcon name="i-lucide-clapperboard" class="size-12 text-(--ui-text-dimmed)" />
         <h1 class="text-2xl font-semibold">Nothing here yet</h1>
-        <p class="text-white/65">Once there is something to watch, it will show up here.</p>
-        <UButton to="/browse" variant="subtle">Browse the library</UButton>
+        <p class="text-(--ui-text-muted)">Once there is something to watch, it will show up here.</p>
+        <UButton to="/browse" color="neutral" variant="subtle">Browse the library</UButton>
       </div>
     </div>
   </div>

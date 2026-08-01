@@ -21,7 +21,12 @@ export interface TranscodeOptions {
   durationSec: number | null;
   crf: number;
   preset: string;
-  onProgress: (progress: { percent: number | null; etaSeconds: number | null }) => void;
+  onProgress: (progress: {
+    percent: number | null;
+    etaSeconds: number | null;
+    /** The tail of ffmpeg's own stderr, so the UI can show what it is doing. */
+    logTail: string;
+  }) => void;
   /** Aborting kills the child. */
   signal: AbortSignal;
 }
@@ -72,7 +77,6 @@ export class Transcoder {
       '+faststart',
       '-progress',
       'pipe:1',
-      '-nostats',
       options.destination,
     ];
 
@@ -107,17 +111,43 @@ export class Transcoder {
       const child = spawn(this.ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       const reader = new ProgressReader();
 
-      // Bounded: ffmpeg can be chatty, and an unbounded string on a job that
-      // runs for an hour is a slow memory leak.
-      let stderr = '';
+      /*
+       * Two bounded buffers over the same stream, for two different readers.
+       *
+       * `-nostats` used to be passed, which left stderr empty on a healthy
+       * encode — good for the error message, useless for anyone wanting to see
+       * what ffmpeg is doing. Without it the status line streams, but it also
+       * repeats several times a second and would push the one line that
+       * explains a failure out of a single 8KB window.
+       *
+       * So `diagnostics` drops the status lines and is what FfmpegError reads;
+       * `display` keeps everything and is what the admin sees.
+       */
+      let diagnostics = '';
+      let display = '';
+      let pendingLine = '';
+
+      const isStatusLine = (line: string): boolean =>
+        /^(frame|size)=/.test(line.trimStart()) || line.trimStart().startsWith('video:');
+
       const appendStderr = (chunk: string): void => {
-        stderr = (stderr + chunk).slice(-8_000);
+        display = (display + chunk).slice(-8_000);
+
+        // Diagnostics are split on whole lines, so a status line cannot be
+        // half-classified by an arbitrary chunk boundary.
+        pendingLine += chunk;
+        const lines = pendingLine.split('\n');
+        pendingLine = lines.pop() ?? '';
+        const kept = lines.filter((line) => line.trim() !== '' && !isStatusLine(line));
+        if (kept.length > 0) {
+          diagnostics = (diagnostics + kept.join('\n') + '\n').slice(-8_000);
+        }
       };
 
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', (chunk: string) => {
         for (const update of reader.push(chunk)) {
-          this.report(update, options);
+          this.report(update, options, display);
         }
       });
 
@@ -150,7 +180,13 @@ export class Transcoder {
           return;
         }
 
-        reject(new FfmpegError('ffmpeg', code, stderr || `killed by ${signal ?? 'unknown signal'}`));
+        reject(
+          new FfmpegError(
+            'ffmpeg',
+            code,
+            diagnostics || display || `killed by ${signal ?? 'unknown signal'}`,
+          ),
+        );
       });
     });
   }
@@ -158,10 +194,12 @@ export class Transcoder {
   private report(
     update: ProgressUpdate,
     options: Pick<TranscodeOptions, 'onProgress' | 'durationSec'>,
+    logTail: string,
   ): void {
     options.onProgress({
       percent: percentOf(update.outTimeUs, options.durationSec),
       etaSeconds: remainingSeconds(update.outTimeUs, options.durationSec, update.speed),
+      logTail,
     });
   }
 }

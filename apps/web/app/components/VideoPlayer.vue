@@ -186,7 +186,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative w-full overflow-hidden rounded-lg bg-black ring-1 ring-white/10">
+  <div class="relative w-full overflow-hidden rounded-lg bg-black ring-1 ring-(--ui-border)">
     <video
       ref="video"
       class="aspect-video w-full"

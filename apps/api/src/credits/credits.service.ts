@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { toPage, type Page } from '@video/shared';
 import type { CreateCreditInput, ReorderCreditsInput, UpdateCreditInput } from '@video/shared';
 
 import { whereVisible } from '../common/publishing';
@@ -17,6 +18,18 @@ const CREDIT_SELECT = {
   person: { select: { id: true, slug: true, name: true, photoKey: true } },
 } as const;
 
+/**
+ * A ceiling on one panel's worth of credits.
+ *
+ * Both listings are a whole cast in one response rather than a paged window —
+ * a credits panel that arrives in pages is not a credits panel — but they still
+ * return a `Page`, because **every list endpoint does**. The subtitles endpoint
+ * shipped as a bare array for exactly this reason and the player's track list
+ * silently came back empty; the frontend reads `.items` because everything else
+ * does, which is the whole point of the convention.
+ */
+const MAX_CREDITS = 500;
+
 /** Which parent a credit hangs off. Exactly one, enforced by a CHECK constraint too. */
 type Parent = { collectionId: string; videoId?: undefined } | { videoId: string; collectionId?: undefined };
 
@@ -25,14 +38,17 @@ export class CreditsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** A collection's own credits — the series' main cast and crew. */
-  async listForCollection(collectionId: string, role: Role): Promise<MergeableCredit[]> {
+  async listForCollection(collectionId: string, role: Role): Promise<Page<MergeableCredit>> {
     await this.requireCollection(collectionId, role);
 
-    return this.prisma.credit.findMany({
+    const credits = await this.prisma.credit.findMany({
       where: { collectionId },
       select: CREDIT_SELECT,
       orderBy: [{ role: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+      take: MAX_CREDITS,
     });
+
+    return toPage(credits, credits.length, { limit: MAX_CREDITS, offset: 0 });
   }
 
   /**
@@ -44,14 +60,16 @@ export class CreditsService {
     const video = await this.requireVideo(videoId, role);
 
     const [own, inherited] = await Promise.all([
-      this.prisma.credit.findMany({ where: { videoId }, select: CREDIT_SELECT }),
+      this.prisma.credit.findMany({ where: { videoId }, select: CREDIT_SELECT, take: MAX_CREDITS }),
       this.prisma.credit.findMany({
         where: { collectionId: video.collectionId },
         select: CREDIT_SELECT,
+        take: MAX_CREDITS,
       }),
     ]);
 
-    return mergeCredits(inherited, own);
+    const merged = mergeCredits(inherited, own);
+    return toPage(merged, merged.length, { limit: MAX_CREDITS, offset: 0 });
   }
 
   async createForCollection(collectionId: string, dto: CreateCreditInput) {

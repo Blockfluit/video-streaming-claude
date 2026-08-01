@@ -48,13 +48,15 @@ async function remove(person: Person) {
   await api(`/people/${person.id}`, { method: 'DELETE' })
   await refresh()
 }
+
+useHead({ title: 'People' })
 </script>
 
 <template>
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">People</h1>
-      <p class="text-sm text-white/65">Cast and crew, shared across the library.</p>
+      <p class="text-sm text-(--ui-text-muted)">Cast and crew, shared across the library.</p>
     </div>
 
     <div class="flex flex-wrap gap-2">
@@ -69,16 +71,16 @@ async function remove(person: Person) {
       <div
         v-for="person in data.items"
         :key="person.id"
-        class="flex items-center gap-3 rounded-lg border border-white/12 bg-(--ui-bg-elevated) p-3"
+        class="flex items-center gap-3 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-3"
       >
-        <div class="grid size-10 shrink-0 place-items-center rounded-full bg-white/5 text-xs font-semibold">
+        <div class="grid size-10 shrink-0 place-items-center rounded-full bg-(--ui-bg-elevated) text-xs font-semibold">
           {{ person.name.slice(0, 2).toUpperCase() }}
         </div>
         <div class="min-w-0 grow">
           <NuxtLink :to="`/people/${person.slug}`" class="truncate text-sm font-medium hover:underline">
             {{ person.name }}
           </NuxtLink>
-          <p class="text-xs text-white/70">{{ person._count?.credits ?? 0 }} credits</p>
+          <p class="text-xs text-(--ui-text-muted)">{{ person._count?.credits ?? 0 }} credits</p>
         </div>
         <UButton
           size="xs"
@@ -91,7 +93,7 @@ async function remove(person: Person) {
       </div>
     </div>
 
-    <p v-else class="py-20 text-center text-white/70">
+    <p v-else class="py-20 text-center text-(--ui-text-muted)">
       {{ q ? 'Nobody matches.' : 'No people yet.' }}
     </p>
   </div>

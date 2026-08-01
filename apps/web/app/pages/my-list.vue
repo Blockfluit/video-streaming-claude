@@ -51,10 +51,12 @@ async function remove(item: SavedItem) {
     await refresh()
   }
 }
+
+useHead({ title: 'My List' })
 </script>
 
 <template>
-  <UContainer class="py-8 space-y-6">
+  <div class="page-shell space-y-6 pt-24 pb-16">
     <h1 class="text-2xl font-semibold">My list</h1>
 
     <div
@@ -94,5 +96,5 @@ async function remove(item: SavedItem) {
     <p v-else class="py-20 text-center text-(--ui-text-muted)">
       Nothing saved yet. Add something from a collection or the player.
     </p>
-  </UContainer>
+  </div>
 </template>

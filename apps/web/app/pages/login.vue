@@ -36,6 +36,8 @@ async function submit() {
     pending.value = false
   }
 }
+
+useHead({ title: 'Sign in' })
 </script>
 
 <template>

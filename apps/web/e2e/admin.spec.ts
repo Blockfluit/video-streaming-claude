@@ -137,6 +137,77 @@ test.describe('admin', () => {
     await expect(page.getByRole('link', { name })).toHaveCount(0)
   })
 
+  /**
+   * The credits editor, driven through its real controls.
+   *
+   * Worth covering carefully: the credits API shipped in step 16 and nothing in
+   * the frontend called it until now, so the merge rules and the billing order
+   * were reachable only from a unit test. It also has to clean up after itself
+   * — a credit is a duplicate on (person, role, parent) and the second run of a
+   * test that leaves one behind gets a 409.
+   */
+  test('a person can be credited on a video and removed again', async ({ page }) => {
+    const name = `Credited ${Date.now()}`
+
+    await visit(page, '/admin/people')
+    await fillStable(page, 'input[placeholder="New person"]', name)
+    await expectsRequest(page, /\/people$/, 'POST', () =>
+      page.getByRole('button', { name: 'Add' }).click())
+    await expect(page.getByRole('link', { name })).toBeVisible()
+
+    /*
+     * Pick the video from the home page and resolve *that* one's id, rather
+     * than crediting `videos?limit=1` and then opening whichever card the home
+     * page happens to show first. Those are two different orderings and they
+     * disagree — the first draft of this test credited Chinatown and then
+     * asserted against South Park.
+     */
+    await visit(page, '/')
+    const watchPath = await page.locator('main a[href^="/c/"]').first().getAttribute('href') as string
+    const [, collectionSlug, ...rest] = new URL(watchPath, 'http://x').pathname.split('/').filter(Boolean)
+    const videoId = await page.evaluate(async ({ slug, path }) => {
+      const response = await fetch(`/api/collections/${slug}/resolve?path=${encodeURIComponent(path)}`)
+      return (await response.json()).data.id as string
+    }, { slug: collectionSlug as string, path: rest.join('/') })
+
+    await visit(page, `/admin/videos/${videoId}`)
+
+    await expect(page.getByRole('heading', { name: 'Cast and crew' })).toBeVisible()
+
+    // The trigger carries an explicit aria-label: USelectMenu's own is
+    // "Show popup", which shadows the visible text and names the control
+    // after its mechanism rather than its job.
+    await page.getByRole('button', { name: 'Person to credit' }).click()
+    await page.getByRole('option', { name }).click()
+
+    /*
+     * Picking someone must close the menu, and this waits for it rather than
+     * racing it. While the popover is open its focus trap owns the keyboard, so
+     * the character name typed next lands in the *search box* instead — the
+     * credit then saves with no character and nothing anywhere reports an
+     * error. That is a real bug this assertion pins, not test hygiene.
+     */
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+
+    await fillStable(page, 'input[placeholder="Optional"]', 'Herself')
+
+    await expectsRequest(page, /\/credits$/, 'POST', () =>
+      page.getByRole('button', { name: 'Add credit' }).click())
+    await expect(page.getByText(name)).toBeVisible()
+
+    // And it must reach the viewer-facing panel, not just the editor.
+    await visit(page, watchPath)
+    await expect(page.getByRole('heading', { name: 'Cast and crew' })).toBeVisible()
+    await expect(page.getByText(name)).toBeVisible()
+    await expect(page.getByText('as Herself')).toBeVisible()
+
+    // Clean up, or the next run collides on (person, role, parent).
+    await visit(page, `/admin/videos/${videoId}`)
+    await expectsRequest(page, /\/credits\//, 'DELETE', () =>
+      page.getByRole('button', { name: `Remove ${name}` }).click())
+    await expect(page.getByText(name)).toHaveCount(0)
+  })
+
   test('minting an invite shows a token exactly once', async ({ page }) => {
     await visit(page, '/admin/users')
 

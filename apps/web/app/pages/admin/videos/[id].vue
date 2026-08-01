@@ -106,11 +106,25 @@ async function clearMarker(field: string) {
   await refresh()
 }
 
+/** The jobs panel, so queueing something shows up in it straight away. */
+const jobs = ref<{ refresh: () => Promise<void> } | null>(null)
+
 async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Done') {
   try {
     await api(`/videos/${id}${path}`, { method })
     await refresh()
     toast.add({ title: label, color: 'success' })
+
+    /*
+     * Pulls the new job into the panel rather than waiting up to 2s for the
+     * next poll, which reads as the button having done nothing.
+     *
+     * Deliberately after the toast and deliberately not awaited into the catch
+     * below: this is a nicety, and the first version had it before the toast
+     * and inside the try — so a refresh of a *side panel* could swallow the
+     * confirmation of an action that had already succeeded on the server.
+     */
+    void jobs.value?.refresh().catch(() => undefined)
   } catch (error) {
     toast.add({ title: message(error, 'That did not work'), color: 'error' })
   }
@@ -181,17 +195,21 @@ const markers = [
   { field: 'outroStartSec', label: 'Outro start' },
   { field: 'outroEndSec', label: 'Outro end' },
 ] as const
+
+// Computed, not a literal: an admin editing three videos has three tabs open
+// and they should not all read "Edit".
+useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit') })
 </script>
 
 <template>
   <div v-if="video" class="space-y-6">
     <div class="flex flex-wrap items-start gap-4">
       <div class="grow">
-        <NuxtLink to="/admin/drafts" class="text-sm text-white/70 hover:text-white">
+        <NuxtLink to="/admin/drafts" class="text-sm text-(--ui-text-muted) hover:text-white">
           ← Drafts
         </NuxtLink>
         <h1 class="text-2xl font-bold tracking-tight">{{ video.title }}</h1>
-        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/70">
+        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-(--ui-text-muted)">
           <UBadge :color="video.state === 'PUBLISHED' ? 'success' : 'neutral'" variant="subtle">
             {{ video.state }}
           </UBadge>
@@ -259,7 +277,7 @@ const markers = [
         <UCard>
           <template #header>
             <h2 class="font-semibold">Skip markers</h2>
-            <p class="text-xs text-white/70">
+            <p class="text-xs text-(--ui-text-muted)">
               Scrub to a position, then set. Each click saves on its own.
             </p>
           </template>
@@ -273,7 +291,7 @@ const markers = [
               @timeupdate="previewTime = ($event.target as HTMLVideoElement).currentTime"
             />
 
-            <p class="text-sm text-white/65">
+            <p class="text-sm text-(--ui-text-muted)">
               Playhead at <span class="font-mono text-white">{{ timecode(previewTime) }}</span>
             </p>
 
@@ -281,13 +299,13 @@ const markers = [
               <div
                 v-for="marker in markers"
                 :key="marker.field"
-                class="flex items-center gap-2 rounded-md bg-white/5 p-2"
+                class="flex items-center gap-2 rounded-md bg-(--ui-bg-elevated) p-2"
               >
-                <span class="w-24 text-sm text-white/70">{{ marker.label }}</span>
+                <span class="w-24 text-sm text-(--ui-text-muted)">{{ marker.label }}</span>
                 <span class="font-mono text-sm">
                   {{ video[marker.field] === null ? '—' : timecode(video[marker.field]!) }}
                 </span>
-                <UButton size="xs" variant="subtle" class="ml-auto" @click="setMarker(marker.field)">
+                <UButton size="xs" color="neutral" variant="subtle" class="ml-auto" @click="setMarker(marker.field)">
                   Set
                 </UButton>
                 <UButton
@@ -305,8 +323,16 @@ const markers = [
         </UCard>
 
         <UCard>
+          <VideoJobs ref="jobs" :video-id="id" />
+        </UCard>
+
+        <UCard>
+          <CreditsEditor :video-id="id" />
+        </UCard>
+
+        <UCard>
           <template #header><h2 class="font-semibold">Subtitles</h2></template>
-          <ul v-if="subtitles?.items?.length" class="mb-4 divide-y divide-white/10">
+          <ul v-if="subtitles?.items?.length" class="mb-4 divide-y divide-(--ui-border)">
             <li
               v-for="track in subtitles.items"
               :key="track.id"
@@ -317,16 +343,16 @@ const markers = [
               <UBadge v-if="track.isDefault" color="primary" variant="subtle" size="sm">
                 default
               </UBadge>
-              <span class="ml-auto text-xs text-white/55">{{ track.origin }}</span>
+              <span class="ml-auto text-xs text-(--ui-text-dimmed)">{{ track.origin }}</span>
             </li>
           </ul>
-          <p v-else class="mb-4 text-sm text-white/70">No subtitle tracks.</p>
+          <p v-else class="mb-4 text-sm text-(--ui-text-muted)">No subtitle tracks.</p>
 
           <div class="flex flex-wrap gap-2">
             <label class="cursor-pointer">
               <input type="file" accept=".vtt" class="hidden" @change="uploadSubtitle">
               <span
-                class="inline-flex items-center gap-2 rounded-md bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+                class="inline-flex items-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
               >
                 <UIcon name="i-lucide-upload" class="size-4" /> Upload .vtt
               </span>
@@ -347,7 +373,7 @@ const markers = [
         <UCard>
           <template #header>
             <h2 class="font-semibold">Poster</h2>
-            <p class="text-xs text-white/70">{{ video.thumbnailSource }}</p>
+            <p class="text-xs text-(--ui-text-muted)">{{ video.thumbnailSource }}</p>
           </template>
 
           <img
@@ -357,13 +383,13 @@ const markers = [
           >
 
           <div class="space-y-2">
-            <UButton block variant="subtle" icon="i-lucide-crosshair" @click="captureThumbnail">
+            <UButton block color="neutral" variant="subtle" icon="i-lucide-crosshair" @click="captureThumbnail">
               Capture at {{ timecode(previewTime) }}
             </UButton>
             <label class="block cursor-pointer">
               <input type="file" accept="image/*" class="hidden" @change="uploadPoster">
               <span
-                class="flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+                class="flex w-full items-center justify-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
               >
                 <UIcon name="i-lucide-image" class="size-4" /> Upload image
               </span>
@@ -384,15 +410,15 @@ const markers = [
           <template #header><h2 class="font-semibold">Media</h2></template>
           <dl class="space-y-2 text-sm">
             <div class="flex justify-between">
-              <dt class="text-white/65">Size</dt>
+              <dt class="text-(--ui-text-muted)">Size</dt>
               <dd>{{ (Number(video.sizeBytes) / 1024 ** 3).toFixed(2) }} GB</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-white/65">Audio tracks</dt>
+              <dt class="text-(--ui-text-muted)">Audio tracks</dt>
               <dd>{{ video.audioTracks ?? '—' }}</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-white/65">Converted</dt>
+              <dt class="text-(--ui-text-muted)">Converted</dt>
               <dd>{{ video.playbackKey ? 'yes' : 'no' }}</dd>
             </div>
           </dl>
@@ -400,7 +426,7 @@ const markers = [
           <div class="mt-4 space-y-2">
             <UButton
               block
-              variant="subtle"
+              color="neutral" variant="subtle"
               icon="i-lucide-refresh-cw"
               @click="act('/reprobe', 'POST', 'Reprobed')"
             >

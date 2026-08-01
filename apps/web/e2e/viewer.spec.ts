@@ -190,8 +190,31 @@ test.describe('viewer', () => {
     })
 
     test('the sidebar moves between videos in the collection', async ({ page }) => {
-      const sidebar = page.getByText('More from')
-      if (await sidebar.count() === 0) test.skip(true, 'only one video in this collection')
+      /**
+       * The skip is decided from the *data*, not from the DOM.
+       *
+       * This guard used to be `await page.getByText('More from').count() === 0`,
+       * run immediately after `waitForURL`. `count()` does not retry, and the
+       * sidebar renders about 200ms after the route resolves — so it read 0
+       * every single time and the test skipped on every run since it was
+       * written, reporting "only one video in this collection" about a
+       * collection holding five. A test that never runs is worse than no test:
+       * it reports green.
+       */
+      const inCollection = await page.evaluate(async () => {
+        const response = await fetch('/api/videos?limit=100')
+        const body = await response.json()
+        const counts = new Map<string, number>()
+        for (const video of body.items ?? []) {
+          const key = video.collection?.slug ?? '(none)'
+          counts.set(key, (counts.get(key) ?? 0) + 1)
+        }
+        return Math.max(0, ...counts.values())
+      })
+      test.skip(inCollection < 2, 'no collection here holds two videos')
+
+      // Now wait for it properly — `expect` retries where `count()` does not.
+      await expect(page.getByText('More from')).toBeVisible()
 
       const other = page.locator('aside a').nth(1)
       const href = await other.getAttribute('href')

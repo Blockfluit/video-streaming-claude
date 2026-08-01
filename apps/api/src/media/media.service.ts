@@ -1,6 +1,11 @@
 import { extname } from 'node:path';
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnModuleDestroy,
+} from '@nestjs/common';
 
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,10 +30,11 @@ const CONCURRENCY = 2;
 const THUMBNAIL_POSITION = 0.1;
 
 @Injectable()
-export class MediaService {
+export class MediaService implements OnModuleDestroy {
   private readonly logger = new Logger(MediaService.name);
 
   private readonly queued = new Set<string>();
+  private shuttingDown = false;
   private readonly waiting: string[] = [];
   private active = 0;
 
@@ -37,6 +43,30 @@ export class MediaService {
     private readonly storage: StorageService,
     private readonly ffmpeg: FfmpegService,
   ) {}
+
+  /**
+   * Stops the queue when the app shuts down.
+   *
+   * Without this the probes still in flight outlive `app.close()`: their
+   * ffprobe children and Prisma writes keep the event loop alive, so Jest
+   * reported "did not exit one second after the test run has completed" and
+   * `test:db` exited non-zero **with all 399 tests passing**. The same
+   * stragglers logged `No record was found for an update` when they landed on
+   * rows the finished test had already deleted.
+   *
+   * Anything still waiting is dropped rather than run — nothing is watching for
+   * the result any more — and the in-flight ones are given a bounded moment to
+   * land so a half-written probe does not race the connection closing under it.
+   */
+  async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
+    this.waiting.length = 0;
+
+    const deadline = Date.now() + 5_000;
+    while (this.active > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
 
   get pending(): number {
     return this.waiting.length + this.active;
@@ -64,6 +94,8 @@ export class MediaService {
   }
 
   private pump(): void {
+    if (this.shuttingDown) return;
+
     while (this.active < CONCURRENCY && this.waiting.length > 0) {
       const videoId = this.waiting.shift() as string;
       this.active += 1;

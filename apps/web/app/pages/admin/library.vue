@@ -75,6 +75,8 @@ watch([q, state], () => {
   })
 })
 
+
+useHead({ title: 'All titles' })
 </script>
 
 <template>
@@ -87,7 +89,7 @@ watch([q, state], () => {
     </div>
 
     <section v-if="collections?.items?.length" class="space-y-2">
-      <h2 class="text-sm font-semibold tracking-wide text-white/65 uppercase">
+      <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
         Collections ({{ collections.total }})
       </h2>
       <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -95,7 +97,7 @@ watch([q, state], () => {
           v-for="collection in collections.items"
           :key="collection.id"
           :to="`/c/${collection.slug}`"
-          class="flex items-center gap-3 rounded-lg border border-white/12 bg-(--ui-bg-elevated) p-3 hover:border-white/25"
+          class="flex items-center gap-3 rounded-lg border border-(--ui-border-accented) bg-(--ui-bg-elevated) p-3 transition-colors hover:border-(--ui-text-dimmed) hover:bg-(--ui-bg-accented)"
         >
           <img
             :src="`/api/collections/${collection.id}/poster`"
@@ -105,19 +107,19 @@ watch([q, state], () => {
           >
           <div class="min-w-0">
             <p class="truncate text-sm font-medium">{{ collection.title }}</p>
-            <p class="text-xs text-white/70">{{ collection.state }}</p>
+            <p class="text-xs text-(--ui-text-muted)">{{ collection.state }}</p>
           </div>
         </NuxtLink>
       </div>
     </section>
 
     <section class="space-y-2">
-      <h2 class="text-sm font-semibold tracking-wide text-white/65 uppercase">
+      <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
         Videos ({{ videos?.total ?? 0 }})
       </h2>
-      <div v-if="videos?.items?.length" class="overflow-hidden rounded-lg border border-white/12">
+      <div v-if="videos?.items?.length" class="overflow-hidden rounded-lg border border-(--ui-border)">
         <table class="w-full text-sm">
-          <tbody class="divide-y divide-white/10">
+          <tbody class="divide-y divide-(--ui-border)">
             <tr v-for="video in videos.items" :key="video.id" class="hover:bg-white/[0.03]">
               <td class="p-3">
                 <div class="flex items-center gap-3">
@@ -138,16 +140,16 @@ watch([q, state], () => {
                   {{ video.state }}
                 </UBadge>
               </td>
-              <td class="p-3 text-white/70">{{ runtime(video.durationSec) ?? '—' }}</td>
+              <td class="p-3 text-(--ui-text-muted)">{{ runtime(video.durationSec) ?? '—' }}</td>
               <td class="p-3"><QualityBadge :width="video.width" :height="video.height" /></td>
               <td class="p-3 text-right">
-                <UButton :to="`/admin/videos/${video.id}`" size="xs" variant="subtle">Edit</UButton>
+                <UButton :to="`/admin/videos/${video.id}`" size="xs" color="neutral" variant="subtle">Edit</UButton>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p v-else class="py-12 text-center text-white/70">Nothing matches.</p>
+      <p v-else class="py-12 text-center text-(--ui-text-muted)">Nothing matches.</p>
     </section>
   </div>
 </template>

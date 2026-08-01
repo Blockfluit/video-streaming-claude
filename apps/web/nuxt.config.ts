@@ -6,6 +6,11 @@ export default defineNuxtConfig({
   modules: ['@nuxt/ui'],
   css: ['~/assets/css/main.css'],
 
+  // The suffix itself lives in app.vue: `titleTemplate` has to be a serialisable
+  // string here, and a string template renders " · Library" for any route that
+  // sets no title of its own.
+  app: { head: { htmlAttrs: { lang: 'en' } } },
+
   // Nuxt Icon serves its runtime bundle from `/api/_nuxt_icon` by default,
   // which the proxy below swallows whole and forwards to NestJS — where it is
   // a 404, and any icon resolved at runtime silently fails to draw. Moved off

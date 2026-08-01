@@ -91,13 +91,15 @@ function upload() {
   })
   request.send(body)
 }
+
+useHead({ title: 'Upload' })
 </script>
 
 <template>
   <div class="max-w-2xl space-y-6">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Upload</h1>
-      <p class="text-sm text-white/65">
+      <p class="text-sm text-(--ui-text-muted)">
         Lands in the media folder as a draft, exactly as if you had copied it there.
       </p>
     </div>
@@ -110,14 +112,14 @@ function upload() {
 
         <UFormField label="File">
           <label
-            class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-white/15 p-8 text-center transition-colors hover:border-white/30"
+            class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-(--ui-border) p-8 text-center transition-colors hover:border-(--ui-border-accented)"
           >
             <input type="file" accept="video/*,.mkv,.mp4,.avi,.mov" class="hidden" @change="pick">
-            <UIcon name="i-lucide-upload-cloud" class="size-8 text-white/55" />
+            <UIcon name="i-lucide-upload-cloud" class="size-8 text-(--ui-text-dimmed)" />
             <span class="text-sm">
               {{ file ? file.name : 'Choose a video file' }}
             </span>
-            <span v-if="file" class="text-xs text-white/70">
+            <span v-if="file" class="text-xs text-(--ui-text-muted)">
               {{ (file.size / 1024 ** 3).toFixed(2) }} GB
             </span>
           </label>
@@ -127,7 +129,7 @@ function upload() {
           <div class="h-2 overflow-hidden rounded-full bg-white/10">
             <div class="h-full bg-(--ui-primary) transition-[width]" :style="{ width: `${progress}%` }" />
           </div>
-          <p class="text-xs text-white/65">{{ Math.round(progress) }}%</p>
+          <p class="text-xs text-(--ui-text-muted)">{{ Math.round(progress) }}%</p>
         </div>
 
         <UButton
@@ -157,7 +159,7 @@ function upload() {
             >
               Open it
             </UButton>
-            <UButton size="xs" variant="subtle" to="/admin/drafts">All drafts</UButton>
+            <UButton size="xs" color="neutral" variant="subtle" to="/admin/drafts">All drafts</UButton>
           </template>
         </UAlert>
       </div>

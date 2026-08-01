@@ -26,10 +26,12 @@ interface HistoryItem {
 
 const { data } = await useApiData<Page<HistoryItem>>('history', '/me/history?limit=100')
 const items = computed(() => data.value?.items ?? [])
+
+useHead({ title: 'History' })
 </script>
 
 <template>
-  <UContainer class="py-8 space-y-6">
+  <div class="page-shell space-y-6 pt-24 pb-16">
     <h1 class="text-2xl font-semibold">History</h1>
 
     <ul v-if="items.length" class="divide-y divide-(--ui-border)">
@@ -57,5 +59,5 @@ const items = computed(() => data.value?.items ?? [])
     </ul>
 
     <p v-else class="py-20 text-center text-(--ui-text-muted)">Nothing watched yet.</p>
-  </UContainer>
+  </div>
 </template>

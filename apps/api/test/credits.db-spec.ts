@@ -288,8 +288,8 @@ describe('People and credits (real database)', () => {
 
       const response = await viewer.get(`/videos/${videoId}/credits`).expect(200);
 
-      expect(response.body).toHaveLength(1);
-      expect(response.body[0]).toMatchObject({ inherited: true, person: { name: 'Ada Lovelace' } });
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0]).toMatchObject({ inherited: true, person: { name: 'Ada Lovelace' } });
     });
 
     it('puts the show’s regulars before the episode’s guests', async () => {
@@ -304,7 +304,7 @@ describe('People and credits (real database)', () => {
 
       const response = await viewer.get(`/videos/${videoId}/credits`).expect(200);
 
-      expect(response.body.map((c: { person: { name: string } }) => c.person.name)).toEqual([
+      expect(response.body.items.map((c: { person: { name: string } }) => c.person.name)).toEqual([
         'Ada Lovelace',
         'Grace Hopper',
       ]);
@@ -323,8 +323,8 @@ describe('People and credits (real database)', () => {
 
       const response = await viewer.get(`/videos/${videoId}/credits`).expect(200);
 
-      expect(response.body).toHaveLength(1);
-      expect(response.body[0]).toMatchObject({
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0]).toMatchObject({
         characterName: 'The Countess, older',
         inherited: false,
       });
@@ -403,7 +403,7 @@ describe('People and credits (real database)', () => {
         .send({ videoId, creditIds: [second, first] })
         .expect(200);
 
-      expect(response.body.map((c: { person: { name: string } }) => c.person.name)).toEqual([
+      expect(response.body.items.map((c: { person: { name: string } }) => c.person.name)).toEqual([
         'Grace Hopper',
         'Ada Lovelace',
       ]);
