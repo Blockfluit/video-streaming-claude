@@ -13,8 +13,21 @@ definePageMeta({ layout: false })
 
 const api = useApi()
 const user = useSessionUser()
+const route = useRoute()
 
-const state = reactive<RedeemInput>({ token: '', username: '', password: '' })
+/**
+ * An invite link carries its token: `/setup?token=…`. Prefilling the field is
+ * the entire point of the link — 43 characters of base64 retyped out of a chat
+ * message is where an invite goes to die.
+ *
+ * A repeated query parameter arrives as an array, and `?token=` with no value
+ * as null; both collapse to an empty field rather than rendering `undefined`
+ * into the box.
+ */
+const linked = route.query.token
+const linkedToken = (Array.isArray(linked) ? linked[0] : linked) ?? ''
+
+const state = reactive<RedeemInput>({ token: linkedToken, username: '', password: '' })
 const pending = ref(false)
 const failure = ref<string | null>(null)
 
@@ -53,12 +66,19 @@ useHead({ title: 'Set up' })
       </template>
 
       <UForm :schema="redeemSchema" :state="state" class="space-y-4" @submit="submit">
+        <!-- Arriving by link, the token is already answered; the cursor belongs
+             on the first thing still to fill in. -->
         <UFormField label="Token" name="token" required>
-          <UInput v-model="state.token" autofocus class="w-full" />
+          <UInput v-model="state.token" :autofocus="!linkedToken" class="w-full" />
         </UFormField>
 
         <UFormField label="Username" name="username" required :hint="USERNAME_RULES">
-          <UInput v-model="state.username" autocomplete="username" class="w-full" />
+          <UInput
+            v-model="state.username"
+            :autofocus="Boolean(linkedToken)"
+            autocomplete="username"
+            class="w-full"
+          />
         </UFormField>
 
         <UFormField

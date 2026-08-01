@@ -1,5 +1,17 @@
 # Video Streaming App — Nuxt + NestJS
 
+> **Status: all eighteen steps are built.** This document is the design record —
+> what was decided before the code existed, and why. It is deliberately *not*
+> rewritten to match the result.
+>
+> Where the build departed from this plan, [`CLAUDE.md`](../CLAUDE.md) is the
+> authority and gives the reason. The departures worth knowing about are marked
+> **[built differently]** below.
+>
+> The Context section is written in the future tense and names a Windows path;
+> the repository actually lives on the WSL2 Linux filesystem, because `inotify`
+> does not fire reliably under `/mnt/c` and the ingest watcher depends on it.
+
 ## Context
 
 `c:\Users\nwbva\Git\video-streaming-claude` is empty. This is a greenfield build of a **private, invite-only Netflix-style video library** with two ways in: browser uploads, and a **PIM-style ingest pipeline** where files dropped into the media folder are auto-discovered from their folder structure, staged as drafts, enriched by an admin, and published.
@@ -684,6 +696,13 @@ Derived from probe data by a pure `qualityLabel(width, height)` helper in `packa
 
 | Condition | Badge |
 |---|---|
+> **[built differently]** The comparison is by **edge, not axis**: long edge against the width
+> threshold, short edge against the height threshold. Height alone hides the badge on most films — a
+> 1080p film in 2.39:1 is `1920×800` — while "either raw dimension against either threshold"
+> over-promotes portrait video, since a 1080×1920 phone clip clears QHD's 1440 on height. The table
+> below says the latter and the surrounding text also claims portrait is handled correctly; those
+> conflict, and comparing by edge is what satisfies both intents.
+
 | `width ≥ 7680` or `height ≥ 4320` | `8K` |
 | `width ≥ 3840` or `height ≥ 2160` | `4K` |
 | `width ≥ 2560` or `height ≥ 1440` | `QHD` |
@@ -761,6 +780,10 @@ Server (`apps/api/src/watch/watch.service.ts`), per heartbeat in one transaction
 - `upsert` `WatchProgress`: `lastPositionSec = positionSec`, `maxPositionSec = max(existing, positionSec)`, `secondsWatched += deltaSec`, `completed = maxPositionSec >= 0.9 * durationSec`.
 - Increment `viewCount` only on the first beat of a new `playSessionId`.
 - Clamp `deltaSec` server-side (reject > 30) so a buggy or hostile client can't inflate totals.
+  **[built differently]** It is **capped** at 30, not rejected. Rejecting the beat throws away the
+  viewer's resume position along with the excess seconds, and missing two beats is an ordinary network
+  hiccup. The cap stops one bad number rewriting a total; the *rate* limit is separate, in
+  `common/throttling.ts`, because a client beating in a loop still accumulates real seconds.
 
 Per-video stats via `aggregate`/`groupBy` over `WatchProgress`: unique viewers, total watch time, average completion %, plus the caller's own progress. Collection pages roll the same figures up.
 
@@ -866,6 +889,13 @@ account's comments, watch history and watchlist; `PATCH { isActive: false }` is 
 16. **People + credits**, then **comments**, then **My List**, then **curated lists**.
 17. **Frontend** — auth → home/browse/collection → player (subtitles, markers, quality badge, comments) → My List → admin PIM screens → jobs → curation → users.
 18. **Hardening** — `helmet`, `@nestjs/throttler` (tight on login, redeem, and comment posting), global `ValidationPipe` with `whitelist: true`, `README.md`.
+    **[built differently]** Two departures. There is **no** global `ValidationPipe` — this contradicts
+    the plan's own validation section above, which says there is not one, and that section won: validation
+    is per parameter against a zod schema from `packages/shared`, and zod strips unknown keys by default,
+    which is what `whitelist` bought. And throttling covers more than three routes: an audit of all 83
+    found that the heartbeat, uploads, every ffmpeg-spawning route, media scans and invite minting all
+    need limits — and that streaming, artwork, subtitle tracks and `/auth/me` must never have one, because
+    a single `<video>` issues a range request per seek.
 
 ## Configuration
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { progressPercent, runtime, timecode } from './format'
+import { dateTime, progressPercent, runtime, shortDate, timecode } from './format'
 
 describe('timecode', () => {
   it('formats minutes and seconds', () => {
@@ -75,5 +75,44 @@ describe('progressPercent', () => {
     expect(progressPercent(null, 600)).toBe(0)
     expect(progressPercent(300, null)).toBe(0)
     expect(progressPercent(300, 0)).toBe(0)
+  })
+})
+
+describe('shortDate', () => {
+  it('renders an unambiguous day, month and year', () => {
+    expect(shortDate('2026-08-01T14:32:00.000Z')).toBe('1 Aug 2026')
+  })
+
+  /**
+   * The assertion this pair exists for. These run on a machine in
+   * Europe/Amsterdam, two hours ahead of UTC in August — so an unpinned
+   * formatter renders this instant as the *2nd*. Nitro and a browser disagreeing
+   * about the date is a hydration mismatch, and Vue's answer to one is to throw
+   * away the server-rendered subtree.
+   */
+  it('pins the time zone, so a late-evening instant does not slide into tomorrow', () => {
+    expect(shortDate('2026-08-01T23:30:00.000Z')).toBe('1 Aug 2026')
+  })
+
+  it('returns null for nothing, rather than "Invalid Date"', () => {
+    expect(shortDate(null)).toBeNull()
+    expect(shortDate(undefined)).toBeNull()
+    expect(shortDate('not a date')).toBeNull()
+  })
+})
+
+describe('dateTime', () => {
+  it('adds a 24-hour clock to the date', () => {
+    expect(dateTime('2026-08-01T14:32:00.000Z')).toBe('1 Aug 2026, 14:32')
+  })
+
+  it('is pinned to the same zone as shortDate', () => {
+    expect(dateTime('2026-08-01T23:30:00.000Z')).toBe('1 Aug 2026, 23:30')
+  })
+
+  it('returns null for nothing', () => {
+    expect(dateTime(null)).toBeNull()
+    expect(dateTime(undefined)).toBeNull()
+    expect(dateTime('not a date')).toBeNull()
   })
 })

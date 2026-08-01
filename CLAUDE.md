@@ -87,7 +87,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 494 unit, 19 e2e and 456 db. The thin wrapper in
+  which is where every API test runs — COUNTS_PLACEHOLDER. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -173,7 +173,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `deltaSec` is **capped** at 30s per beat, not rejected — the plan says "reject > 30", but a rejected beat
   throws away the viewer's resume position along with the excess seconds, and missing two beats is a normal
   network hiccup. The cap stops one bad number from rewriting a total; it is **not** a rate limit, since a
-  client beating in a loop still accumulates. That is `@nestjs/throttler` in step 18.
+  client beating in a loop still accumulates. That is what the heartbeat limit in
+  `common/throttling.ts` is for.
 - The `WatchEvent` row stores the **credited** delta, not the claimed one, so summing the log still
   reproduces the rollup. Both are written in one transaction for the same reason.
 - `viewCount` increments only on the first beat carrying a given `playSessionId` — that lookup is why
@@ -541,4 +542,11 @@ npm run dev             # Nuxt :3000, NestJS :4000
 npm test                # Jest unit tests (API)
 npm run test:e2e        # supertest against stubbed Postgres — no database needed
 npm run test:db         # supertest against a real Postgres; creates/migrates `video_test`
+npm run test:all        # all three API tiers, in order — prefer this
+npm run test -w @video/web              # vitest unit tests (web)
+npm run test:e2e -w @video/web          # Playwright, against both dev servers
 ```
+
+Prefer `test:all` over picking a tier. An API change can pass the unit and database tiers and break
+the stubbed HTTP one — that is exactly how `onModuleInit` shipped with a broken `auth.e2e-spec`, and
+it went unnoticed because the change had been "verified" with the other three suites.
