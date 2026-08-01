@@ -19,7 +19,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import {
+  MAX_BANNER_BYTES,
   MAX_THUMBNAIL_BYTES,
+  captureBannerSchema,
   captureThumbnailSchema,
   listVideosSchema,
   updateMarkersSchema,
@@ -27,12 +29,14 @@ import {
   type CaptureThumbnailInput,
   type ListVideosQuery,
   type UpdateMarkersInput,
+  type CaptureBannerInput,
   type UpdateVideoInput,
 } from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { ImagesService } from '../common/images.service';
+import { imageFileFilter, MIME_TO_EXTENSION } from '../common/image-uploads';
 import { validate } from '../common/zod-validation.pipe';
 import { MediaService } from '../media/media.service';
 import { JobsService } from '../transcode/jobs.service';
@@ -191,12 +195,7 @@ export class VideosController {
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: MAX_THUMBNAIL_BYTES, files: 1 },
-      fileFilter: (_request, file, callback) => {
-        // The client's filename is metadata, never a path component — the
-        // extension is taken from the mime type instead.
-        const extension = MIME_TO_EXTENSION[file.mimetype];
-        callback(extension ? null : new BadRequestException('Unsupported image type'), Boolean(extension));
-      },
+      fileFilter: imageFileFilter,
     }),
   )
   async uploadThumbnail(
@@ -260,6 +259,49 @@ export class VideosController {
     return this.jobs.reclaimSource(id);
   }
 
+  /** Uploads the wide backdrop for the overview page. */
+  @ThrottleExpensive()
+  @Post(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      // The cap is what makes buffering in memory safe; see common/image-uploads.
+      limits: { fileSize: MAX_BANNER_BYTES, files: 1 },
+      fileFilter: imageFileFilter,
+    }),
+  )
+  async uploadBanner(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+
+    const key = await this.media.setBanner(id, file.buffer, MIME_TO_EXTENSION[file.mimetype]);
+    return { bannerKey: key };
+  }
+
+  /** Grabs a frame to use as the backdrop. One ffmpeg invocation per call. */
+  @ThrottleExpensive()
+  @Post(':id/banner/capture')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async captureBanner(
+    @Param('id') id: string,
+    @Body(validate(captureBannerSchema)) dto: CaptureBannerInput,
+  ) {
+    const key = await this.media.captureBanner(id, dto.atSeconds);
+    return { bannerKey: key };
+  }
+
+  /** Drops the backdrop. The hero falls back to the thumbnail, which is fine. */
+  @Delete(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearBanner(@Param('id') id: string): Promise<void> {
+    return this.media.clearBanner(id);
+  }
+
   /** Drops the poster and returns the video to AUTO; the next probe regenerates one. */
   @Delete(':id/thumbnail')
   @Roles('ADMIN')
@@ -268,10 +310,3 @@ export class VideosController {
     return this.media.clearThumbnail(id);
   }
 }
-
-/** Extension taken from the mime type, never from the client's filename. */
-const MIME_TO_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};

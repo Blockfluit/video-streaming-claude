@@ -17,6 +17,7 @@ import {
 import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import type { Role } from '../prisma/generated/enums';
+import { bannerKeyFor } from '../common/image-uploads';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -173,6 +174,47 @@ export class CollectionsService {
       },
       select: COLLECTION_SUMMARY,
     });
+  }
+
+  /**
+   * Stores an uploaded image as the collection's wide backdrop.
+   *
+   * Upload only, with no capture twin: a collection has no file of its own to
+   * grab a frame from. This is also the first thing anyone can upload *to* a
+   * collection — the poster still arrives from the folder on disk and has no
+   * endpoint.
+   */
+  async setBanner(id: string, image: Buffer, extension: string): Promise<string> {
+    const collection = await this.prisma.collection.findUnique({
+      where: { id },
+      select: { id: true, bannerKey: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    const key = bannerKeyFor('collections', collection.id, extension);
+    await this.storage.save('derived', key, image);
+
+    // The extension is part of the key, so replacing a png with a jpg orphans
+    // the png unless it goes first.
+    if (collection.bannerKey && collection.bannerKey !== key) {
+      await this.storage.delete('derived', collection.bannerKey);
+    }
+
+    await this.prisma.collection.update({ where: { id: collection.id }, data: { bannerKey: key } });
+
+    return key;
+  }
+
+  async clearBanner(id: string): Promise<void> {
+    const collection = await this.prisma.collection.findUnique({
+      where: { id },
+      select: { id: true, bannerKey: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    if (collection.bannerKey) await this.storage.delete('derived', collection.bannerKey);
+
+    await this.prisma.collection.update({ where: { id: collection.id }, data: { bannerKey: null } });
   }
 
   async update(id: string, dto: UpdateCollectionInput) {

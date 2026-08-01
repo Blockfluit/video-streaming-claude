@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,8 +11,12 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  MAX_BANNER_BYTES,
   createCollectionSchema,
   deleteWithFilesSchema,
   listCollectionsSchema,
@@ -32,6 +37,8 @@ import type { Response } from 'express';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { imageFileFilter, MIME_TO_EXTENSION } from '../common/image-uploads';
+import { ThrottleExpensive } from '../common/throttling';
 import { validate } from '../common/zod-validation.pipe';
 import { ImagesService } from '../common/images.service';
 import { CollectionsService } from './collections.service';
@@ -81,6 +88,40 @@ export class CollectionsController {
     @Res() response: Response,
   ): Promise<void> {
     return this.images.collectionBanner(id, user.role, response);
+  }
+
+  /**
+   * Uploads the collection's wide backdrop.
+   *
+   * The first upload endpoint on the collection side — the poster still comes
+   * from the folder on disk and has none. Upload only, with no capture twin: a
+   * collection has no file of its own to grab a frame from.
+   */
+  @ThrottleExpensive()
+  @Post(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_BANNER_BYTES, files: 1 },
+      fileFilter: imageFileFilter,
+    }),
+  )
+  async uploadBanner(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+
+    const key = await this.collections.setBanner(id, file.buffer, MIME_TO_EXTENSION[file.mimetype]);
+    return { bannerKey: key };
+  }
+
+  @Delete(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearBanner(@Param('id') id: string): Promise<void> {
+    return this.collections.clearBanner(id);
   }
 
   @Get()

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -191,7 +192,20 @@ export class FfmpegService {
    * `-ss` before `-i` seeks by keyframe index rather than decoding up to the
    * timestamp — the difference between instant and minutes on a long file.
    */
-  async captureFrame(source: string, atSeconds: number, destination: string): Promise<void> {
+  async captureFrame(
+    source: string,
+    atSeconds: number,
+    destination: string,
+    /**
+     * Output width; the height follows the aspect ratio.
+     *
+     * Defaults to what a card needs, which is what every existing caller wants.
+     * A hero asks for 1920 — a 640px frame stretched across a full-bleed
+     * backdrop is visibly soft, and scaling up in the browser cannot put back
+     * detail ffmpeg never wrote.
+     */
+    width = 640,
+  ): Promise<void> {
     await run(
       'ffmpeg',
       this.ffmpeg,
@@ -208,11 +222,29 @@ export class FfmpegService {
         '3',
         // Even width and height: some JPEG encoders reject odd dimensions.
         '-vf',
-        'scale=640:-2',
+        `scale=${width}:-2`,
         destination,
       ],
       { timeout: THUMBNAIL_TIMEOUT_MS },
     );
+
+    /*
+     * ffmpeg exits **0** when `-ss` lands past the end of the file: it encodes
+     * nothing, writes no output, and says so only on stderr. The caller then
+     * renames a file that was never created, and what surfaces is
+     * `ENOENT ... rename /srv/derived/tmp/...` — a filesystem error carrying
+     * absolute server paths, for what is really "there is no frame there".
+     *
+     * Picking a timestamp at the very end of a video is an ordinary thing for
+     * an admin to do, so it gets an ordinary answer.
+     */
+    if (!existsSync(destination)) {
+      throw new FfmpegError(
+        'ffmpeg',
+        0,
+        `No frame at ${atSeconds}s — the video may be shorter than that`,
+      );
+    }
   }
 }
 

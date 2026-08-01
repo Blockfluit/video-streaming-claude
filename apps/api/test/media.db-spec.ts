@@ -432,6 +432,190 @@ describe('Media probing (real ffmpeg)', () => {
     });
   });
 
+  describe('banners', () => {
+    /** A one-pixel PNG. */
+    const PNG = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    it('captures a frame into banners/videos and records the key', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      const response = await admin
+        .post(`/videos/${id}/banner/capture`)
+        .send({ atSeconds: 1 })
+        .expect(200);
+
+      expect(response.body).toEqual({ bannerKey: `banners/videos/${id}.jpg` });
+      await expect(storage.exists('derived', `banners/videos/${id}.jpg`)).resolves.toBe(true);
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      expect(video.bannerKey).toBe(`banners/videos/${id}.jpg`);
+    });
+
+    /**
+     * The invariant that costs the most to get wrong: generated output landing
+     * in the watched tree feeds the ingest watcher its own work.
+     */
+    it('writes nothing into the media tree', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
+
+      await expect(storage.exists('media', `banners/videos/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('media', 'banners')).resolves.toBe(false);
+    });
+
+    /**
+     * A banner is captured far wider than a thumbnail. Without the width
+     * parameter both come out at 640 and the hero is visibly soft — which
+     * looks like a CSS problem rather than a missing ffmpeg argument.
+     */
+    it('captures wider than a thumbnail', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
+      await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(200);
+
+      const banner = await readFile(storage.resolvePath('derived', `banners/videos/${id}.jpg`));
+      const thumbnail = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+
+      expect(banner.length).toBeGreaterThan(thumbnail.length);
+    });
+
+    it('leaves no temporary file behind when a capture fails', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      // Writes some of a frame and only then dies — a source ffmpeg cannot read
+      // at all never opens the output, so it proves nothing about cleanup.
+      const ffmpeg = app.get(FfmpegService);
+      const capture = jest
+        .spyOn(ffmpeg, 'captureFrame')
+        .mockImplementation(async (_source, _atSeconds, destination) => {
+          await writeFile(destination, 'half a jpeg');
+          throw new Error('ffmpeg died half way');
+        });
+      try {
+        await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(500);
+      } finally {
+        capture.mockRestore();
+      }
+
+      await expect(storage.exists('derived', `tmp/${id}-banner.jpg`)).resolves.toBe(false);
+    });
+
+    it('stores an upload under the extension its mime type names', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      const response = await admin
+        .post(`/videos/${id}/banner`)
+        .attach('file', PNG, { filename: 'hero.png', contentType: 'image/png' })
+        .expect(200);
+
+      expect(response.body).toEqual({ bannerKey: `banners/videos/${id}.png` });
+    });
+
+    /**
+     * The extension is part of the key, so a png replaced by a jpg overwrites
+     * nothing and would leave the png referenced by no row at all.
+     */
+    it('removes the previous picture when the extension changes', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin
+        .post(`/videos/${id}/banner`)
+        .attach('file', PNG, { filename: 'hero.png', contentType: 'image/png' })
+        .expect(200);
+      await expect(storage.exists('derived', `banners/videos/${id}.png`)).resolves.toBe(true);
+
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
+
+      await expect(storage.exists('derived', `banners/videos/${id}.jpg`)).resolves.toBe(true);
+      await expect(storage.exists('derived', `banners/videos/${id}.png`)).resolves.toBe(false);
+    });
+
+    it('refuses an upload that is not an image a browser renders', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin
+        .post(`/videos/${id}/banner`)
+        .attach('file', Buffer.from('#!/bin/sh'), { filename: 'evil.sh', contentType: 'text/x-sh' })
+        .expect(400);
+    });
+
+    it('clearing removes the row reference and the file', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
+
+      await admin.delete(`/videos/${id}/banner`).expect(204);
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      expect(video.bannerKey).toBeNull();
+      await expect(storage.exists('derived', `banners/videos/${id}.jpg`)).resolves.toBe(false);
+    });
+
+    /** A banner is never generated on its own, so a probe must not invent one. */
+    it('is not created by a probe', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      media.enqueue(id);
+      await media.drain();
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      expect(video.thumbnailKey).not.toBeNull();
+      expect(video.bannerKey).toBeNull();
+    });
+
+    /**
+     * ffmpeg exits **0** when `-ss` lands past the end: it encodes nothing and
+     * writes no file. Without a check the caller renames something that was
+     * never created, and the admin gets `ENOENT ... rename /srv/derived/tmp/…`
+     * — a filesystem error carrying absolute server paths for what is really
+     * "there is no frame there". Picking a moment near the end of a video is an
+     * ordinary thing to do, so it gets an ordinary answer.
+     */
+    it('fails clearly when the timestamp is past the end of the video', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 1 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      const response = await admin
+        .post(`/videos/${id}/banner/capture`)
+        .send({ atSeconds: 30 })
+        .expect(500);
+
+      expect(JSON.stringify(response.body)).not.toContain('rename');
+      expect(JSON.stringify(response.body)).not.toContain('/tmp/');
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      expect(video.bannerKey).toBeNull();
+      await expect(storage.exists('derived', `tmp/${id}-banner.jpg`)).resolves.toBe(false);
+    });
+
+    it('is admin-only', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+      const invite = await admin.post('/admin/invites').send({}).expect(201);
+      const user = request.agent(app.getHttpServer());
+      await user
+        .post('/auth/redeem')
+        .send({ token: invite.body.token, username: 'ida', password: PASSWORD })
+        .expect(201);
+
+      await user.post(`/videos/${id}/banner/capture`).send({ atSeconds: 0 }).expect(403);
+      await user.delete(`/videos/${id}/banner`).expect(403);
+    });
+  });
+
   describe('reprobe endpoint', () => {
     it('fills in the fields and returns the updated video', async () => {
       await makeVideo('Films/bars.mp4', { size: '1920x1080' });
