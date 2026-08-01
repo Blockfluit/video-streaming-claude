@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { toPage, type ListWatchlistQuery, type Page, type WatchlistRefInput } from '@video/shared';
 
+import { isUniqueViolation } from '../common/prisma-errors';
 import { whereVisible } from '../common/publishing';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -180,13 +181,4 @@ export class WatchlistService {
     if (!video) throw new NotFoundException('No such video');
     return { videoId: video.id };
   }
-}
-
-/** Prisma's unique-constraint failure. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: string }).code === 'P2002'
-  );
 }

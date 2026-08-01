@@ -785,10 +785,19 @@ All routes require an authenticated session except `POST /auth/login` and `POST 
 | People | `GET /people` (+ autocomplete) · `GET /people/:slug` (filmography) · `POST/PATCH/DELETE /people` |
 | Credits | `POST /collections/:id/credits` · `POST /videos/:id/credits` · `PATCH /credits/:id` · `PATCH /credits/reorder` · `DELETE /credits/:id` |
 | Comments | `GET /videos/:id/comments` · `POST /videos/:id/comments` · `PATCH/DELETE /comments/:id` |
+| Requests | `GET /requests` (filters: `status`, `mine`, `q`) · `POST /requests` · `PATCH /requests/:id/status` (ADMIN) · `DELETE /requests/:id` |
 | Curation | `GET /lists` · `POST/PATCH/DELETE /lists` · `POST /lists/:id/items` · `PATCH /lists/:id/reorder` · `DELETE /lists/:id/items/:itemId` |
 | Ingest | `POST /admin/ingest/scan` · `GET /admin/ingest/status` · `GET /admin/ingest/issues` |
 | Watch | `POST /videos/:id/heartbeat` · `GET /me/history` |
 | My List | `GET /me/watchlist` · `POST /me/watchlist` (`{ videoId \| collectionId }`, idempotent) · `DELETE /me/watchlist` (same body) |
+
+Requests are a viewer asking for something the library does not have: a required title, an optional year and
+comment, and a status only an admin can move (`NEW` → `SEEN` · `PROCESSING` · `NOT_AVAILABLE` · `REJECTED` ·
+`AVAILABLE`). Everyone sees every request and its status; **nobody but an admin sees who asked**, which is
+the serializer's job rather than the query's. Submitting checks the title against the library first, on a
+`normalisedTitle` column derived from `normaliseTitle()` in `packages/shared` — and scoped to what the
+caller may see, so a draft never refuses a viewer on the strength of a record they are not allowed to know
+exists. A partial unique index allows one *open* request per title and any number of settled ones.
 
 Self-lockout guard: refuse to demote, deactivate or delete the last active admin. A deactivated admin does
 not count as cover, and the remaining-admin count is read `FOR UPDATE` so two simultaneous demotions cannot
@@ -811,6 +820,7 @@ account's comments, watch history and watchlist; `PATCH { isActive: false }` is 
 | `c/[collection]/[...path]` | Catch-all resolving to collection, season, or video (player) |
 | `people/[slug]` | Person detail + filmography |
 | `history` | Watch history with completion bars |
+| `requests` | Ask for something the library lacks; everyone's requests and statuses, without the names |
 | `admin/index` | Dashboard: draft counts, issues, last scan |
 | `admin/drafts` | **The PIM inbox** — staged entries with missing-field checklists, bulk publish |
 | `admin/collections/[id]` | Enrich collection + seasons, reorder videos, poster, credits |
@@ -822,6 +832,7 @@ account's comments, watch history and watchlist; `PATCH { isActive: false }` is 
 | `admin/jobs` | Conversion queue: live progress bars, ETA, cancel, retry, failure logs |
 | `admin/users` | Accounts + invite tokens (minted token shown once, copy button) |
 | `admin/comments` | Moderation queue |
+| `admin/requests` | The request queue: who asked and when, status control, replies, and any library match |
 
 - **Proxy:** `routeRules: { '/api/**': { proxy: 'http://localhost:4000/**' } }` — works in dev and production, so the browser only ever sees one origin.
 - **The bug you will hit first:** during SSR, `useFetch`/`$fetch` run inside Nitro and do **not** forward the browser's cookie. Every server-side call must pass `headers: useRequestHeaders(['cookie'])`. Wrap this once in a `useApi()` composable so no page has to remember.

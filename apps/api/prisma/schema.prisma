@@ -1,10 +1,14 @@
 // Data model for the video library — see docs/PLAN.md for the reasoning behind it.
 //
-// Two things this file cannot express, both handled elsewhere:
+// Three things this file cannot express, all handled elsewhere:
 //   - CHECK constraints. ListItem, Credit and WatchlistItem are polymorphic and each needs
 //     CHECK ((collectionId IS NULL) <> (videoId IS NULL)), hand-added to the migration.
 //   - Uniqueness over nullable columns. Postgres treats NULLs as distinct, so composite
 //     uniques containing one do not prevent duplicates; those are enforced in the services.
+//   - Partial (filtered) unique indexes. VideoRequest allows one *open* request per
+//     normalised title and any number of settled ones, which is a UNIQUE ... WHERE —
+//     hand-added to the migration. It is what makes "already requested" atomic rather
+//     than a check-then-write with a gap in the middle.
 
 // The v7 generator emits TypeScript, not compiled JS, so the output has to sit under src/
 // or tsc infers a different rootDir and `nest build` starts emitting dist/src/main.js.
@@ -73,6 +77,17 @@ enum JobStatus {
   CANCELLED
 }
 
+/// Where a viewer's request for something the library does not have has got to.
+/// NEW is where every request starts; the rest are an admin's answer.
+enum RequestStatus {
+  NEW
+  SEEN
+  PROCESSING
+  NOT_AVAILABLE
+  REJECTED
+  AVAILABLE
+}
+
 // ---------------------------------------------------------------------------
 // Accounts
 // ---------------------------------------------------------------------------
@@ -91,14 +106,16 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  uploads    Video[]
-  progress   WatchProgress[]
-  events     WatchEvent[]
-  comments   Comment[]
-  watchlist  WatchlistItem[]
-  jobs       MediaJob[]
-  mintedBy   InviteToken[]   @relation("Minter")
-  redeemedBy InviteToken[]   @relation("Redeemer")
+  uploads          Video[]
+  progress         WatchProgress[]
+  events           WatchEvent[]
+  comments         Comment[]
+  watchlist        WatchlistItem[]
+  jobs             MediaJob[]
+  mintedBy         InviteToken[]   @relation("Minter")
+  redeemedBy       InviteToken[]   @relation("Redeemer")
+  requests         VideoRequest[]  @relation("Requester")
+  requestsReviewed VideoRequest[]  @relation("RequestReviewer")
 }
 
 model InviteToken {
@@ -134,6 +151,11 @@ model Collection {
   id          String       @id @default(cuid())
   slug        String       @unique
   title       String
+  /// normaliseTitle(title) — the key "is this already in the library?" compares on.
+  /// Deliberately not the slug: a slug is stable once created and drifts away from
+  /// the title it came from, so matching on one would miss every renamed record.
+  /// Written by titleData() wherever title is; '' means "not comparable" and never matches.
+  normalisedTitle String    @default("")
   description String?
   year        Int?
   tags        String[]     @default([])
@@ -151,6 +173,7 @@ model Collection {
   watchlistedBy WatchlistItem[]
 
   @@index([state])
+  @@index([normalisedTitle])
 }
 
 model Season {
@@ -179,6 +202,8 @@ model Video {
   season       Season?      @relation(fields: [seasonId], references: [id], onDelete: SetNull)
   orderIndex   Int?
   title        String
+  /// normaliseTitle(title) — see the note on Collection.normalisedTitle.
+  normalisedTitle String @default("")
   description  String?
   tags         String[]     @default([])
   state        PublishState @default(DRAFT)
@@ -237,6 +262,7 @@ model Video {
   @@index([collectionId, seasonId, orderIndex])
   @@index([state])
   @@index([contentTag])
+  @@index([normalisedTitle])
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +368,58 @@ model Comment {
 
   @@index([videoId, createdAt])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------
+
+/// Someone asking for something the library does not have.
+///
+/// The row holds who asked; the API's serializer is what decides whether a given
+/// caller is allowed to know. Other viewers see the title, year, comment and
+/// status and never the name — an admin sees all of it. That asymmetry is the
+/// whole feature, so it lives in one pure function with its own tests rather
+/// than in whichever query happens to be running.
+///
+/// `normalisedTitle` carries a **partial unique index**, added by hand in the
+/// migration because Prisma cannot express one:
+///
+///     CREATE UNIQUE INDEX ... ON "VideoRequest" ("normalisedTitle")
+///       WHERE "status" IN ('NEW', 'SEEN', 'PROCESSING');
+///
+/// One open request per title, any number of settled ones. Asking again for
+/// something rejected a year ago is a fair question; asking twice for what is
+/// already being processed is a duplicate, and the index is what makes catching
+/// it atomic rather than a check-then-write with a gap in the middle.
+model VideoRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("Requester", fields: [userId], references: [id], onDelete: Cascade)
+
+  title           String
+  /// normaliseTitle(title) — what both duplicate checks compare on.
+  normalisedTitle String
+  year            Int?
+  /// The requester's own note. Shown to everyone, so it is content, not metadata.
+  comment         String?
+
+  status    RequestStatus @default(NEW)
+  /// The admin's answer in words. REJECTED on its own tells nobody why.
+  adminNote String?
+
+  /// Who last answered, and when. Null while the request is still untouched —
+  /// `createdAt` already says when it arrived.
+  statusChangedAt   DateTime?
+  statusChangedById String?
+  statusChangedBy   User?     @relation("RequestReviewer", fields: [statusChangedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([normalisedTitle])
 }
 
 // ---------------------------------------------------------------------------

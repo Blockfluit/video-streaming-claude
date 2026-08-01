@@ -171,6 +171,7 @@ const PAGES = [
   '/browse',
   '/my-list',
   '/history',
+  '/requests',
   '/admin',
   '/admin/drafts',
   '/admin/library',
@@ -181,6 +182,7 @@ const PAGES = [
   '/admin/users',
   '/admin/upload',
   '/admin/comments',
+  '/admin/requests',
 ]
 
 test.describe('legibility', () => {

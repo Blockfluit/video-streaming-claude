@@ -87,7 +87,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where all 558 tests run. The thin wrapper in `media/ffmpeg.service.ts` stays.
+  which is where every API test runs — 494 unit, 19 e2e and 456 db. The thin wrapper in
+  `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
   It adds nothing to a successful probe, so it is always passed. Prefer it to reading stderr.
@@ -235,6 +236,37 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `DELETE /lists/:id/items/:itemId` is scoped to the list in the URL — an item id alone must not reach into
   another row.
 
+**Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
+- `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins
+  get the title, year, comment, status and admin note — hiding those would leave a page listing nothing —
+  and never `requestedBy` or `statusChangedBy`. It is built field by field rather than spread from the row,
+  so a column added to `VideoRequest` later cannot ride along into a viewer's response; `serialize.spec.ts`
+  pins the exact key set for that reason. `mine` is the deliberate exception: it tells you which entry is
+  yours, which you already knew, and without it a page that has hidden every name has also hidden yours.
+- The existence check is scoped to **`whereVisible(role)`**. Refusing a USER because a DRAFT matches would
+  tell them the draft exists — the leak the whole visibility rule exists to prevent. Their request is
+  created instead, and the admin (who can see both) gets a `libraryMatch` hint putting the two side by side.
+  That hint is computed over the *whole* library, so handing it to a non-admin undoes the same protection.
+- `normalisedTitle` on `Video` and `Collection` is derived from `normaliseTitle()` and written **only**
+  through `titleData()`/`titleUpdate()` in `common/title.ts`. A derived column is worth nothing while it
+  disagrees with its source, and the way that rots is a new write site setting `title` alone.
+- It is deliberately **not** the slug. A slug is stable once created and drifts away from the title it came
+  from, so matching on one would miss every record that was ever renamed.
+- `normaliseTitle` drops a **trailing bracketed** year (`The Matrix (1999)`), never a bare one — `Blade
+  Runner 2049` and `2001: A Space Odyssey` *are* their numbers. It keeps leading articles: dropping them
+  matches `The Thing` to `Thing`, which is usually right, and `The Others` to `Others`, which is not, and a
+  false match refuses a legitimate request. It never returns `''` for a title with any content, because `''`
+  is the "not comparable" sentinel that an unbackfilled row holds and that must match nothing.
+- One **open** request per normalised title, enforced by a hand-written partial unique index
+  (`WHERE status IN ('NEW','SEEN','PROCESSING')`) that Prisma cannot express — re-append it if the migration
+  is regenerated, like the polymorphic CHECK constraints. The service **catches** the violation rather than
+  checking first: check-then-write has a gap and two people submitting the same title land inside it.
+  Reopening a settled request while another is open hits the same index, and that is not a fault.
+- Asking again for something rejected a year ago is a fair question, which is why the index filters on
+  status rather than being unique outright.
+- `adminNote` omitted leaves the stored note alone; an explicit empty value clears it. Without that
+  distinction, moving a request from SEEN to PROCESSING silently discards the explanation attached to it.
+
 **Parsing** (`ingest/path-parser.ts`, `ingest/subtitle-matcher.ts` — pure, no filesystem)
 - `parseMediaPath` returns `storageKey` **verbatim**. Reconcile is keyed on it, so normalising the path here
   would silently break move detection.
@@ -267,6 +299,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added
   `CHECK ((collectionId IS NULL) <> (videoId IS NULL))` in their migration. Regenerating the init migration
   drops them — re-append them.
+- Prisma cannot express **partial (filtered) unique indexes** either. `VideoRequest` needs a hand-added
+  `UNIQUE ("normalisedTitle") WHERE status IN ('NEW','SEEN','PROCESSING')`, and the same warning applies.
 - Prisma 7 differs from 6 in ways that bite: the connection URL lives in `prisma.config.ts`, **not** in the
   schema's datasource block; the client needs a driver adapter (`@prisma/adapter-pg`); and the generator
   emits **TypeScript**, not compiled JS.
@@ -469,6 +503,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `*.db-spec.ts` (HTTP against a real `video_test` database). Anything whose correctness *is* a database
   guarantee — transactions, conditional updates, constraints — belongs in the third; a stub cannot lose a
   race. `test:db` fails loudly with no database rather than skipping, so it can never go green testing nothing.
+- **`test:db` is not safe to run twice at once.** The database name (`video_test`) and the bootstrap-token
+  paths (`/tmp/video-streaming-*-test.bootstrap-token`) are fixed, and every suite `TRUNCATE`s between
+  cases — so two runs from two worktrees delete each other's fixtures and each other's master token. The
+  failures look nothing like a collision: `/auth/redeem` starts answering **400 "That invite token is not
+  valid"** (the other run redeemed it, or truncated it away) or the token file simply vanishes, and a whole
+  green suite goes red on code that is fine. Give a parallel checkout its own database with
+  `TEST_DATABASE_URL=…/video_test_<name>` — `test/db/global-setup.ts` already reads it — and remember the
+  `/tmp` token paths still collide, which is what the two ffmpeg suites trip over.
+- `NUXT_DEV_PORT` and `NUXT_API_TARGET` exist for the same reason: :3000 and :4000 are hardcoded defaults,
+  and a second checkout cannot start either server without them. Both default to the old values.
 - Validation: **zod schemas in `packages/shared`** are the source of truth, so a form and the endpoint
   behind it cannot drift apart. Applied per parameter with `validate(schema)` — there is no global pipe,
   because the schema is what says *what* to validate. Zod objects strip unknown keys by default, which is

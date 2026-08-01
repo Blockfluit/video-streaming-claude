@@ -9,6 +9,7 @@ import {
 
 import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
+import { titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateMarkers, type Markers } from './markers';
@@ -138,7 +139,8 @@ export class VideosService {
     return this.prisma.video.update({
       where: { id },
       data: {
-        title: dto.title,
+        // Carries normalisedTitle with it — see common/title.ts.
+        ...titleUpdate(dto.title),
         description: dto.description,
         tags: dto.tags,
         orderIndex: dto.orderIndex,
