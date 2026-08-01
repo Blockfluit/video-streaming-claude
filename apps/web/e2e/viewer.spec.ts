@@ -1,4 +1,4 @@
-import { expect, expectsRequest, fillStable, signIn, test, visit } from './fixtures'
+import { expect, expectsRequest, fillStable, test, visit } from './fixtures'
 import type { Page } from '@playwright/test'
 
 
@@ -28,9 +28,6 @@ async function currentVideoId(page: Page): Promise<string> {
 
 /** The viewer-facing app: every control a member can press. */
 test.describe('viewer', () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page)
-  })
 
   test('the hero play button reaches a player', async ({ page }) => {
     await visit(page, '/')

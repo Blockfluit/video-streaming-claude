@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { SessionStoreService } from './auth/session-store.service';
@@ -15,6 +16,33 @@ async function bootstrap(): Promise<void> {
   // hands this replacer to every res.json(), so it is handled once at the real
   // response boundary rather than remembered at each call site.
   app.set('json replacer', bigIntReplacer);
+
+  /*
+   * Security headers.
+   *
+   * The API serves JSON and media to a same-origin Nuxt app; it renders no HTML
+   * of its own, so the interesting defaults are the ones that would get in the
+   * way rather than the ones that help.
+   *
+   * `contentSecurityPolicy` is off here deliberately. A CSP describes what a
+   * *document* may load, and nothing this server returns is a document — the
+   * page comes from Nuxt, which is where a CSP belongs. Setting one here would
+   * be a header nobody enforces, which is worse than none because it reads like
+   * protection.
+   *
+   * `crossOriginResourcePolicy` is relaxed to same-site rather than left at
+   * same-origin: in development the browser is on :3000 and this is :4000, so
+   * the strict default blocks every poster and the video itself. Same-site
+   * still refuses a genuinely foreign origin.
+   */
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      // Range requests and <video> do not mix with an embedder policy.
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
 
   // Must be registered before routes, which Nest maps during listen().
   app.use(app.get(SessionStoreService).createMiddleware());

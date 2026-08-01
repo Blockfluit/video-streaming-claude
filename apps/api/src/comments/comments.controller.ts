@@ -25,6 +25,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { CommentsService } from './comments.service';
+import { ThrottleAuthoring } from '../common/throttling';
 
 @Controller()
 export class CommentsController {
@@ -53,7 +54,8 @@ export class CommentsController {
     return this.comments.list(id, user.role, query);
   }
 
-  /** Rate limiting is `@nestjs/throttler` in step 18. */
+  /** Spam control. Fast enough never to notice, slow enough to be pointless. */
+  @ThrottleAuthoring()
   @Post('videos/:id/comments')
   create(
     @Param('id') id: string,

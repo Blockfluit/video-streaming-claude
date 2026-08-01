@@ -4,7 +4,6 @@ import {
   expectsRequest,
   fillStable,
   removeSeasonWithFolder,
-  signIn,
   test,
   toast,
   visit,
@@ -12,9 +11,6 @@ import {
 
 /** The management screens: every control that changes something. */
 test.describe('admin', () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page)
-  })
 
   test('the overview tiles lead somewhere', async ({ page }) => {
     await visit(page, '/admin')

@@ -6,6 +6,8 @@ import { Test } from '@nestjs/testing';
 import session from 'express-session';
 import request from 'supertest';
 
+import { ThrottlerStorage } from '@nestjs/throttler';
+
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/auth/password.service';
 import { SessionStoreService } from '../src/auth/session-store.service';
@@ -94,6 +96,13 @@ describe('Auth (e2e)', () => {
         // exists", so it mints nothing and this suite stays about login.
         count: jest.fn().mockResolvedValue(1),
       },
+      /*
+       * Read by JobsService.onModuleInit, which fails jobs a previous process
+       * left running. Nothing here is about jobs, but the hook runs on every
+       * app boot — including this one — and without the stub the whole module
+       * fails to initialise and every test in this file dies at startup.
+       */
+      mediaJob: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -117,6 +126,20 @@ describe('Auth (e2e)', () => {
     app = moduleRef.createNestApplication();
     app.use(app.get(SessionStoreService).createMiddleware());
     await app.init();
+  });
+
+  /*
+   * Empties the rate-limit buckets between tests.
+   *
+   * Every request here arrives from one address with no session, so they all
+   * share a bucket — and this file deliberately makes far more than ten login
+   * attempts. Without a reset the limit does its job and the later tests see
+   * 429 instead of what they came to check. That is the limit working, not a
+   * bug, so the suite resets rather than the limit being loosened.
+   */
+  beforeEach(() => {
+    const storage = app.get<ThrottlerStorage & { storage?: Map<string, unknown> }>(ThrottlerStorage);
+    storage.storage?.clear();
   });
 
   afterAll(async () => {

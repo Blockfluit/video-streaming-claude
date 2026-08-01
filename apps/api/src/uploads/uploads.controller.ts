@@ -21,6 +21,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { UPLOAD_STAGING_DIRECTORY, UploadsService, type UploadedVideoFile } from './uploads.service';
+import { ThrottleExpensive } from '../common/throttling';
 
 /**
  * Staging directory, resolved once at module load.
@@ -46,6 +47,8 @@ export class UploadsController {
    * `diskStorage`, never memory: a 2 GB file buffered in the heap would take
    * the process with it. multer streams it to disk as it arrives.
    */
+  /** Writes gigabytes to disk. A loop here fills the drive. */
+  @ThrottleExpensive()
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(

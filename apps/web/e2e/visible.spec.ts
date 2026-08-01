@@ -1,4 +1,4 @@
-import { expect, signIn, test, visit } from './fixtures'
+import { expect, test, visit } from './fixtures'
 
 /**
  * Two kinds of bug that every other test in this suite walks straight past.
@@ -184,9 +184,6 @@ const PAGES = [
 ]
 
 test.describe('legibility', () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page)
-  })
 
   for (const path of PAGES) {
     test(`${path} has no unreadable text or invisible controls`, async ({ page }) => {

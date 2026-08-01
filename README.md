@@ -4,9 +4,9 @@ A private, invite-only Netflix-style video library — a CRUD application for ma
 byte-range streaming, collections and seasons, and a PIM-style ingest pipeline that discovers media
 dropped on disk, stages it as drafts, and lets an admin enrich and publish it.
 
-> **Status: scaffolded (build step 2 of [`docs/PLAN.md`](docs/PLAN.md)).**
-> The monorepo, database container, and both apps run; no features are implemented yet.
-> The full design lives in [`docs/PLAN.md`](docs/PLAN.md).
+> **Status: complete.** All eighteen steps of [`docs/PLAN.md`](docs/PLAN.md) are built.
+> The design lives in the plan; the things that are easy to get wrong — and why they are the way
+> they are — live in [`CLAUDE.md`](CLAUDE.md).
 
 ## What it does
 
@@ -49,8 +49,13 @@ npm run db:migrate      # applies the initial migration
 npm run dev             # Nuxt on :3000, NestJS on :4000
 ```
 
-Then open <http://localhost:3000> — the placeholder page reports the API's health through the
-`/api` proxy, which is the quickest check that both halves are talking.
+Then open <http://localhost:3000>.
+
+On first run the API prints a **single-use master token** and writes it to `.bootstrap-token`
+(mode `600`, gitignored). Redeem it at `/setup` to create the first admin; every later account comes
+from an admin, directly or by invite. The file is deleted the moment it is used, and on any startup
+that finds an admin already present — a token whose file is gone is unusable, so a stale one is
+replaced rather than reused.
 
 ### Layout
 
@@ -69,12 +74,55 @@ Then open <http://localhost:3000> — the placeholder page reports the API's hea
 | `npm run dev` | Builds `packages/shared`, then runs both apps together |
 | `npm run build` | Shared → API → web, in that order |
 | `npm run typecheck` | `tsc --noEmit` across all three workspaces |
-| `npm test` | Jest (API) |
+| `npm test` | Unit tests (API) |
+| `npm run test:e2e` | HTTP tests against a stubbed database — no Postgres needed |
+| `npm run test:db` | HTTP tests against a real `video_test` database |
+| `npm run test:all` | All three tiers, in order |
 | `npm run db:migrate` / `db:generate` / `db:studio` | Prisma, in `apps/api` |
 
-On first run the API prints a **single-use master token** and writes it to `.bootstrap-token`
-(gitignored). Redeem it at `/setup` to create the first admin account; every later account is
-created by an admin, either directly or via an invite token.
+## Testing
+
+Four tiers, and the split is deliberate — each catches something the others cannot.
+
+| Tier | Command | Catches |
+|---|---|---|
+| Unit | `npm test` | Pure logic: path parsing, subtitle matching, quality labels, watch accounting |
+| HTTP (stubbed) | `npm run test:e2e` | Routing, guards, validation, rate limits — no database required |
+| HTTP (real database) | `npm run test:db` | Anything whose correctness *is* a database guarantee: transactions, conditional updates, constraints. A stub cannot lose a race. |
+| Browser | `npm run test:e2e -w @video/web` | That the app actually works. Needs both dev servers running. |
+
+`npm run test:all` runs the three API tiers together. Use it rather than picking one: an API change
+can pass unit and database tests while breaking the stubbed HTTP tier, and that has happened.
+
+The browser tests assert that controls **do something** — a button with no handler renders
+perfectly — and include a legibility audit that measures contrast by painting colours onto a canvas,
+because a dark theme makes grey-on-black easy to ship. They need
+`npx playwright install --with-deps chromium`.
+
+## Hardening
+
+- **`helmet`** for security headers. Its CSP is deliberately off: a CSP describes what a *document*
+  may load, and this server returns JSON and media, never a document. The page comes from Nuxt, which
+  is where a CSP belongs.
+- **Rate limiting** counts against the signed-in user, falling back to the IP. Keying on IP alone
+  would throttle a whole household behind one NAT, and would miss one account misbehaving from
+  several addresses.
+
+| Bucket | Limit | Where |
+|---|---|---|
+| Credentials | 10/min | `POST /auth/login`, `POST /auth/redeem` — the only routes reachable without a session |
+| Authoring | 30/min | Posting a comment, minting an invite |
+| Expensive | 20/min | Anything that spawns ffmpeg or walks the disk: convert, extract, re-probe, capture, upload, scan |
+| Heartbeat | 40/min | Playback telemetry — leaves room for the 10s beat across a couple of tabs |
+| Default | 300/min | Everything else |
+
+Streaming, artwork, subtitle tracks and `/auth/me` are **exempt**. A single `<video>` issues a range
+request per seek; every card on a shelf asks for a poster. A limit there does not protect anything —
+it breaks playback.
+
+- **Validation** is per parameter against a zod schema from `packages/shared`, rather than a global
+  pipe. The schema is what says *what* to validate, and zod strips unknown keys by default — which is
+  what a global `whitelist: true` would have bought.
 
 ## Licence
 
