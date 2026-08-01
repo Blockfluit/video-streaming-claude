@@ -192,17 +192,47 @@ export class MediaService implements OnModuleDestroy {
       video.playbackKey ?? video.storageKey,
     );
 
-    // Into DERIVED_ROOT, never the watched media tree — generated output
-    // landing there feeds the ingest watcher its own work.
-    await this.storage.ensureDirectory('derived', 'thumbnails');
-    const destination = this.storage.resolvePath('derived', key);
-
-    await this.ffmpeg.captureFrame(source, durationSec * THUMBNAIL_POSITION, destination);
+    await this.writeThumbnail(video.id, source, durationSec * THUMBNAIL_POSITION);
 
     await this.prisma.video.update({
       where: { id: video.id },
       data: { thumbnailKey: key, thumbnailSource: 'AUTO' },
     });
+  }
+
+  /**
+   * Captures a frame into place **atomically**.
+   *
+   * ffmpeg truncates its output the moment it opens it, so writing straight to
+   * `thumbnails/<id>.jpg` leaves the poster missing or half-written for as long
+   * as the capture takes. Every card in the app asks for that URL, so a routine
+   * re-probe made artwork across the library flicker to a broken image — and it
+   * is a 404, not a stale picture, which is worse. Three viewer tests caught it
+   * when a boot-time reconcile re-probed everything mid-run.
+   *
+   * So it goes to `derived/tmp/` first and is renamed in on success, the same
+   * way a transcode does. `rename` within DERIVED_ROOT is atomic and stays on
+   * one filesystem; a reader either sees the old poster or the new one, never
+   * neither. A failed capture leaves the live file untouched.
+   */
+  private async writeThumbnail(videoId: string, source: string, atSeconds: number): Promise<void> {
+    const key = `thumbnails/${videoId}.jpg`;
+    const temporaryKey = `tmp/${videoId}-thumbnail.jpg`;
+
+    // Into DERIVED_ROOT, never the watched media tree — generated output
+    // landing there feeds the ingest watcher its own work.
+    await this.storage.ensureDirectory('derived', 'thumbnails');
+    await this.storage.ensureDirectory('derived', 'tmp');
+
+    try {
+      await this.ffmpeg.captureFrame(source, atSeconds, this.storage.resolvePath('derived', temporaryKey));
+      await this.storage.move('derived', temporaryKey, key);
+    } catch (error) {
+      // A half-written frame must not be left where the next run might rename
+      // it into place.
+      await this.storage.delete('derived', temporaryKey);
+      throw error;
+    }
   }
 
   /** Re-runs a probe on demand, and waits for it — the admin clicked a button and expects an answer. */
@@ -234,8 +264,7 @@ export class MediaService implements OnModuleDestroy {
       video.playbackKey ?? video.storageKey,
     );
 
-    await this.storage.ensureDirectory('derived', 'thumbnails');
-    await this.ffmpeg.captureFrame(source, atSeconds, this.storage.resolvePath('derived', key));
+    await this.writeThumbnail(video.id, source, atSeconds);
 
     await this.prisma.video.update({
       where: { id: video.id },

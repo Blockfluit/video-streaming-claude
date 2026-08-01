@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { SessionStoreService } from '../src/auth/session-store.service';
 import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
+import { FfmpegService } from '../src/media/ffmpeg.service';
 import { MediaService } from '../src/media/media.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -284,6 +285,72 @@ describe('Media probing (real ffmpeg)', () => {
       await media.drain();
 
       await expect(storage.exists('media', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+    });
+
+    /**
+     * Captures land atomically, or not at all.
+     *
+     * ffmpeg truncates its output the moment it opens it, so writing straight
+     * to `thumbnails/<id>.jpg` left the live poster missing for as long as the
+     * capture took — and every card in the app asks for that URL, so a routine
+     * re-probe made artwork across the library flicker to a **404**, not merely
+     * a stale picture. Three viewer tests caught it when a boot-time reconcile
+     * re-probed everything mid-run.
+     *
+     * A failing capture is the observable half of that guarantee: the existing
+     * poster has to come through it byte-for-byte.
+     */
+    it('leaves the existing poster intact when a capture fails part-way', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(200);
+      const before = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+
+      /*
+       * Fails the way ffmpeg actually fails: it opens its output, truncates it,
+       * writes some of a frame, and only then dies. A source ffmpeg cannot read
+       * at all is not the same test — it never opens the output, so the live
+       * poster survives even a direct write, and the mutation passes.
+       */
+      const ffmpeg = app.get(FfmpegService);
+      const capture = jest
+        .spyOn(ffmpeg, 'captureFrame')
+        .mockImplementation(async (_source, _atSeconds, destination) => {
+          await writeFile(destination, 'half a jpeg');
+          throw new Error('ffmpeg died half way');
+        });
+
+      try {
+        await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(500);
+      } finally {
+        capture.mockRestore();
+      }
+
+      const after = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      expect(after.equals(before)).toBe(true);
+    });
+
+    /** A half-written frame must not be left where a later run could rename it in. */
+    it('cleans up its temporary file when a capture fails', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      const ffmpeg = app.get(FfmpegService);
+      const capture = jest
+        .spyOn(ffmpeg, 'captureFrame')
+        .mockImplementation(async (_source, _atSeconds, destination) => {
+          await writeFile(destination, 'half a jpeg');
+          throw new Error('ffmpeg died half way');
+        });
+
+      try {
+        await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(500);
+      } finally {
+        capture.mockRestore();
+      }
+
+      await expect(storage.exists('derived', `tmp/${id}-thumbnail.jpg`)).resolves.toBe(false);
     });
 
     /**
