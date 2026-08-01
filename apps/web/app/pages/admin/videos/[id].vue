@@ -106,11 +106,25 @@ async function clearMarker(field: string) {
   await refresh()
 }
 
+/** The jobs panel, so queueing something shows up in it straight away. */
+const jobs = ref<{ refresh: () => Promise<void> } | null>(null)
+
 async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Done') {
   try {
     await api(`/videos/${id}${path}`, { method })
     await refresh()
     toast.add({ title: label, color: 'success' })
+
+    /*
+     * Pulls the new job into the panel rather than waiting up to 2s for the
+     * next poll, which reads as the button having done nothing.
+     *
+     * Deliberately after the toast and deliberately not awaited into the catch
+     * below: this is a nicety, and the first version had it before the toast
+     * and inside the try — so a refresh of a *side panel* could swallow the
+     * confirmation of an action that had already succeeded on the server.
+     */
+    void jobs.value?.refresh().catch(() => undefined)
   } catch (error) {
     toast.add({ title: message(error, 'That did not work'), color: 'error' })
   }
@@ -306,6 +320,10 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
               </div>
             </div>
           </div>
+        </UCard>
+
+        <UCard>
+          <VideoJobs ref="jobs" :video-id="id" />
         </UCard>
 
         <UCard>

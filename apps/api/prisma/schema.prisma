@@ -253,6 +253,12 @@ model MediaJob {
   etaSeconds  Int?
   message     String?
   error       String?
+  /**
+   * The tail of ffmpeg's own stderr, so an admin can see what it is actually
+   * doing rather than only a bar. Bounded in the writer — a long encode emits
+   * megabytes and none of the middle is worth keeping.
+   */
+  logTail     String?
   outputKey   String?
   createdById String?
   createdBy   User?     @relation(fields: [createdById], references: [id])

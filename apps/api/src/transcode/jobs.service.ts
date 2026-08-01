@@ -194,7 +194,7 @@ export class JobsService {
         crf: Number(this.config.get<string>('TRANSCODE_CRF') ?? 25),
         preset: this.config.get<string>('TRANSCODE_PRESET') ?? 'medium',
         signal,
-        onProgress: ({ percent, etaSeconds }) => {
+        onProgress: ({ percent, etaSeconds, logTail }) => {
           // Throttled: ffmpeg reports several times a second, and a write per
           // report would spend the transcode hammering Postgres.
           const now = Date.now();
@@ -204,7 +204,13 @@ export class JobsService {
           void this.prisma.mediaJob
             .update({
               where: { id: jobId },
-              data: { progress: percent ?? 0, etaSeconds: etaSeconds ?? null },
+              data: {
+                progress: percent ?? 0,
+                etaSeconds: etaSeconds ?? null,
+                // Already bounded to 8KB by the transcoder; carried on the same
+                // throttled write rather than one of its own.
+                logTail,
+              },
             })
             .catch(() => undefined);
         },
