@@ -59,13 +59,27 @@ export class CreditsService {
   async listForVideo(videoId: string, role: Role) {
     const video = await this.requireVideo(videoId, role);
 
+    /**
+     * Inherited from **every** collection the video is in, not from one parent.
+     *
+     * An episode can sit in its show and in a themed row, and dropping either
+     * one's cast because the other exists would hide credits for no reason a
+     * viewer could see. Ordered by collection id so the merge is fed the same
+     * list every time: the sort has to be total, or the panel reshuffles between
+     * identical requests and reads as a rendering bug for weeks.
+     */
+    const parentIds = video.collections.map((membership) => membership.collectionId);
+
     const [own, inherited] = await Promise.all([
       this.prisma.credit.findMany({ where: { videoId }, select: CREDIT_SELECT, take: MAX_CREDITS }),
-      this.prisma.credit.findMany({
-        where: { collectionId: video.collectionId },
-        select: CREDIT_SELECT,
-        take: MAX_CREDITS,
-      }),
+      parentIds.length === 0
+        ? []
+        : this.prisma.credit.findMany({
+            where: { collectionId: { in: parentIds } },
+            select: CREDIT_SELECT,
+            orderBy: [{ collectionId: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+            take: MAX_CREDITS,
+          }),
     ]);
 
     const merged = mergeCredits(inherited, own);
@@ -224,7 +238,7 @@ export class CreditsService {
   private async requireVideo(id: string, role: Role) {
     const video = await this.prisma.video.findFirst({
       where: { id, ...whereVisible(role) },
-      select: { id: true, collectionId: true },
+      select: { id: true, collections: { select: { collectionId: true } } },
     });
     if (!video) throw new NotFoundException('No such video');
     return video;

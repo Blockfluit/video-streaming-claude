@@ -548,7 +548,8 @@ model WatchEvent {
 /// deleted, which keeps a record of what the library used to be unhappy about.
 enum IngestIssueKind {
   ROOT_LEVEL_FILE // a video sitting directly in MEDIA_ROOT
-  PATH_TOO_DEEP // nested below collection/season/file
+  LOOSE_DRIVE_FILE // a video loose in a drive root, with no folder to take a shape from
+  PATH_TOO_DEEP // nested below drive/item/season/file
   UNREADABLE_SEASON // a season folder whose number could not be parsed
   ORPHAN_SUBTITLE // a sidecar matching no video
   AMBIGUOUS_SUBTITLE // a sidecar matching several videos equally well

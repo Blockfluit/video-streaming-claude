@@ -1,32 +1,39 @@
-import { rm, stat } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
-import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
-import { titleData } from '../common/title';
-import { computeContentTag } from '../ingest/content-tag';
-import { VIDEO_EXTENSIONS, parseOrderAndTitle } from '../ingest/path-parser';
-import { MediaService } from '../media/media.service';
+import { ReconcileService } from '../ingest/reconcile.service';
+import { VIDEO_EXTENSIONS } from '../ingest/path-parser';
 import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeFilename, splitUploadName } from './filename';
 
 /**
- * Browser uploads, landing in the same media tree the watcher scans.
+ * Browser uploads, which **place files and nothing else**.
  *
- * The interesting part is that this writes into a **watched** directory, so it
- * has to cooperate with ingest rather than race it:
+ * An upload used to create the video row itself, and so had its own opinion
+ * about which collection the result belonged to. That is the one thing it must
+ * not have: the folder layout decides shape, and there is no reason for a file
+ * to mean something different because it arrived through a browser rather than
+ * being copied onto a disk. So this writes the bytes into the shape the
+ * convention expects and stops. Reconcile creates the rows, applies the
+ * proposal, and is idempotent on `storageKey` — which is exactly what it was
+ * built for.
  *
- * - multer streams to `MEDIA_ROOT/.uploads/`, a dot-directory both the ingest
- *   scanner and the watcher skip. A partial or abandoned upload is therefore
- *   never seen, and cannot be ingested as a truncated file.
- * - The finished file is **renamed** into its collection folder. Rename is
- *   atomic within a filesystem, and staging inside `MEDIA_ROOT` rather than
- *   under `DERIVED_ROOT` keeps it on the same one — across two mounts a rename
- *   fails with `EXDEV`.
- * - The row is created here, keyed on the same `storageKey` reconcile would
- *   use, so the scan that follows finds the file already known. That is what
- *   the plan means by uploads not double-creating.
+ * The layout it writes:
+ *
+ *   one file            → `<drive>/<name without extension>/<file>`
+ *   a folder of files   → `<drive>/<folder>/…`, as given
+ *
+ * A single file gets a folder of its own because a bare file in a drive root is
+ * a triage issue, and a folder holding one video is a standalone video. Upload
+ * therefore never produces something an admin has to place by hand.
+ *
+ * Staging still happens in a dot-directory both the scanner and the watcher
+ * skip, so a partial or abandoned transfer is never a candidate for ingestion.
+ * The move into place crosses filesystems now — each drive is its own disk — and
+ * `StorageService.move` copies to a dot-prefixed neighbour and renames when it
+ * has to, so the file still appears under its final name only once complete.
  */
 
 /**
@@ -57,6 +64,19 @@ export interface UploadedVideoFile {
   originalname: string;
   mimetype: string;
   size: number;
+  /**
+   * `webkitRelativePath` for a directory upload, sent as its own field.
+   *
+   * multer strips both slash and backslash from `originalname`, so the shape of
+   * an uploaded folder cannot survive in the filename — it has to travel beside
+   * it or be lost.
+   */
+  relativePath?: string;
+}
+
+export interface PlacedFile {
+  storageKey: string;
+  originalName: string;
 }
 
 @Injectable()
@@ -66,105 +86,142 @@ export class UploadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
-    private readonly media: MediaService,
+    private readonly reconcile: ReconcileService,
   ) {}
 
-  /** True when the extension and mime type are both acceptable. Called by the multer filter. */
+  /** True when the extension is one the library ingests. Called by the multer filter. */
   static isAcceptable(originalName: string): boolean {
     const { extension } = splitUploadName(sanitizeFilename(originalName));
 
     return ALLOWED_EXTENSIONS.has(extension);
   }
 
-  async ingestUpload(
-    file: UploadedVideoFile,
-    input: { collectionId: string; seasonId?: string | null; title?: string },
+  /** The drives an upload may target: the top-level folders of MEDIA_ROOT. */
+  async listDrives(): Promise<{ name: string }[]> {
+    return (await this.storage.listDirectories('media', '')).map((name) => ({ name }));
+  }
+
+  async placeUpload(
+    files: UploadedVideoFile[],
+    input: { drive: string },
     uploadedById: string,
-  ) {
+  ): Promise<{ placed: PlacedFile[] }> {
     try {
-      return await this.place(file, input, uploadedById);
+      return await this.place(files, input, uploadedById);
     } finally {
-      // Whatever happened, the staged file does not stay. On success it has
-      // already been renamed away and this is a no-op.
-      await rm(file.path, { force: true });
+      // Whatever happened, nothing stays in staging. On success these have
+      // already been moved away and this is a no-op.
+      await Promise.all(files.map((file) => rm(file.path, { force: true })));
     }
   }
 
   private async place(
-    file: UploadedVideoFile,
-    input: { collectionId: string; seasonId?: string | null; title?: string },
+    files: UploadedVideoFile[],
+    input: { drive: string },
     uploadedById: string,
-  ) {
-    const collection = await this.prisma.collection.findUnique({
-      where: { id: input.collectionId },
-      select: { id: true, folderKey: true },
-    });
-    if (!collection) throw new NotFoundException('No such collection');
+  ): Promise<{ placed: PlacedFile[] }> {
+    if (files.length === 0) throw new BadRequestException('No files were uploaded');
 
-    let folderKey = collection.folderKey;
-    let seasonId: string | null = null;
+    const drive = await this.requireDrive(input.drive);
+    const placed: PlacedFile[] = [];
 
-    if (input.seasonId) {
-      const season = await this.prisma.season.findUnique({
-        where: { id: input.seasonId },
-        select: { id: true, collectionId: true, folderKey: true },
-      });
-      if (!season) throw new NotFoundException('No such season');
-      // Otherwise the file would land under a show it is not part of.
-      if (season.collectionId !== collection.id) {
-        throw new BadRequestException('That season belongs to a different collection');
+    for (const file of files) {
+      const relative = this.targetPath(file);
+      const { basename, extension } = splitUploadName(relative.slice(relative.lastIndexOf('/') + 1));
+
+      if (!ALLOWED_EXTENSIONS.has(extension)) {
+        throw new BadRequestException(`Unsupported video type: .${extension || 'none'}`);
       }
-      folderKey = season.folderKey;
-      seasonId = season.id;
+
+      const folderKey = `${drive}/${relative.slice(0, relative.lastIndexOf('/'))}`;
+      const storageKey = await this.freeStorageKey(folderKey, basename, extension);
+
+      await this.storage.ensureDirectory('media', folderKey);
+      await this.storage.move('media', this.storage.toKey('media', file.path), storageKey);
+
+      placed.push({ storageKey, originalName: file.originalname });
     }
 
-    const filename = sanitizeFilename(input.title ? `${input.title}.${splitUploadName(sanitizeFilename(file.originalname)).extension}` : file.originalname);
-    const { basename, extension } = splitUploadName(filename);
+    /**
+     * The rows come from the scan, not from here.
+     *
+     * Awaited so the caller is told what the upload became rather than being
+     * left to poll for it, and because the proposal for a folder can only be
+     * made once every file in it is on disk.
+     */
+    await this.reconcile.run();
 
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      throw new BadRequestException(`Unsupported video type: .${extension || 'none'}`);
-    }
-
-    const storageKey = await this.freeStorageKey(folderKey, basename, extension);
-
-    await this.storage.ensureDirectory('media', folderKey);
-    await this.storage.move('media', this.storage.toKey('media', file.path), storageKey);
-
-    const stats = await stat(this.storage.resolvePath('media', storageKey));
-    const contentTag = await computeContentTag(
-      this.storage.resolvePath('media', storageKey),
-      stats.size,
-    );
-
-    const parsed = parseOrderAndTitle(basename);
-    const slug = await this.freeSlug(collection.id, slugify(input.title ?? parsed.title));
-
-    const video = await this.prisma.video.create({
-      data: {
-        collectionId: collection.id,
-        seasonId,
-        slug,
-        ...titleData(input.title ?? parsed.title),
-        orderIndex: parsed.orderIndex,
-        // The same key reconcile derives from the path, so the next scan
-        // recognises this file rather than creating it again.
-        storageKey,
-        contentTag,
-        // Kept as metadata, which is all it ever was.
-        originalName: file.originalname,
-        mimeType: file.mimetype || 'application/octet-stream',
-        sizeBytes: BigInt(stats.size),
-        fileMtime: stats.mtime,
-        state: 'DRAFT',
-        origin: 'UPLOAD',
-        uploadedById,
-      },
+    /**
+     * Attribution, applied after the fact.
+     *
+     * Reconcile creates every row the same way, so without this an upload would
+     * be indistinguishable from a file someone copied onto the disk — the
+     * uploader's name lost and the origin reading INGEST. Matched on
+     * `storageKey`, which is what the whole pipeline is keyed on anyway.
+     */
+    await this.prisma.video.updateMany({
+      where: { storageKey: { in: placed.map((file) => file.storageKey) } },
+      data: { origin: 'UPLOAD', uploadedById },
     });
 
-    // Probing fills in duration, dimensions and the conversion verdict.
-    this.media.enqueue(video.id);
+    this.logger.log(`Placed ${placed.length} file(s) on ${drive}`);
 
-    return video;
+    return { placed };
+  }
+
+  /**
+   * Where a file goes inside its drive, as a relative path with at least one
+   * folder in it.
+   *
+   * Every segment is sanitised, not just the filename: a directory upload
+   * carries a client-supplied path, and `..` or a leading dot in the middle of
+   * it would either escape the drive or create a folder the scanner skips
+   * forever.
+   */
+  private targetPath(file: UploadedVideoFile): string {
+    const name = sanitizeFilename(file.originalname);
+
+    if (!file.relativePath) {
+      // A file of its own gets a folder named after it, which is what makes it
+      // a standalone video rather than a loose file in a drive root.
+      const { basename } = splitUploadName(name);
+      return `${basename}/${name}`;
+    }
+
+    const segments = file.relativePath
+      .split('/')
+      .map((segment) => sanitizeFilename(segment.trim()))
+      .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+
+    if (segments.length < 2) {
+      // A folder upload whose path collapsed to a bare filename is still a file
+      // that needs a folder around it.
+      const { basename } = splitUploadName(name);
+      return `${basename}/${name}`;
+    }
+
+    return segments.join('/');
+  }
+
+  /**
+   * The drive an upload targets: a directory directly under MEDIA_ROOT.
+   *
+   * Checked rather than trusted — the name arrives in a request body, and
+   * `StorageService` is the only thing that joins paths. A drive that is a
+   * symlink to another disk is the normal case in production and passes here,
+   * because the containment check is lexical.
+   */
+  private async requireDrive(name: string): Promise<string> {
+    const drive = sanitizeFilename(name.trim());
+
+    if (drive.length === 0 || drive.startsWith('.') || drive.includes('/')) {
+      throw new BadRequestException('Choose a drive to upload to');
+    }
+
+    const drives = await this.storage.listDirectories('media', '');
+    if (!drives.includes(drive)) throw new NotFoundException('No such drive');
+
+    return drive;
   }
 
   /**
@@ -172,7 +229,9 @@ export class UploadsService {
    *
    * Checks the filesystem as well as the database: a file can be on disk
    * without a row yet — dropped in seconds ago and not scanned — and
-   * overwriting it would destroy something nobody asked to replace.
+   * overwriting it would destroy something nobody asked to replace. The folder
+   * itself is deliberately *not* made unique: uploading `Avatar/` when the drive
+   * already has one adds to it, which is how a second season arrives.
    */
   private async freeStorageKey(
     folderKey: string,
@@ -191,17 +250,5 @@ export class UploadsService {
 
       if (!taken) return candidate;
     }
-  }
-
-  private async freeSlug(collectionId: string, base: string): Promise<string> {
-    const taken = await this.prisma.video.findMany({
-      where: { collectionId },
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
   }
 }

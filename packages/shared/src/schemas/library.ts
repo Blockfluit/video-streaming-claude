@@ -74,14 +74,18 @@ export type ListVideosQuery = z.infer<typeof listVideosSchema>;
  * Metadata only. Nothing here touches `storageKey`, `contentTag` or the probed
  * fields — those describe the file on disk and belong to ingest and probing,
  * not to whoever is editing the page.
+ *
+ * Season and running order are deliberately absent too.
+ *
+ * They say where a video sits *in one collection*, and a video may sit in
+ * several — so there is nothing here for them to mean. Both are set together by
+ * `PATCH /collections/:id/videos/order`, which names the collection it is
+ * talking about.
  */
 export const updateVideoSchema = z.object({
   title: nonEmptyText(300).optional(),
   description: optionalText(10000),
   tags: tagsSchema.optional(),
-  orderIndex: z.coerce.number().int().min(0).max(100000).optional(),
-  /** `null` moves the video out of its season, which is different from omitting the field. */
-  seasonId: idSchema.nullable().optional(),
   regenerateSlug,
 });
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;
@@ -127,6 +131,7 @@ export type PublishCollectionQuery = z.infer<typeof publishCollectionSchema>;
 
 export const ingestIssueKindSchema = z.enum([
   'ROOT_LEVEL_FILE',
+  'LOOSE_DRIVE_FILE',
   'PATH_TOO_DEEP',
   'UNREADABLE_SEASON',
   'ORPHAN_SUBTITLE',
@@ -189,12 +194,31 @@ export type ListJobsQuery = z.infer<typeof listJobsSchema>;
 /** 2 GB, matching MAX_UPLOAD_BYTES in the environment. */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
+/**
+ * How many files one upload may carry.
+ *
+ * A whole season is an ordinary thing to drag in; a whole disk is not. The cap
+ * bounds a single request rather than what anyone may upload in total.
+ */
+export const MAX_UPLOAD_FILES = 200;
+
+/**
+ * An upload names a **drive** and nothing else.
+ *
+ * It used to name a collection and a season, which made uploading a different
+ * way of deciding what something is. It is not: the files land on the disk in
+ * the shape the folder convention expects, and the scan makes of them exactly
+ * what it would make of the same folders copied there by hand. Where they end up
+ * in the library is edited afterwards, like anything else.
+ *
+ * `paths` carries one `webkitRelativePath` per file, in the order the files were
+ * appended. multer strips both slash and backslash from a filename, so the shape
+ * of an uploaded folder cannot survive inside `originalname` — it travels here
+ * or it is lost.
+ */
 export const uploadVideoSchema = z.object({
-  collectionId: idSchema,
-  /** Omit to place the video directly in the collection. */
-  seasonId: idSchema.optional(),
-  /** Overrides the title derived from the filename. */
-  title: nonEmptyText(300).optional(),
+  drive: nonEmptyText(255),
+  paths: z.union([z.string(), z.array(z.string())]).optional(),
 });
 export type UploadVideoInput = z.infer<typeof uploadVideoSchema>;
 

@@ -132,6 +132,9 @@ export class SeasonsService {
 
     await this.prisma.season.delete({ where: { id } });
 
+    // A season with no folder behind it has nothing on disk either way.
+    if (season.folderKey === null) return;
+
     if (deleteFiles) {
       await this.storage.delete('media', season.folderKey);
       return;
