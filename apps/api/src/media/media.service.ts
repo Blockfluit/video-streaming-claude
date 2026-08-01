@@ -1,6 +1,7 @@
 import { extname } from 'node:path';
 
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,6 +10,7 @@ import {
 
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NoFrameError } from './ffmpeg-error';
 import { FfmpegService } from './ffmpeg.service';
 import { needsConversion } from './needs-conversion';
 
@@ -132,6 +134,9 @@ export class MediaService implements OnModuleDestroy {
     const key = video.playbackKey ?? video.storageKey;
     const path = this.storage.resolvePath(root, key);
 
+    /** Hoisted so the poster below can read it after the probe's catch. */
+    let durationSec: number | null;
+
     try {
       const probe = await this.ffmpeg.probe(path);
       const extension = extname(key).replace('.', '').toLowerCase();
@@ -160,7 +165,7 @@ export class MediaService implements OnModuleDestroy {
         },
       });
 
-      await this.generateThumbnail(video, probe.durationSec);
+      durationSec = probe.durationSec;
     } catch (error) {
       // Recorded rather than thrown: one unreadable file must not stop a scan,
       // and the admin needs to see which file and why.
@@ -169,6 +174,26 @@ export class MediaService implements OnModuleDestroy {
         where: { id: video.id },
         data: { probeError: describe(error).slice(0, 1000), probedAt: new Date() },
       });
+      return;
+    }
+
+    /**
+     * The poster is generated **outside** the probe's catch, and its failure is
+     * logged rather than stored.
+     *
+     * It used to sit inside the try above, so a capture that failed was written
+     * to `probeError` — on a row whose probe had just succeeded and stored a
+     * duration, dimensions and codecs. The admin then sees a file reported as
+     * unreadable in the ingest list while it plays and edits perfectly well,
+     * which is what was reported from a real library.
+     *
+     * A missing poster is a missing picture. It is not a reason to call the
+     * video broken, and `probeError` is the field that says it is.
+     */
+    try {
+      await this.generateThumbnail(video, durationSec);
+    } catch (error) {
+      this.logger.warn(`Thumbnail failed for ${key}: ${describe(error)}`);
     }
   }
 
@@ -264,7 +289,19 @@ export class MediaService implements OnModuleDestroy {
       video.playbackKey ?? video.storageKey,
     );
 
-    await this.writeThumbnail(video.id, source, atSeconds);
+    try {
+      await this.writeThumbnail(video.id, source, atSeconds);
+    } catch (error) {
+      /**
+       * A timestamp with no frame at it is a bad request, not a server fault.
+       *
+       * The admin picked the moment; telling them the file has nothing there
+       * is the whole answer, and a 500 saying "Internal server error" is not
+       * something anyone can act on.
+       */
+      if (error instanceof NoFrameError) throw new BadRequestException(error.message);
+      throw error;
+    }
 
     await this.prisma.video.update({
       where: { id: video.id },

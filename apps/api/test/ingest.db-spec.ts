@@ -158,6 +158,47 @@ describe('Ingest (real database)', () => {
     });
   });
 
+  /**
+   * A scan has no `awaitWriteFinish`, unlike the watcher, so it will happily
+   * read a file that is still being copied. That is how a 994 MB film was
+   * ingested at 8 MB: ffprobe read the moov atom at the front of the container,
+   * reported the full duration, and the row recorded a size two orders of
+   * magnitude out. The auto-poster then sought to a tenth of that duration —
+   * far past the bytes that existed — and failed.
+   *
+   * Reconcile cannot tell a half-copied file from a finished one at the moment
+   * it looks. What it can do is notice, next time, that the file is no longer
+   * what it recorded, and read it again. Without that the wrong size and the
+   * missing poster are permanent, because a row that already exists was never
+   * looked at again.
+   */
+  describe('a file that changed since it was recorded', () => {
+    it('re-reads a file that has grown since the row was written', async () => {
+      await put('disk1/Film/film.mp4', 'the first eight bytes');
+      await reconcile.run();
+      const [before] = await videos();
+
+      await put('disk1/Film/film.mp4', 'the first eight bytes, and then a great deal more');
+      await reconcile.run();
+
+      const [after] = await videos();
+      expect(after.id).toBe(before.id);
+      expect(Number(after.sizeBytes)).toBeGreaterThan(Number(before.sizeBytes));
+    });
+
+    it('leaves a file that has not changed alone', async () => {
+      await put('disk1/Film/film.mp4');
+      await reconcile.run();
+      const [before] = await videos();
+
+      const summary = await reconcile.run();
+
+      const [after] = await videos();
+      expect(summary).toMatchObject({ created: 0, moved: 0 });
+      expect(after.updatedAt).toEqual(before.updatedAt);
+    });
+  });
+
   describe('idempotency', () => {
     // The property that stops an upload writing into the watched tree from
     // creating a second row for a file that is already known.

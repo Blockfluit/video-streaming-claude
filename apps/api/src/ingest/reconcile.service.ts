@@ -117,6 +117,9 @@ export class ReconcileService {
         stateBeforeMissing: true,
         sourceDeletedAt: true,
         playbackKey: true,
+        // To notice a file that is not what it was when the row was written.
+        sizeBytes: true,
+        fileMtime: true,
       },
     });
 
@@ -137,6 +140,7 @@ export class ReconcileService {
     let created = 0;
     let moved = 0;
     let restored = 0;
+    let rescanned = 0;
 
     /**
      * Videos this pass created, by storage key.
@@ -153,6 +157,34 @@ export class ReconcileService {
 
       if (existing) {
         present.add(existing.id);
+
+        /**
+         * The file is not what it was, so what was read off it is not either.
+         *
+         * A scan has no `awaitWriteFinish` — the watcher does — so it will read
+         * a file that is still being copied. ffprobe reads the moov atom at the
+         * front of an MP4 and reports the whole duration while most of the
+         * bytes are still arriving, which is how a 994 MB film was recorded at
+         * 8 MB with a poster seeking 813 seconds into a file that had barely
+         * started. Nothing looked at that row again, so it stayed wrong.
+         *
+         * Reconcile cannot tell a half-copied file from a finished one while it
+         * is looking at it. It can notice next time, and read it again.
+         */
+        const changed =
+          existing.sizeBytes !== BigInt(file.size)
+          || existing.fileMtime.getTime() !== file.mtime.getTime();
+
+        if (changed) {
+          await this.prisma.video.update({
+            where: { id: existing.id },
+            data: { sizeBytes: BigInt(file.size), fileMtime: file.mtime },
+          });
+          // Duration, dimensions and the conversion verdict all came off the
+          // old bytes, and the poster was taken from them.
+          this.media.enqueue(existing.id);
+          rescanned += 1;
+        }
 
         if (existing.state === 'MISSING') {
           // It came back. Restore what it was, rather than quietly demoting a
@@ -249,7 +281,7 @@ export class ReconcileService {
     };
 
     this.logger.log(
-      `Reconcile: ${summary.scannedFiles} files, +${created} new, ${moved} moved, ` +
+      `Reconcile: ${summary.scannedFiles} files, +${created} new, ${moved} moved, ${rescanned} re-read, ` +
         `${markedMissing} missing, ${restored} restored, ${subtitles.bound} subtitles, ` +
         `${seenIssues.length} issues`,
     );

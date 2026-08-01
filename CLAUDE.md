@@ -122,6 +122,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   source fails during input parsing, never touches the destination, and passes against the broken code too.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
+- **A poster failure is not a probe failure.** Thumbnail generation runs outside the probe's `catch` and is
+  only logged: it used to sit inside, so a failed capture wrote `probeError` on a row whose probe had just
+  succeeded, and the ingest list reported a file as broken while it played and edited perfectly well.
+- **`captureFrame` checks that a frame was actually written.** ffmpeg exits **0** when the seek lands past
+  the end — it says "Output file is empty, nothing was encoded" on stderr and writes nothing — so trusting
+  the exit code left the *rename* to fail with an `ENOENT` naming neither the timestamp nor the file. A
+  `NoFrameError` becomes a **400** on the capture endpoint, because the admin chose the moment.
+- **A scan has no `awaitWriteFinish`; the watcher does.** A scan will therefore read a file that is still
+  being copied, and ffprobe reports the whole duration from an MP4's leading moov atom while the bytes are
+  still arriving — a 994 MB film was recorded at 8 MB, and its poster sought 813 seconds into it. Reconcile
+  cannot tell mid-copy from finished while it looks, so it notices **next time**: a row whose file has a
+  different size or mtime is updated and re-probed. Without that, nothing ever looked at the row again.
 - `needsConversion` does **not** fire on nulls from a failed probe — that would queue CPU-saturating work on
   a guess. The container check still applies, since it needs no probe.
 - Probe/thumbnail run at concurrency 2 (cheap, IO-bound). Transcoding is separate and runs one at a time —

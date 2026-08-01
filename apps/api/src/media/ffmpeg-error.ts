@@ -104,3 +104,19 @@ export class FfmpegError extends Error {
     this.name = 'FfmpegError';
   }
 }
+
+/**
+ * ffmpeg ran, exited 0, and produced no frame.
+ *
+ * Its own kind because it is not a failure of the process — nothing crashed and
+ * there is no stderr worth summarising. It means the seek landed somewhere the
+ * file has nothing at: past the end, or past the bytes written so far while a
+ * copy is still in flight. Named so the capture endpoint can answer with the
+ * reason instead of a 500 the admin cannot act on.
+ */
+export class NoFrameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoFrameError';
+  }
+}
