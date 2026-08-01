@@ -19,6 +19,21 @@ dropped on disk, stages it as drafts, and lets an admin enrich and publish it.
 - **Watch tracking.** Resume where you left off, per-video stats, continue-watching.
 - **Skip intro / outro**, cast and crew, comments, curated rows, and a personal My List.
 
+### Managing it
+
+The admin side is the other half of the app, not an afterthought — most of the work in a private
+library is getting the metadata right.
+
+- **A screen per thing.** Collections (details, seasons, cast, and how it is doing), videos (metadata,
+  markers, poster, subtitles, conversion), people, curated rows, and accounts.
+- **Drag episodes into seasons.** Where you drop one is the order it plays in, and "next episode"
+  follows it everywhere else.
+- **Live job feedback.** Conversion progress and ffmpeg's own output, on the video's own page as well
+  as the queue.
+- **A moderation queue** covering every comment in the library — including on videos nobody is
+  watching, which is where an unwanted one is least likely to be noticed.
+- **An ingest inbox** listing what the scanner could not work out, rather than failing silently.
+
 ## Stack
 
 | Layer | Choice |
