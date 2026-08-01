@@ -22,12 +22,12 @@ export default defineNuxtConfig({
   // that would otherwise flash white on first paint.
   colorMode: { preference: 'dark', fallback: 'dark' },
 
-  devServer: { port: 3000 },
+  devServer: { port: Number(process.env.NUXT_DEV_PORT ?? 3000) },
 
   routeRules: {
     // Everything the browser touches is same-origin on :3000. This is not just
     // convenience: a cross-origin <track> fails silently, and <video>/<track>
     // cannot send Authorization headers — which is why auth is cookie-based.
-    '/api/**': { proxy: 'http://localhost:4000/**' },
+    '/api/**': { proxy: `${process.env.NUXT_API_TARGET ?? 'http://localhost:4000'}/**` },
   },
 })

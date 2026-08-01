@@ -16,6 +16,7 @@ import {
 } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
+import { titleData, titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -162,7 +163,7 @@ export class CollectionsService {
     return this.prisma.collection.create({
       data: {
         slug,
-        title: dto.title,
+        ...titleData(dto.title),
         description: dto.description ?? null,
         year: dto.year ?? null,
         tags: dto.tags ?? [],
@@ -187,7 +188,7 @@ export class CollectionsService {
     return this.prisma.collection.update({
       where: { id },
       data: {
-        title: dto.title,
+        ...titleUpdate(dto.title),
         description: dto.description,
         year: dto.year,
         tags: dto.tags,

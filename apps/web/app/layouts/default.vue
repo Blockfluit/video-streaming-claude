@@ -15,6 +15,7 @@ const links = computed(() => [
   { label: 'Browse', to: '/browse' },
   { label: 'My List', to: '/my-list' },
   { label: 'History', to: '/history' },
+  { label: 'Requests', to: '/requests' },
   ...(isAdmin.value ? [{ label: 'Manage', to: '/admin' }] : []),
 ])
 

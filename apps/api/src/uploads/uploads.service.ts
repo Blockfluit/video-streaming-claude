@@ -4,6 +4,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 
 import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
+import { titleData } from '../common/title';
 import { computeContentTag } from '../ingest/content-tag';
 import { VIDEO_EXTENSIONS, parseOrderAndTitle } from '../ingest/path-parser';
 import { MediaService } from '../media/media.service';
@@ -143,7 +144,7 @@ export class UploadsService {
         collectionId: collection.id,
         seasonId,
         slug,
-        title: input.title ?? parsed.title,
+        ...titleData(input.title ?? parsed.title),
         orderIndex: parsed.orderIndex,
         // The same key reconcile derives from the path, so the next scan
         // recognises this file rather than creating it again.

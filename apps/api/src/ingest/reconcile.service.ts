@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
+import { titleData } from '../common/title';
 import { MediaService } from '../media/media.service';
 import { SubtitlesService } from '../subtitles/subtitles.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
@@ -369,7 +370,7 @@ export class ReconcileService {
         collectionId,
         seasonId,
         slug,
-        title: file.parsed.title,
+        ...titleData(file.parsed.title),
         orderIndex: file.parsed.orderIndex,
         storageKey: file.relPath,
         contentTag,
@@ -494,7 +495,7 @@ export class ReconcileService {
           slugify(folder),
           taken.map((row) => row.slug),
         ),
-        title: folder,
+        ...titleData(folder),
         folderKey: folder,
         state: 'DRAFT',
         origin: 'INGEST',

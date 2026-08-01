@@ -15,6 +15,7 @@ import { ListsModule } from './lists/lists.module';
 import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RequestsModule } from './requests/requests.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { TranscodeModule } from './transcode/transcode.module';
 import { UploadsModule } from './uploads/uploads.module';
@@ -49,6 +50,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     CommentsModule,
     WatchlistModule,
     ListsModule,
+    RequestsModule,
   ],
   controllers: [AppController],
   providers: [

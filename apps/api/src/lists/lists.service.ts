@@ -9,6 +9,7 @@ import {
   type UpdateCuratedListInput,
 } from '@video/shared';
 
+import { isUniqueViolation } from '../common/prisma-errors';
 import { whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
 import type { Role } from '../prisma/generated/enums';
@@ -274,13 +275,4 @@ export class ListsService {
       taken.map((row) => row.slug),
     );
   }
-}
-
-/** Prisma's unique-constraint failure. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: string }).code === 'P2002'
-  );
 }

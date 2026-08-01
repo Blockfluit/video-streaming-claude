@@ -20,6 +20,7 @@ const sections = [
   { label: 'Ingest', to: '/admin/ingest', icon: 'i-lucide-folder-sync' },
   { label: 'Curated rows', to: '/admin/lists', icon: 'i-lucide-rows-3' },
   { label: 'Comments', to: '/admin/comments', icon: 'i-lucide-message-square' },
+  { label: 'Requests', to: '/admin/requests', icon: 'i-lucide-ticket' },
   { label: 'People', to: '/admin/people', icon: 'i-lucide-users' },
   { label: 'Accounts', to: '/admin/users', icon: 'i-lucide-key-round' },
 ]
