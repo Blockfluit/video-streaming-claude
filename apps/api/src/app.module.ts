@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
@@ -20,6 +22,7 @@ import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 import { WatchModule } from './watch/watch.module';
 import { WatchlistModule } from './watchlist/watchlist.module';
+import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
 
 @Module({
   imports: [
@@ -27,6 +30,7 @@ import { WatchlistModule } from './watchlist/watchlist.module';
       isGlobal: true,
       envFilePath: ['.env'],
     }),
+    ThrottlerModule.forRoot({ throttlers: THROTTLERS }),
     PrismaModule,
     CommonModule,
     MediaModule,
@@ -47,5 +51,13 @@ import { WatchlistModule } from './watchlist/watchlist.module';
     ListsModule,
   ],
   controllers: [AppController],
+  providers: [
+    /*
+     * Registered here rather than alongside the session guards, so it runs
+     * first: a request that is already over its limit is rejected without
+     * costing the database the user lookup `SessionGuard` does on every call.
+     */
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
+  ],
 })
 export class AppModule {}

@@ -29,6 +29,8 @@ import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { VideosService } from '../videos/videos.service';
 import { SubtitlesService } from './subtitles.service';
+import { SkipThrottle } from '@nestjs/throttler';
+import { ThrottleExpensive } from '../common/throttling';
 
 @Controller()
 export class SubtitlesController {
@@ -57,6 +59,12 @@ export class SubtitlesController {
    * Served same-origin through the Nuxt proxy: a cross-origin `<track>` fails
    * **silently**, showing a track the viewer can select that never displays.
    */
+  /*
+   * Not throttled: the browser fetches every <track> it is offered as soon as
+   * the player mounts, and a film with eight subtitle languages would spend a
+   * chunk of any limit before playback starts.
+   */
+  @SkipThrottle()
   @Get('videos/:videoId/subtitles/:subtitleId.vtt')
   @Header('Content-Type', 'text/vtt; charset=utf-8')
   // Private media behind a session cookie, like the video itself.
@@ -73,6 +81,8 @@ export class SubtitlesController {
     response.send(body);
   }
 
+  /** Uploads a file, sniffs its charset and converts it. */
+  @ThrottleExpensive()
   @Post('videos/:videoId/subtitles')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.CREATED)

@@ -398,6 +398,31 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   ships `aria-label="Show popup"` — so the accessible name of the control that picks a person was "Show
   popup". Pass an explicit `aria-label` naming the *job*, not the mechanism. (Same bug as `AddToListButton`.)
 
+**Rate limiting** (`common/throttling.ts`)
+- There is exactly **one** throttler, named `default`, overridden per route with `@Throttle({ default: … })`.
+  Declaring several *named* throttlers reads better and is wrong: the guard evaluates **every** named
+  throttler on **every** request, so a `credentials` bucket of 10/min governs the whole API, and
+  `@SkipThrottle()` — which skips only the throttler literally named `default` — exempts one of them. The
+  e2e tests caught this; browsing would have died after ten requests.
+- Keys are `class + handler + throttler + tracker`, so each route counts separately. The tracker is the
+  **signed-in user**, falling back to IP. IP alone throttles a whole household behind one NAT and misses one
+  account misbehaving from several addresses; this library is invite-only, so almost every request has an
+  identity. The IP fallback is what covers `/auth/login` and `/auth/redeem`, which have no session yet.
+- Streaming, video thumbnails, collection posters, subtitle tracks and `/auth/me` are **exempt**, and must
+  stay exempt. One `<video>` issues a range request per seek and a shelf issues a poster request per card —
+  a limit there protects nothing and breaks playback. `throttling.e2e-spec.ts` asserts this by hammering
+  each one past every bucket, because a decorator on the wrong method is exactly the mistake worth catching.
+- The heartbeat limit is the one `watch/progress.ts` was written expecting: capping `deltaSec` at 30s stops
+  one bad number rewriting a total but is explicitly **not** a rate limit, since a client beating in a loop
+  still accumulates real seconds.
+- The browser suite signs in **once** (a Playwright setup project writing `storageState`) rather than per
+  test. Fifty logins in seven minutes from one address is not what a person does, and it trips the login
+  limit — the suite was wrong, not the limit. It also cut the run from 7.5 minutes to 2.3.
+- `helmet`'s CSP is deliberately **off**. A CSP describes what a *document* may load; this server returns
+  JSON and media and never a document. Setting one here would be a header nobody enforces, which reads like
+  protection. `crossOriginResourcePolicy` is `same-site`, not the stricter default, or the browser on :3000
+  blocks every poster served from :4000 in development.
+
 **Access control**
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
 - A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Use

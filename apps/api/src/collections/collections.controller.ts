@@ -36,6 +36,7 @@ import { validate } from '../common/zod-validation.pipe';
 import { ImagesService } from '../common/images.service';
 import { CollectionsService } from './collections.service';
 import { ResolveService, type ResolveResult } from './resolve.service';
+import { SkipThrottle } from '@nestjs/throttler';
 
 /**
  * Reads are open to any signed-in user and filtered by role in the service —
@@ -60,6 +61,8 @@ export class CollectionsController {
    * two segments and `:slug` is one, so Express cannot confuse them. Checked
    * rather than assumed: moving it below `:slug` fails nothing.
    */
+  /** Not throttled, for the same reason as video thumbnails: one per card. */
+  @SkipThrottle()
   @Get(':id/poster')
   poster(
     @Param('id') id: string,

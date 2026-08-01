@@ -6,6 +6,7 @@ import { validate } from '../common/zod-validation.pipe';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReconcileService, type ReconcileSummary } from './reconcile.service';
 import { WatcherService } from './watcher.service';
+import { ThrottleExpensive } from '../common/throttling';
 
 @Controller('admin/ingest')
 @Roles('ADMIN')
@@ -22,6 +23,8 @@ export class IngestController {
    * Joins an in-flight pass rather than starting a second one, so an impatient
    * admin clicking twice gets one scan and two identical answers.
    */
+  /** Walks the whole media tree and queues probes for what it finds. */
+  @ThrottleExpensive()
   @Post('scan')
   @HttpCode(HttpStatus.OK)
   scan(): Promise<ReconcileSummary> {

@@ -10,6 +10,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { WatchService } from './watch.service';
+import { ThrottleHeartbeat } from '../common/throttling';
 
 @Controller()
 export class WatchController {
@@ -21,6 +22,15 @@ export class WatchController {
    * 200 rather than 201 — a beat updates a rollup that already conceptually
    * exists, and the player wants the rollup back to keep its own state honest.
    */
+  /*
+   * The limit `watch/progress.ts` was written expecting. Capping `deltaSec` at
+   * 30s stops one bad number rewriting a total, but explicitly is not a rate
+   * limit — a client beating in a loop still accumulates real seconds. This is.
+   *
+   * 40/min leaves room for the player's 10s beat plus the sendBeacon on pause,
+   * tab-hide and unload, across a couple of tabs.
+   */
+  @ThrottleHeartbeat()
   @Post('videos/:id/heartbeat')
   @HttpCode(HttpStatus.OK)
   heartbeat(

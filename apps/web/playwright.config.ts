@@ -29,5 +29,20 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    /*
+     * One sign-in for the whole run, saved and reused.
+     *
+     * Logging in per test meant about fifty logins in seven minutes from one
+     * address — far more than a person ever does — and once `/auth/login` gained
+     * a rate limit that started returning 429 mid-run. Reusing a session is what
+     * a real browser does anyway, and it is quicker.
+     */
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/state.json' },
+      dependencies: ['setup'],
+    },
+  ],
 })

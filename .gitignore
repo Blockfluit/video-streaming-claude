@@ -49,3 +49,9 @@ Thumbs.db
 # Playwright run artifacts — a per-run file that changes on every invocation.
 test-results/
 playwright-report/
+
+# The signed-in session the browser suite reuses. A live cookie, so it must
+# never be committed. Leading **/ matters: a pattern containing a slash is
+# anchored to this file's directory, so a bare `e2e/.auth/` matches only at the
+# repo root and misses apps/web/e2e/.auth/ — which is where it actually lives.
+**/e2e/.auth/

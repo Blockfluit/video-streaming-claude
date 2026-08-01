@@ -16,6 +16,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import {
   MAX_THUMBNAIL_BYTES,
@@ -37,6 +38,7 @@ import { MediaService } from '../media/media.service';
 import { JobsService } from '../transcode/jobs.service';
 import { StreamingService } from './streaming.service';
 import { VideosService } from './videos.service';
+import { ThrottleExpensive } from '../common/throttling';
 
 @Controller('videos')
 export class VideosController {
@@ -70,6 +72,13 @@ export class VideosController {
    * `Authorization` header to its own range requests, which is the reason this
    * app uses cookies at all.
    */
+  /*
+   * Never throttled. A single <video> element issues a range request per seek
+   * and several more while buffering — scrubbing through a film is dozens in a
+   * few seconds, and that is one person watching one thing. A limit here does
+   * not protect anything; it breaks playback.
+   */
+  @SkipThrottle()
   @Get(':id/stream')
   stream(
     @Param('id') id: string,
@@ -86,6 +95,12 @@ export class VideosController {
    * storage key is stable across replacements, so a cached copy would outlive
    * the picture it shows.
    */
+  /*
+   * Never throttled either. Every card on every shelf asks for one of these, so
+   * a single home page is dozens of requests before anyone has clicked
+   * anything. They are cheap static reads behind an ETag.
+   */
+  @SkipThrottle()
   @Get(':id/thumbnail')
   thumbnail(
     @Param('id') id: string,
@@ -142,6 +157,8 @@ export class VideosController {
    * Re-runs ffprobe and waits for it — the admin clicked a button and expects
    * an answer, not a promise that something will happen eventually.
    */
+  /** Spawns ffprobe and waits for it, so a loop spawns processes. */
+  @ThrottleExpensive()
   @Post(':id/reprobe')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
@@ -151,6 +168,7 @@ export class VideosController {
   }
 
   /** Uploads a poster image. Marked MANUAL, so no later probe overwrites it. */
+  @ThrottleExpensive()
   @Post(':id/thumbnail')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
@@ -176,6 +194,8 @@ export class VideosController {
   }
 
   /** Grabs a frame at a chosen moment. Also MANUAL — someone picked it. */
+  /** One ffmpeg invocation per call. */
+  @ThrottleExpensive()
   @Post(':id/thumbnail/capture')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
@@ -194,6 +214,7 @@ export class VideosController {
    * Nothing converts on its own: a 200-file drop flags what needs converting
    * and stops, so it cannot silently peg the CPU for a day.
    */
+  @ThrottleExpensive()
   @Post(':id/convert')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -202,6 +223,7 @@ export class VideosController {
   }
 
   /** Pulls embedded text subtitle tracks out into servable VTT sidecars. */
+  @ThrottleExpensive()
   @Post(':id/extract-subtitles')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.ACCEPTED)

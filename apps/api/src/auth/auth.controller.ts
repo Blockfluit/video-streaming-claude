@@ -21,6 +21,8 @@ import { AuthService } from './auth.service';
 import type { AuthUser } from './auth.types';
 import { validate } from '../common/zod-validation.pipe';
 import { CurrentUser, Public } from './decorators';
+import { SkipThrottle } from '@nestjs/throttler';
+import { ThrottleCredentials } from '../common/throttling';
 
 /** express-session's callback API, as promises. */
 function regenerate(request: Request): Promise<void> {
@@ -50,6 +52,12 @@ export class AuthController {
    * is nothing for `SessionGuard` to authenticate. The token is the credential.
    */
   @Public()
+  /*
+   * Every failure here returns one identical 400, so a spent token cannot be
+   * told from an unknown one. The limit is what stops that being probed at
+   * speed.
+   */
+  @ThrottleCredentials()
   @Post('redeem')
   @HttpCode(HttpStatus.CREATED)
   async redeem(
@@ -68,6 +76,8 @@ export class AuthController {
   }
 
   @Public()
+  /** Tightest limit in the app: this is where a password is guessed. */
+  @ThrottleCredentials()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -100,6 +110,11 @@ export class AuthController {
     response.clearCookie('vsc.sid', { path: '/' });
   }
 
+  /*
+   * Not throttled: every page load and every route change asks who you are, and
+   * the navigation middleware calls it too. It is a session lookup, not work.
+   */
+  @SkipThrottle()
   @Get('me')
   me(@CurrentUser() user: AuthUser): AuthUser {
     return user;
