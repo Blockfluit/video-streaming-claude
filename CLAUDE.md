@@ -301,6 +301,60 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   silently, and `<video>`/`<track>` cannot send `Authorization` headers (this is why auth is cookie-based).
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
+**Trailers, banners and overview pages**
+- A **banner** is a third kind of picture and not interchangeable with the other two: a thumbnail is a
+  640px frame ffmpeg captured on its own, a poster is 2:3, a banner is a wide backdrop somebody chose.
+  The hero fallback is video banner → **collection banner → video thumbnail** → collection poster, and the
+  collection's banner outranks the video's thumbnail deliberately.
+- There is no `bannerSource` twin to `thumbnailSource`. That enum exists to stop a reprobe clobbering a
+  hand-picked poster; nothing generates a banner on its own, so there is nothing to protect it from.
+- Trailer and banner are **never** publish requirements. Both arrived after the library was full, so
+  requiring either would un-publish every record in one migration.
+- Only the 11-character **id** is stored, never a URL — `parseYoutubeId` in `packages/shared` is shared
+  because the API validates with it and the admin form parses with it, and two implementations would
+  disagree eventually with the loser failing only on a viewer's screen. The id pattern is **anchored**, or
+  `https://evil.example/dQw4w9WgXcQ` parses as a trailer.
+- `loop=1` on a single video does **nothing** without `playlist=<id>` — the trailer plays once and stops,
+  which reads as a bug rather than as a missing parameter. Pinned by a unit test.
+- Embeds go through `youtube-nocookie.com`. Unmuting is a `postMessage` (hence `enablejsapi=1` and an
+  `origin`), never a reload with `mute=0`: reloading restarts the trailer, and losing your place is not
+  what "sound on" should mean. Stop **unmounts** the iframe, which ends the network as well as the audio.
+- The trailer iframe is `pointer-events: none` and `tabindex="-1"`. Stretched across a hero it otherwise
+  swallows every click meant for the Play button underneath.
+- The hero decides on **mount**, never during SSR: `matchMedia` and `navigator.connection` do not exist in
+  Nitro, and reduced-motion or save-data means no iframe is created at all.
+- `?play=1` is a **query**, not a path segment: the collection resolver reads every segment after the
+  collection as a season or video slug, so `/watch` would become a reserved slug for ever. `playing` is
+  deliberately absent from both `useApiData` watch arrays — that is what makes a Play click reuse the
+  cached payload instead of refetching twice and flashing.
+- Every card goes to an overview. Only Continue Watching, the home hero and the player's "Next episode"
+  resume directly.
+- **`GET /trailers/search` is optional by design.** No key is an ordinary state answered with a 503 naming
+  the variable and telling the admin to paste a URL instead. It is throttled at 10/min — tighter than
+  `@ThrottleExpensive()` — because the cost is metered third-party quota, not CPU: 100 units a call against
+  a 10,000/day default is ~100 searches a day for the whole install. Hence search-on-submit, never
+  type-ahead.
+- **The API key is a query parameter, so the request URL is the credential.** `fetch` puts the whole URL
+  into what it throws and Google echoes the key back in some 403 bodies, so client messages are fixed
+  strings that forward neither, and log lines go through `redactKey`. Two different guards: removing the
+  redaction fails the log test and only the log test.
+- `GET /videos/:id/banner` and `GET /collections/:id/banner` join the `@SkipThrottle()` set, and
+  `throttling.e2e-spec.ts` hammers them — a shelf of heroes is one request per card.
+- **ffmpeg exits `0` when `-ss` lands past the end of a file**, writing no output and saying so only on
+  stderr. Unchecked, the caller renames a file that never existed and the admin sees
+  `ENOENT ... rename /srv/derived/tmp/…`. `captureFrame` checks its own output and throws `NoFrameError`,
+  which `MediaService` turns into a **400** — asking for a frame near the end is the caller's ordinary
+  mistake, not a server fault.
+- A banner replaced with a different extension **deletes the old key first**. `setThumbnail` has orphaned a
+  file on every png-to-jpg replacement since step 10; that half is deliberately not copied.
+- Playwright **blocks YouTube outright** (`fixtures.ts`). A real embed emits 4xx telemetry that would trip
+  the watchdog on every page with a hero, and a streaming trailer keeps the network busy so `visit()`'s
+  `networkidle` never settles. The watchdog is also scoped to same-origin — a third party answering 4xx is
+  not evidence about our app.
+- `visible.spec.ts`'s `PAGES` holds **static paths only**; the overview and the player each need their own
+  click-through test. Repointing the old one at the overview would have left the player with no contrast
+  audit at all.
+
 **Frontend** (`apps/web`, in addition to the notes above)
 - **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
   bare `$fetch` runs in Nitro with no cookie jar, so a call that works in the browser 401s the moment the

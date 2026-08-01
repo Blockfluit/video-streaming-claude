@@ -17,6 +17,10 @@ dropped on disk, stages it as drafts, and lets an admin enrich and publish it.
 - **Transcoding.** Browser-triggered MKV → MP4 (H.264/AAC, faststart) with live progress.
 - **Subtitles.** Sidecar files and embedded MKV tracks, both normalised to WebVTT.
 - **Watch tracking.** Resume where you left off, per-video stats, continue-watching.
+- **Overview pages.** Clicking a card shows what a thing *is* — artwork, description, runtime, episodes by
+  season — rather than starting playback. Play is a second, deliberate click.
+- **YouTube trailers and banners.** A video or a collection can carry a trailer that autoplays muted over a
+  wide backdrop, falling back to the thumbnail or poster. Both optional; neither gates publishing.
 - **Skip intro / outro**, cast and crew, comments, curated rows, and a personal My List.
 
 ## Stack
@@ -79,6 +83,20 @@ replaced rather than reused.
 | `npm run test:db` | HTTP tests against a real `video_test` database |
 | `npm run test:all` | All three tiers, in order |
 | `npm run db:migrate` / `db:generate` / `db:studio` | Prisma, in `apps/api` |
+
+### Optional: trailer search
+
+Pasting a YouTube URL into the admin trailer picker always works and needs nothing configured. To search
+from inside the app, set a [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
+key in `apps/api/.env`:
+
+```bash
+YOUTUBE_API_KEY=...
+```
+
+Without it, `GET /trailers/search` answers `503` and the picker says so. Note the quota: a search costs 100
+units of a 10,000/day default — roughly **100 searches a day for the whole install** — which is why the
+picker searches on submit rather than as you type.
 
 ## Testing
 
