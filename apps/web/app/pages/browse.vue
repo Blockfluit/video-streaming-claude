@@ -23,6 +23,8 @@ interface CollectionCard {
   year: number | null
   tags: string[]
   state: string
+  /** Null means there is none, so the card does not ask for it. */
+  posterKey: string | null
 }
 
 interface VideoCard {
@@ -32,6 +34,7 @@ interface VideoCard {
   durationSec: number | null
   tags: string[]
   state: string
+  thumbnailKey: string | null
 }
 
 /** One grid, so the two kinds sort together rather than in separate blocks. */
@@ -40,7 +43,7 @@ interface Card {
   to: string
   title: string
   subtitle: string | null
-  imageUrl: string
+  imageUrl: string | null
   badge: string | null
 }
 
@@ -98,7 +101,7 @@ const cards = computed<Card[]>(() => {
     to: collectionPath(collection),
     title: collection.title,
     subtitle: collection.year ? String(collection.year) : null,
-    imageUrl: `/api/collections/${collection.id}/poster`,
+    imageUrl: collectionPoster(collection),
     badge: collection.state === 'PUBLISHED' ? null : collection.state,
   }))
 
@@ -107,7 +110,7 @@ const cards = computed<Card[]>(() => {
     to: watchPath(video),
     title: video.title,
     subtitle: runtime(video.durationSec),
-    imageUrl: `/api/videos/${video.id}/thumbnail`,
+    imageUrl: videoThumbnail(video),
     badge: video.state === 'PUBLISHED' ? null : video.state,
   }))
 

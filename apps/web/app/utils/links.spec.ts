@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { collectionPath, watchPath } from './links'
+import { collectionPath, playPath, watchPath } from './links'
 
 describe('collectionPath', () => {
   it('points at the collection page', () => {
@@ -32,5 +32,25 @@ describe('watchPath', () => {
    */
   it('has a link for a video that belongs to no collection', () => {
     expect(watchPath({ slug: 'orphan' })).toBe('/v/orphan')
+  })
+})
+
+describe('playPath', () => {
+  it('points at the player', () => {
+    expect(playPath({ slug: 'the-film' })).toBe('/watch/the-film')
+  })
+
+  /**
+   * The distinction the two exist for: one page describes a video and the other
+   * plays it, and a surface picks between them on purpose. A card that resumes
+   * something goes to the player; one that offers something new goes to the
+   * page that says what it is.
+   */
+  it('is not the page that describes the video', () => {
+    expect(playPath({ slug: 'the-film' })).not.toBe(watchPath({ slug: 'the-film' }))
+  })
+
+  it('has a link for a video that belongs to no collection', () => {
+    expect(playPath({ slug: 'orphan' })).toBe('/watch/orphan')
   })
 })

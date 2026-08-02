@@ -33,3 +33,20 @@ export function collectionPath(collection: LinkableCollection): string {
 export function watchPath(video: LinkableVideo): string {
   return `/v/${video.slug}`
 }
+
+/**
+ * Straight into playback.
+ *
+ * `/v/:slug` is where a video is *described* — synopsis, cast, what it belongs
+ * to — and this is where it is *played*. Two routes rather than one page that
+ * changes mode, so the back button returns to the description and a link that
+ * starts playing can be shared as such.
+ *
+ * Keyed on the slug like everything else. Playback used to be worth keying on an
+ * id, because the surfaces that offer to resume something held a video row
+ * without its collection and no slug URL could be built from that; a video
+ * addressing itself removed the problem rather than solving it.
+ */
+export function playPath(video: LinkableVideo): string {
+  return `/watch/${video.slug}`
+}

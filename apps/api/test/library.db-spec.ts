@@ -108,6 +108,15 @@ describe('Library (real database)', () => {
     return response.body;
   }
 
+  /** Publishing a collection needs a description and a poster first. */
+  async function publishCollection(id: string): Promise<void> {
+    await admin
+      .patch(`/collections/${id}`)
+      .send({ description: 'A description.', posterKey: 'posters/a.jpg' })
+      .expect(200);
+    await admin.post(`/collections/${id}/publish`).expect(200);
+  }
+
   beforeEach(async () => {
     banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     workspace = await mkdtemp(join(tmpdir(), 'library-'));
@@ -539,6 +548,126 @@ describe('Library (real database)', () => {
     // a collection slug.
     it('does not shadow the collection detail route', async () => {
       await admin.get(`/collections/${south.slug}`).expect(200);
+    });
+  });
+
+  /**
+   * The title page's hero button and every row's resume bar, in one read.
+   *
+   * Order comes through the membership, which is the point: the same video can
+   * be episode three of a show and item one of a best-of row, and this endpoint
+   * has to answer about *this* collection.
+   */
+  describe('GET /collections/:slug/progress', () => {
+    let show: { id: string; slug: string };
+    let first: { id: string; slug: string };
+    let second: { id: string; slug: string };
+
+    const beat = (id: string, positionSec: number) =>
+      admin
+        .post(`/videos/${id}/heartbeat`)
+        .send({
+          playSessionId: '11111111-1111-4111-8111-111111111111',
+          positionSec,
+          deltaSec: 30,
+        })
+        .expect(200);
+
+    beforeEach(async () => {
+      show = await createCollection('South Park');
+      first = await seedVideo(show.id, 'One', publishable, { orderIndex: 1 });
+      second = await seedVideo(show.id, 'Two', publishable, { orderIndex: 2 });
+      await admin.post(`/videos/${first.id}/publish`).expect(200);
+      await admin.post(`/videos/${second.id}/publish`).expect(200);
+      await publishCollection(show.id);
+    });
+
+    it('offers the first video when nothing has been watched', async () => {
+      const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+      expect(response.body.next).toMatchObject({
+        videoId: first.id,
+        slug: first.slug,
+        lastPositionSec: 0,
+      });
+      expect(response.body.items).toEqual([]);
+    });
+
+    it('offers the next unfinished one, and reports how far each got', async () => {
+      // 119 of 120 seconds is past the completion threshold.
+      await beat(first.id, 119);
+
+      const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+      expect(response.body.next.videoId).toBe(second.id);
+      expect(response.body.items).toEqual([
+        { videoId: first.id, lastPositionSec: 119, maxPositionSec: 119, completed: true },
+      ]);
+    });
+
+    it('resumes a half-watched video rather than skipping it', async () => {
+      await beat(first.id, 30);
+
+      const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+      expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 30 });
+    });
+
+    /** One person's positions are not another's. */
+    it('is scoped to the caller', async () => {
+      await beat(first.id, 30);
+      const user = await asUser();
+
+      const response = await user.get(`/collections/${show.slug}/progress`).expect(200);
+
+      expect(response.body.items).toEqual([]);
+      expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 0 });
+    });
+
+    it('never offers a draft video to a USER', async () => {
+      const draft = await seedVideo(show.id, 'Zero', publishable, { orderIndex: 0 });
+      const user = await asUser();
+
+      const asAdmin = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+      const asViewer = await user.get(`/collections/${show.slug}/progress`).expect(200);
+
+      // The admin can see it, so the draft really is first in order.
+      expect(asAdmin.body.next.videoId).toBe(draft.id);
+      expect(asViewer.body.next.videoId).toBe(first.id);
+    });
+
+    /**
+     * The membership is what carries the order, so a video sitting in two
+     * collections is answered about differently by each.
+     */
+    it('answers about the collection asked for, not the video', async () => {
+      const bestOf = await createCollection('Best Of');
+      await prisma.collectionVideo.create({
+        data: { collectionId: bestOf.id, videoId: second.id, orderIndex: 1 },
+      });
+      await publishCollection(bestOf.id);
+
+      const inShow = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+      const inBestOf = await admin.get(`/collections/${bestOf.slug}/progress`).expect(200);
+
+      expect(inShow.body.next.videoId).toBe(first.id);
+      // The only member of the other collection, so it is what that one offers.
+      expect(inBestOf.body.next.videoId).toBe(second.id);
+    });
+
+    it('404s a collection the caller cannot see', async () => {
+      const hidden = await createCollection('Hidden');
+      const user = await asUser();
+
+      await user.get(`/collections/${hidden.slug}/progress`).expect(404);
+    });
+
+    it('has nothing to offer for an empty collection', async () => {
+      const empty = await createCollection('Empty');
+
+      const response = await admin.get(`/collections/${empty.slug}/progress`).expect(200);
+
+      expect(response.body).toEqual({ next: null, items: [] });
     });
   });
 
