@@ -5,14 +5,16 @@
 # a variable, so production is a second stack with a different stack.env and
 # nothing forked.
 #
-# Variables arrive two ways, and both are needed:
+# Portainer turns the stack's environment variables into a stack.env file and
+# hands it to compose as --env-file, so `${VAR}` interpolation always works no
+# matter where that file lands. Everything load-bearing therefore arrives that
+# way, and the required values use `${VAR:?message}` so a missing one fails the
+# deploy with a sentence rather than booting broken.
 #
-#   env_file: ./stack.env   Portainer writes the stack's environment variables
-#                           to stack.env beside this file. That is how secrets
-#                           reach the *process* without being listed here.
-#   ${VAR}                  The same variables, interpolated into things that
-#                           are properties of the compose file rather than of
-#                           the process: image tags, host paths, hostnames.
+# `env_file:` is a second, optional path for tuning knobs only. It is declared
+# twice with `required: false` because the file sits beside the compose file in
+# a web-editor stack and one directory up in a Git-backed stack, and env_file
+# resolves relative to the compose file.
 #
 # See deploy/stack.env.example for the full list, and deploy/README.md for the
 # one-time server setup.
@@ -22,7 +24,10 @@ services:
     image: postgres:17
     container_name: ${STACK_NAME}-postgres
     restart: unless-stopped
-    env_file: ./stack.env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the stack environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the stack environment}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in the stack environment}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -53,8 +58,26 @@ services:
     # Matches the `node` user baked into the image. The bind-mounted host
     # directories must be owned by this uid — see deploy/README.md step 1.
     user: '1000:1000'
-    env_file: ./stack.env
+    # Optional, and optional in *both* places on purpose. Portainer writes
+    # stack.env into the stack folder root. For a web-editor stack that is
+    # beside the compose file; for a Git-backed stack the compose file is one
+    # directory down, in deploy/. `env_file` resolves relative to the compose
+    # file, so no single path is correct in both cases — and `required: false`
+    # means whichever one is absent costs nothing instead of failing the deploy.
+    #
+    # This carries only the optional tuning knobs. Everything the app cannot
+    # start without is interpolated below instead, which works in either layout
+    # because Portainer always hands stack.env to compose as --env-file.
+    env_file:
+      - path: ./stack.env
+        required: false
+      - path: ../stack.env
+        required: false
     environment:
+      # `:?` fails the deploy with this message when the value is missing,
+      # rather than booting and throwing — or worse, booting without it.
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in the stack environment}
+
       # Fixed by the topology rather than by the operator. compose gives
       # `environment` precedence over `env_file`, so nothing in stack.env can
       # quietly override one of these.

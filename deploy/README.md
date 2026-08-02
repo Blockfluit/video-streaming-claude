@@ -85,13 +85,15 @@ openssl rand -base64 32   # SESSION_SECRET
 openssl rand -base64 24   # POSTGRES_PASSWORD
 ```
 
-Portainer writes those to `stack.env` next to the compose file, which is where `env_file:
-./stack.env` picks them up.
+Portainer writes those to a `stack.env` and passes it to compose as `--env-file`, which is what makes
+`${VAR}` interpolation work. That happens wherever the file lands, so the compose file relies on
+interpolation for everything load-bearing rather than on `env_file:` finding a particular path —
+`stack.env` sits beside the compose file in a web-editor stack and one directory up in a Git-backed
+one. Both layouts are tested.
 
-> If the first deploy fails with a missing `stack.env`, Portainer has written it to the root of the
-> clone rather than beside the compose file — change `env_file: ./stack.env` to `../stack.env` in
-> `deploy/compose.yml`. It is deliberately a hard failure rather than an optional file: an API that
-> booted without `SESSION_SECRET` would be worse.
+A missing required value fails the deploy with a sentence naming it (`required variable
+SESSION_SECRET is missing a value: set SESSION_SECRET in the stack environment`) rather than starting
+an API that cannot hold a session.
 
 ### 4. The webhook
 
