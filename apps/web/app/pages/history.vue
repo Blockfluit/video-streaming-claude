@@ -36,7 +36,11 @@ useHead({ title: 'History' })
 
     <ul v-if="items.length" class="divide-y divide-(--ui-border)">
       <li v-for="item in items" :key="item.video.id" class="py-3 flex items-center gap-4">
-        <NuxtLink :to="watchPath(item.video) ?? '/browse'" class="grow min-w-0">
+        <!--
+          Back into playback rather than to the title page: a history row is a
+          resume surface, and its whole subject is where you got to.
+        -->
+        <NuxtLink :to="playPath(item.video)" class="grow min-w-0">
           <p class="font-medium truncate">{{ item.video.title }}</p>
           <p class="text-sm text-(--ui-text-muted) truncate">
             {{ item.video.collection?.title }}

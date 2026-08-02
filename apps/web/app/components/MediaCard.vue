@@ -19,6 +19,13 @@ const props = defineProps<{
   badge?: string | null
   /** `poster` is 2:3 for collections; the default 16:9 suits a video still. */
   shape?: 'still' | 'poster'
+  /**
+   * What the card does when clicked, which is not the same everywhere: a
+   * Continue Watching tile resumes playback, while a browse or My List tile
+   * opens a title page. Promising a play glyph and delivering a page of text is
+   * a small lie that makes the app feel slow.
+   */
+  action?: 'play' | 'open'
 }>()
 
 const broken = ref(false)
@@ -58,7 +65,12 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
         class="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
       >
         <span class="grid size-11 place-items-center rounded-full bg-white/95 shadow-lg">
-          <UIcon name="i-lucide-play" class="size-5 text-black translate-x-px" />
+          <UIcon
+            v-if="action === 'play'"
+            name="i-lucide-play"
+            class="size-5 text-black translate-x-px"
+          />
+          <UIcon v-else name="i-lucide-info" class="size-5 text-black" />
         </span>
       </div>
 

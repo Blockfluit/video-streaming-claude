@@ -23,8 +23,12 @@ export function collectionPath(collection: LinkableCollection): string {
 }
 
 /**
- * The watch URL. Returns null when the video arrived without its collection —
- * there is no page to link to, and a half-built href is worse than no link.
+ * A video's own page — its title page, where the description, the cast and the
+ * Play button are. This is the canonical URL for a video and the one worth
+ * sharing: it is built from slugs, so it survives and it reads.
+ *
+ * Returns null when the video arrived without its collection — there is no page
+ * to link to, and a half-built href is worse than no link.
  */
 export function watchPath(video: LinkableVideo): string | null {
   const collectionSlug = video.collection?.slug
@@ -35,4 +39,22 @@ export function watchPath(video: LinkableVideo): string | null {
   )
 
   return `/c/${segments.join('/')}`
+}
+
+/**
+ * Straight into playback.
+ *
+ * Keyed on the id rather than the slug path because that is the one thing every
+ * surface offering to resume something already has: a Continue Watching card, a
+ * history row and the player's own next-episode button all hold a video row,
+ * and not one of them reliably holds its season's slug. `watchPath` returns
+ * null in exactly that case, which is the right answer for a link to a title
+ * page and the wrong one for "keep playing".
+ *
+ * The two live side by side here so that the choice between them is made once
+ * per surface, deliberately, rather than by whichever string a page happened to
+ * interpolate.
+ */
+export function playPath(video: { id: string }): string {
+  return `/watch/${video.id}`
 }

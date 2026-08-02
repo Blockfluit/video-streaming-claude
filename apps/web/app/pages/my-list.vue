@@ -64,11 +64,17 @@ useHead({ title: 'My List' })
       class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4"
     >
       <div v-for="item in items" :key="item.id" class="relative group/item">
+        <!--
+          A title page, not playback. Something saved for later is something you
+          meant to get to rather than something you were in the middle of; the
+          next episode still names itself in the subtitle, and that page's hero
+          offers to resume it.
+        -->
         <MediaCard
           class="w-full"
           :to="
             item.collection
-              ? (item.next ? watchPath(item.next.video) : null) ?? collectionPath(item.collection)
+              ? collectionPath(item.collection)
               : watchPath(item.video!) ?? '/browse'
           "
           :title="item.collection?.title ?? item.video!.title"
