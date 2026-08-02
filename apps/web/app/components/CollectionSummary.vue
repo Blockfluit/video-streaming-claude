@@ -306,8 +306,21 @@ const heading = computed(() => {
         </div>
       </template>
 
+      <!--
+        A season with nothing in it is a different statement from a collection
+        with nothing in it, and the collection is demonstrably not empty if you
+        are reading this on one of its season pages. It happens for real: every
+        episode can sit directly in the collection while the season folders
+        still exist, and then the season filter correctly finds none.
+      -->
       <p v-if="listed.length === 0" class="py-20 text-center text-(--ui-text-muted)">
-        Nothing in this collection yet.
+        <template v-if="season">
+          Nothing in this season.
+          <NuxtLink :to="`/c/${collection.slug}`" class="text-(--ui-text) underline underline-offset-4">
+            See everything in {{ collection.title }}
+          </NuxtLink>.
+        </template>
+        <template v-else>Nothing in this collection yet.</template>
       </p>
     </div>
   </div>
