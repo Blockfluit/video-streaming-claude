@@ -129,6 +129,22 @@ describe('Transcoding (real ffmpeg)', () => {
     }
   }
 
+  /**
+   * Waits for a derived file to disappear. Cleanup after a cancel is ordered
+   * against ffmpeg's death rather than against the job's status write, so
+   * "gone" is eventually true rather than immediately true. Still fails if it
+   * never happens — a leaked temp file is a real fault, just not a fast one.
+   */
+  async function waitUntilGone(root: 'media' | 'derived', key: string, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+      if (!(await storage.exists(root, key))) return;
+      if (Date.now() > deadline) throw new Error(`${key} was never cleaned up`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   beforeEach(async () => {
     banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     workspace = await mkdtemp(join(tmpdir(), 'transcode-'));
@@ -322,7 +338,18 @@ describe('Transcoding (real ffmpeg)', () => {
       const job = await waitForJob(queued.body.id);
       expect(job.status).toBe('CANCELLED');
 
-      await expect(storage.exists('derived', `tmp/${job.id}.mp4`)).resolves.toBe(false);
+      // Polled, not asserted outright. `cancel` writes CANCELLED to the row
+      // before it answers the request, while the SIGKILL and the temp-file
+      // delete happen on the job's own rejection path — so waitForJob returns
+      // with ffmpeg possibly still dying. The guarantee is that the temp file
+      // goes, not that it goes before the status flips, and asserting the
+      // stronger thing fails whenever the machine is loaded enough to slow the
+      // teardown down. It did exactly that on a 2-core CI runner.
+      await waitUntilGone('derived', `tmp/${job.id}.mp4`);
+
+      // No polling here, and deliberately so: the converted file is only ever
+      // renamed into place on success, so a cancelled job must never produce
+      // one at any point. That is the invariant worth failing over.
       await expect(storage.exists('derived', `converted/${videoId}.mp4`)).resolves.toBe(false);
       // The video is untouched — still needing conversion, still playable from source.
       await expect(prisma.video.findUniqueOrThrow({ where: { id: videoId } })).resolves.toMatchObject(
