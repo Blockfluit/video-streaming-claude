@@ -199,10 +199,49 @@ test.describe('legibility', () => {
     })
   }
 
+  /**
+   * The two pages no static route list can reach: both are behind a click, and
+   * a title page's slug depends on what is in the library.
+   */
+  test('a title page too', async ({ page }) => {
+    await visit(page, '/')
+    const card = page.locator('main a[href^="/c/"]').first()
+    const href = await card.getAttribute('href')
+    await card.click()
+    await page.waitForURL(url => url.pathname === href)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `title page:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
+  test('a collection page too', async ({ page }) => {
+    await visit(page, '/browse')
+    const card = page.locator('main a[href^="/c/"]').first()
+    const href = await card.getAttribute('href')
+    await card.click()
+    await page.waitForURL(url => url.pathname === href)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `collection page:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
   test('the player page too', async ({ page }) => {
     await visit(page, '/')
-    await page.locator('main a[href^="/c/"]').first().click()
-    await page.waitForURL(/\/c\/.+\/.+/)
+    const card = page.locator('main a[href^="/c/"]').first()
+    const href = await card.getAttribute('href')
+    await card.click()
+    await page.waitForURL(url => url.pathname === href)
+    // Playback is a deliberate second press now, so the audit has to take it.
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
 
     // Post a comment so its controls are on the page to be judged. Unique per
     // run, or repeated runs pile up identical text and the locator turns

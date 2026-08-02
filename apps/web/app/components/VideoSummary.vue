@@ -52,11 +52,23 @@ const resumeAt = computed(() => {
   return position > 5 && duration > 0 && position < duration * 0.95 ? position : null
 })
 
+/**
+ * `S1 E3`, where the episode is this video's **position in its season** rather
+ * than its `orderIndex`.
+ *
+ * `orderIndex` is not an episode number, however much it looks like one: the
+ * path parser stores the number read off the filename, and dragging an episode
+ * in the admin UI rewrites the whole season 0-based. Rendering it directly
+ * labelled the first episode of a real show "E0". The position is what the
+ * collection page numbers its rows by, so the two always agree.
+ */
 const episodeLabel = computed(() => {
   const season = props.season?.number
-  const episode = props.video.orderIndex
   if (season === null || season === undefined) return null
-  return episode === null ? `Season ${season}` : `S${season} E${episode}`
+
+  const inSeason = props.siblings.filter(entry => entry.seasonId === props.video.seasonId)
+  const position = inSeason.findIndex(entry => entry.id === props.video.id)
+  return position < 0 ? `Season ${season}` : `S${season} E${position + 1}`
 })
 
 const otherEpisodes = computed(() => props.siblings.filter(entry => entry.id !== props.video.id))

@@ -85,13 +85,20 @@ const backTo = computed(
     }) ?? `/c/${video.value!.collection.slug}`,
 )
 
+/**
+ * The episode number is this video's **position in its season**, not its
+ * `orderIndex` — which is not an episode number however much it looks like one.
+ * The parser stores the number read off the filename; dragging an episode in
+ * the admin UI rewrites the whole season 0-based. The title page numbers its
+ * rows the same way, so the two agree.
+ */
 const episodeLabel = computed(() => {
   const seasonNumber = video.value?.season?.number
-  const episode = video.value?.orderIndex
   if (seasonNumber === null || seasonNumber === undefined) return null
-  return episode === null || episode === undefined
-    ? `Season ${seasonNumber}`
-    : `S${seasonNumber} E${episode}`
+
+  const inSeason = ordered.value.filter(entry => entry.seasonId === video.value!.seasonId)
+  const position = inSeason.findIndex(entry => entry.id === video.value!.id)
+  return position < 0 ? `Season ${seasonNumber}` : `S${seasonNumber} E${position + 1}`
 })
 
 const player = ref<{ seek?: (s: number) => void } | null>(null)

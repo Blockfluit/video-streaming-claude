@@ -33,9 +33,16 @@ watch(
 
 <template>
   <!-- Full-bleed, and it runs under the transparent header on purpose. -->
+  <!--
+    `flex flex-col` so the content wrapper below can actually grow. A percentage
+    height inside a section sized by `min-height` has no definite parent to
+    resolve against, so `h-full` collapses to the content and `items-end` does
+    nothing — which left a title page's hero text stranded at the top of a tall
+    band of artwork.
+  -->
   <section
-    class="relative w-full overflow-hidden"
-    :class="size === 'tall' ? 'min-h-140 pt-28 pb-10 sm:min-h-150' : 'h-[58vh] min-h-100'"
+    class="relative flex w-full flex-col overflow-hidden"
+    :class="size === 'tall' ? 'min-h-125 pt-28 pb-10 sm:min-h-140' : 'h-[58vh] min-h-100'"
   >
     <img
       v-if="showImage"
@@ -60,7 +67,7 @@ watch(
     />
 
     <div
-      class="relative flex h-full"
+      class="relative flex flex-1"
       :class="size === 'tall' ? 'items-end' : 'items-center'"
     >
       <div class="page-shell w-full">

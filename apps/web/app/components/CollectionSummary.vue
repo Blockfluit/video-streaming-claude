@@ -80,17 +80,25 @@ const next = computed(() => progress.value?.next ?? null)
 
 const playTarget = computed(() => (next.value ? playPath({ id: next.value.videoId }) : null))
 
-const playLabel = computed(() => {
+/**
+ * The button says what it does; the line under it says what will play.
+ *
+ * It deliberately does not read "Play S1 E3". `orderIndex` is not an episode
+ * number — the parser puts the number it read off the filename in it, and a
+ * drag-reorder rewrites the season 0-based — so that label rendered the first
+ * episode of a real show as "E0". Naming the episode is both honest and more
+ * use: the title is what someone recognises.
+ */
+const playLabel = computed(() =>
+  next.value && next.value.lastPositionSec > 5 ? 'Resume' : 'Play',
+)
+
+const playSubtitle = computed(() => {
   const entry = next.value
-  if (!entry) return 'Play'
-  if (entry.lastPositionSec <= 5) {
-    return entry.seasonNumber !== null && entry.orderIndex !== null
-      ? `Play S${entry.seasonNumber} E${entry.orderIndex}`
-      : 'Play'
-  }
-  return entry.seasonNumber !== null && entry.orderIndex !== null
-    ? `Resume S${entry.seasonNumber} E${entry.orderIndex}`
-    : `Resume from ${timecode(entry.lastPositionSec)}`
+  if (!entry) return null
+  const season = entry.seasonNumber === null ? null : `Season ${entry.seasonNumber}`
+  const at = entry.lastPositionSec > 5 ? `from ${timecode(entry.lastPositionSec)}` : null
+  return [season, entry.title, at].filter(Boolean).join(' · ')
 })
 
 /**
@@ -162,6 +170,10 @@ const meta = computed(() => {
   return parts.join(' · ')
 })
 
+/** Reset on navigation, or one missing poster hides every later one. */
+const posterBroken = ref(false)
+watch(() => props.collection.id, () => { posterBroken.value = false })
+
 const heading = computed(() => {
   if (!props.season) return props.collection.title
   return props.season.title || (props.season.number === null ? props.season.slug : `Season ${props.season.number}`)
@@ -172,11 +184,23 @@ const heading = computed(() => {
   <div>
     <HeroBackdrop :image="backdrop" size="tall">
       <div class="rise flex flex-col gap-6 sm:flex-row sm:items-end">
-        <img
-          :src="`/api/collections/${collection.id}/poster`"
-          alt=""
-          class="aspect-2/3 w-32 shrink-0 rounded-lg object-cover bg-(--ui-bg-elevated) shadow-2xl ring-1 ring-(--ui-border) sm:w-44"
-        >
+        <!--
+          A collection with no poster yet is normal, and the endpoint 404s for
+          one. Without the fallback the browser draws its own broken-image
+          glyph, which is the most conspicuous thing on the page.
+        -->
+        <div class="aspect-2/3 w-32 shrink-0 overflow-hidden rounded-lg bg-(--ui-bg-elevated) shadow-2xl ring-1 ring-(--ui-border) sm:w-44">
+          <img
+            v-if="!posterBroken"
+            :src="`/api/collections/${collection.id}/poster`"
+            alt=""
+            class="size-full object-cover"
+            @error="posterBroken = true"
+          >
+          <div v-else class="grid size-full place-items-center text-(--ui-text-dimmed)">
+            <UIcon name="i-lucide-clapperboard" class="size-8" />
+          </div>
+        </div>
 
         <div class="max-w-2xl space-y-4">
           <NuxtLink
@@ -196,17 +220,22 @@ const heading = computed(() => {
             {{ collection.description }}
           </p>
 
-          <div class="flex flex-wrap items-center gap-3 pt-2">
-            <UButton
-              v-if="playTarget"
-              :to="playTarget"
-              size="lg"
-              icon="i-lucide-play"
-              class="font-semibold"
-            >
-              {{ playLabel }}
-            </UButton>
-            <AddToListButton :collection-id="collection.id" label />
+          <div class="space-y-2 pt-2">
+            <div class="flex flex-wrap items-center gap-3">
+              <UButton
+                v-if="playTarget"
+                :to="playTarget"
+                size="lg"
+                icon="i-lucide-play"
+                class="font-semibold"
+              >
+                {{ playLabel }}
+              </UButton>
+              <AddToListButton :collection-id="collection.id" label />
+            </div>
+            <p v-if="playTarget && playSubtitle" class="text-sm text-(--ui-text-muted)">
+              {{ playSubtitle }}
+            </p>
           </div>
         </div>
       </div>
@@ -233,11 +262,11 @@ const heading = computed(() => {
 
         <!-- A show: rows you can read. -->
         <ul v-if="asEpisodes" class="divide-y divide-(--ui-border)">
-          <li v-for="entry in listed" :key="entry.id">
+          <li v-for="(entry, index) in listed" :key="entry.id">
             <EpisodeRow
               :to="linkTo(entry)"
               :title="entry.title"
-              :number="entry.orderIndex"
+              :number="index + 1"
               :image-url="`/api/videos/${entry.id}/thumbnail`"
               :duration-sec="entry.durationSec"
               :description="entry.description"

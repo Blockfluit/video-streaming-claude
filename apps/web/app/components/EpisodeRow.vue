@@ -13,7 +13,16 @@ const props = defineProps<{
   to: string
   title: string
   imageUrl?: string | null
-  /** Absent when ingest could not number it; the row then shows no number. */
+  /**
+   * The row's place in the list being shown, 1-based — deliberately *not*
+   * `orderIndex`.
+   *
+   * `orderIndex` looks like an episode number and is not one: the path parser
+   * stores the number it read off the filename (`E01` → 1), while dragging an
+   * episode in the admin UI rewrites the whole season 0-based. Rendering it
+   * directly is how a first episode ends up labelled "E0", which is what the
+   * real library did. A position always agrees with what is on the screen.
+   */
   number?: number | null
   durationSec?: number | null
   description?: string | null

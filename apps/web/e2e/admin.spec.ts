@@ -170,8 +170,8 @@ test.describe('admin', () => {
      * asserted against South Park.
      */
     await visit(page, '/')
-    const watchPath = await page.locator('main a[href^="/c/"]').first().getAttribute('href') as string
-    const [, collectionSlug, ...rest] = new URL(watchPath, 'http://x').pathname.split('/').filter(Boolean)
+    const titlePath = await page.locator('main a[href^="/c/"]').first().getAttribute('href') as string
+    const [, collectionSlug, ...rest] = new URL(titlePath, 'http://x').pathname.split('/').filter(Boolean)
     const videoId = await page.evaluate(async ({ slug, path }) => {
       const response = await fetch(`/api/collections/${slug}/resolve?path=${encodeURIComponent(path)}`)
       return (await response.json()).data.id as string
@@ -400,8 +400,14 @@ test.describe('admin', () => {
     // the test does not depend on what a previous run left behind.
     const body = `Moderate me ${Date.now()}`
     await visit(page, '/')
-    await page.locator('main a[href^="/c/"]').first().click()
-    await page.waitForURL(/\/c\/.+\/.+/)
+    // Comments live with the player, so posting one means getting there: a card
+    // opens a title page and Play opens the player.
+    const card = page.locator('main a[href^="/c/"]').first()
+    const href = await card.getAttribute('href')
+    await card.click()
+    await page.waitForURL(url => url.pathname === href)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
     await fillStable(page, 'textarea', body)
     await expectsRequest(page, /\/comments$/, 'POST', () =>
       page.getByRole('button', { name: 'Post' }).click())
