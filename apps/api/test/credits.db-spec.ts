@@ -50,7 +50,7 @@ describe('People and credits (real database)', () => {
     seeded += 1;
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId, orderIndex: seeded } },
         slug: `episode-${seeded}`,
         title: `Episode ${seeded}`,
         storageKey: `Show/episode-${seeded}.mkv`,
@@ -61,7 +61,6 @@ describe('People and credits (real database)', () => {
         fileMtime: new Date(),
         durationSec: 600,
         state: 'PUBLISHED',
-        orderIndex: seeded,
         ...overrides,
       },
       select: { id: true },

@@ -9,7 +9,8 @@ import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
 import { scanMediaRoot, type ScannedFile } from './media-scanner';
-import type { SeasonInfo } from './path-parser';
+import type { MediaPath } from './path-parser';
+import { itemFolderKey, proposeStructure, type ProposedSeason } from './structure';
 import { matchSubtitles, type SubtitleCandidate, type VideoCandidate } from './subtitle-matcher';
 
 /**
@@ -36,6 +37,17 @@ export interface ReconcileSummary {
   startedAt: Date;
   finishedAt: Date;
 }
+
+/** Every reason the parser can refuse a path, and the issue an admin sees for it. */
+const ISSUE_KIND_BY_REASON: Record<
+  Extract<MediaPath, { kind: 'issue' }>['reason'],
+  IngestIssueKind
+> = {
+  'root-level-file': 'ROOT_LEVEL_FILE',
+  'loose-drive-file': 'LOOSE_DRIVE_FILE',
+  'too-deep': 'PATH_TOO_DEEP',
+  'empty-path': 'ROOT_LEVEL_FILE',
+};
 
 /** A guessed MIME type. Probing (step 10) replaces this with what the file really is. */
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -105,6 +117,9 @@ export class ReconcileService {
         stateBeforeMissing: true,
         sourceDeletedAt: true,
         playbackKey: true,
+        // To notice a file that is not what it was when the row was written.
+        sizeBytes: true,
+        fileMtime: true,
       },
     });
 
@@ -125,12 +140,51 @@ export class ReconcileService {
     let created = 0;
     let moved = 0;
     let restored = 0;
+    let rescanned = 0;
+
+    /**
+     * Videos this pass created, by storage key.
+     *
+     * The folder layout is only ever an *initial* suggestion, so a proposal is
+     * applied to a row exactly once — when it is first discovered. Anything
+     * already in the library keeps whatever collections an admin put it in,
+     * however its folder looks now.
+     */
+    const discovered = new Map<string, string>();
 
     for (const file of scan.videos) {
       const existing = byStorageKey.get(file.relPath);
 
       if (existing) {
         present.add(existing.id);
+
+        /**
+         * The file is not what it was, so what was read off it is not either.
+         *
+         * A scan has no `awaitWriteFinish` — the watcher does — so it will read
+         * a file that is still being copied. ffprobe reads the moov atom at the
+         * front of an MP4 and reports the whole duration while most of the
+         * bytes are still arriving, which is how a 994 MB film was recorded at
+         * 8 MB with a poster seeking 813 seconds into a file that had barely
+         * started. Nothing looked at that row again, so it stayed wrong.
+         *
+         * Reconcile cannot tell a half-copied file from a finished one while it
+         * is looking at it. It can notice next time, and read it again.
+         */
+        const changed =
+          existing.sizeBytes !== BigInt(file.size)
+          || existing.fileMtime.getTime() !== file.mtime.getTime();
+
+        if (changed) {
+          await this.prisma.video.update({
+            where: { id: existing.id },
+            data: { sizeBytes: BigInt(file.size), fileMtime: file.mtime },
+          });
+          // Duration, dimensions and the conversion verdict all came off the
+          // old bytes, and the poster was taken from them.
+          this.media.enqueue(existing.id);
+          rescanned += 1;
+        }
 
         if (existing.state === 'MISSING') {
           // It came back. Restore what it was, rather than quietly demoting a
@@ -168,9 +222,15 @@ export class ReconcileService {
       }
 
       const createdId = await this.createDraft(file, contentTag);
-      if (createdId) this.media.enqueue(createdId);
+      if (createdId) {
+        this.media.enqueue(createdId);
+        // Only rows born in this pass are shaped by the folders they sit in.
+        discovered.set(file.relPath, createdId);
+      }
       created += 1;
     }
+
+    await this.applyProposals(scan.videos, discovered);
 
     const markedMissing = await this.sweepMissing(known, present);
 
@@ -180,8 +240,12 @@ export class ReconcileService {
     for (const file of scan.issues) {
       if (file.parsed.kind !== 'issue') continue;
       seenIssues.push({
-        kind: file.parsed.reason === 'too-deep' ? 'PATH_TOO_DEEP' : 'ROOT_LEVEL_FILE',
+        kind: ISSUE_KIND_BY_REASON[file.parsed.reason],
         path: file.relPath,
+        detail:
+          file.parsed.reason === 'loose-drive-file'
+            ? 'Loose in a drive root. Put it in a folder, or place it from the media browser.'
+            : undefined,
       });
     }
 
@@ -191,7 +255,7 @@ export class ReconcileService {
       if (file.parsed.kind === 'video' && file.parsed.season?.needsReview) {
         seenIssues.push({
           kind: 'UNREADABLE_SEASON',
-          path: `${file.parsed.collectionFolder}/${file.parsed.season.folder}`,
+          path: `${itemFolderKey(file.parsed)}/${file.parsed.season.folder}`,
           detail: `Could not read a season number from "${file.parsed.season.folder}"`,
         });
       }
@@ -217,7 +281,7 @@ export class ReconcileService {
     };
 
     this.logger.log(
-      `Reconcile: ${summary.scannedFiles} files, +${created} new, ${moved} moved, ` +
+      `Reconcile: ${summary.scannedFiles} files, +${created} new, ${moved} moved, ${rescanned} re-read, ` +
         `${markedMissing} missing, ${restored} restored, ${subtitles.bound} subtitles, ` +
         `${seenIssues.length} issues`,
     );
@@ -335,19 +399,21 @@ export class ReconcileService {
   private async applyMove(id: string, file: ScannedFile, contentTag: string): Promise<void> {
     if (file.parsed.kind !== 'video') return;
 
-    const { collectionId, seasonId } = await this.ensureParents(file.parsed.collectionFolder, file.parsed.season);
-
-    // The row id survives, and with it every comment, progress row and
-    // watchlist entry pointing at this video. That is the whole point of
-    // detecting a move rather than deleting and recreating.
+    /**
+     * A move follows the file and changes nothing else.
+     *
+     * The row id survives, and with it every comment, progress row and
+     * watchlist entry pointing at this video — that is the whole point of
+     * detecting a move rather than deleting and recreating. Its collections
+     * survive for the same reason: the folder was a suggestion when the video
+     * was discovered, and re-reading it now would undo whatever an admin has
+     * since arranged, on the strength of someone tidying up a disk.
+     */
     await this.prisma.video.update({
       where: { id },
       data: {
         storageKey: file.relPath,
         contentTag,
-        collectionId,
-        seasonId,
-        orderIndex: file.parsed.orderIndex,
         sizeBytes: BigInt(file.size),
         fileMtime: file.mtime,
         // A moved file is present again, so it is no longer missing.
@@ -357,21 +423,23 @@ export class ReconcileService {
     });
   }
 
+  /**
+   * Creates the video and nothing else.
+   *
+   * A video stands on its own; whether it also belongs to a collection is
+   * decided per folder afterwards, by `applyProposals`, because that decision
+   * needs every file in the folder at once.
+   */
   private async createDraft(file: ScannedFile, contentTag: string): Promise<string | null> {
     if (file.parsed.kind !== 'video') return null;
 
-    const { collectionId, seasonId } = await this.ensureParents(file.parsed.collectionFolder, file.parsed.season);
-
-    const slug = await this.freeVideoSlug(collectionId, slugify(file.parsed.title));
+    const slug = await this.freeVideoSlug(slugify(file.parsed.title));
 
     const created = await this.prisma.video.create({
       select: { id: true },
       data: {
-        collectionId,
-        seasonId,
         slug,
         ...titleData(file.parsed.title),
-        orderIndex: file.parsed.orderIndex,
         storageKey: file.relPath,
         contentTag,
         originalName: `${file.parsed.basename}.${file.parsed.extension}`,
@@ -469,21 +537,60 @@ export class ReconcileService {
     }
   }
 
-  /** Creates the collection and season a file implies, if they are not there yet. */
-  private async ensureParents(
-    collectionFolder: string,
-    season: SeasonInfo | null,
-  ): Promise<{ collectionId: string; seasonId: string | null }> {
-    const collection = await this.ensureCollection(collectionFolder);
-    if (!season) return { collectionId: collection, seasonId: null };
+  /**
+   * Turns each folder's proposed shape into collections and memberships, for
+   * the videos this pass discovered.
+   *
+   * The suggestion is applied **once**, at discovery. A video already in the
+   * library is skipped entirely, so an admin who moved an episode into a
+   * different collection — or out of every collection — keeps that arrangement
+   * through every later scan. A folder proposing `standalone` produces no
+   * collection at all: the video is already complete on its own.
+   */
+  private async applyProposals(
+    videos: ScannedFile[],
+    discovered: Map<string, string>,
+  ): Promise<void> {
+    if (discovered.size === 0) return;
 
-    const seasonId = await this.ensureSeason(collection, collectionFolder, season);
-    return { collectionId: collection, seasonId };
+    for (const proposal of proposeStructure(videos.map((file) => file.parsed))) {
+      if (proposal.kind === 'standalone') continue;
+
+      const fresh = proposal.videos.filter((video) => discovered.has(video.storageKey));
+      if (fresh.length === 0) continue;
+
+      const collectionId = await this.ensureCollection(proposal.folderKey, proposal.title);
+      const seasonIds = await this.ensureSeasons(collectionId, proposal.seasons);
+
+      for (const video of fresh) {
+        await this.prisma.collectionVideo.create({
+          data: {
+            collectionId,
+            videoId: discovered.get(video.storageKey)!,
+            seasonId: video.seasonFolder ? (seasonIds.get(video.seasonFolder) ?? null) : null,
+            orderIndex: video.orderIndex,
+          },
+        });
+      }
+    }
   }
 
-  private async ensureCollection(folder: string): Promise<string> {
+  private async ensureSeasons(
+    collectionId: string,
+    seasons: ProposedSeason[],
+  ): Promise<Map<string, string>> {
+    const ids = new Map<string, string>();
+
+    for (const season of seasons) {
+      ids.set(season.folder, await this.ensureSeason(collectionId, season));
+    }
+
+    return ids;
+  }
+
+  private async ensureCollection(folderKey: string, title: string): Promise<string> {
     const existing = await this.prisma.collection.findUnique({
-      where: { folderKey: folder },
+      where: { folderKey },
       select: { id: true },
     });
     if (existing) return existing.id;
@@ -492,11 +599,11 @@ export class ReconcileService {
     const created = await this.prisma.collection.create({
       data: {
         slug: uniqueSlug(
-          slugify(folder),
+          slugify(title),
           taken.map((row) => row.slug),
         ),
-        ...titleData(folder),
-        folderKey: folder,
+        ...titleData(title),
+        folderKey,
         state: 'DRAFT',
         origin: 'INGEST',
       },
@@ -506,12 +613,8 @@ export class ReconcileService {
     return created.id;
   }
 
-  private async ensureSeason(
-    collectionId: string,
-    collectionFolder: string,
-    season: SeasonInfo,
-  ): Promise<string> {
-    const folderKey = `${collectionFolder}/${season.folder}`;
+  private async ensureSeason(collectionId: string, season: ProposedSeason): Promise<string> {
+    const folderKey = season.folderKey;
 
     const existing = await this.prisma.season.findUnique({
       where: { folderKey },
@@ -541,11 +644,9 @@ export class ReconcileService {
     return created.id;
   }
 
-  private async freeVideoSlug(collectionId: string, base: string): Promise<string> {
-    const taken = await this.prisma.video.findMany({
-      where: { collectionId },
-      select: { slug: true },
-    });
+  /** Library-wide: a video's slug is its own address, not one scoped to a parent. */
+  private async freeVideoSlug(base: string): Promise<string> {
+    const taken = await this.prisma.video.findMany({ select: { slug: true } });
 
     return uniqueSlug(
       base,

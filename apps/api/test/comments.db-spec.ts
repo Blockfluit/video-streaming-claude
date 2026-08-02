@@ -48,7 +48,7 @@ describe('Comments (real database)', () => {
     seeded += 1;
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId } },
         slug: `film-${seeded}`,
         title: `Film ${seeded}`,
         storageKey: `Films/film-${seeded}.mkv`,

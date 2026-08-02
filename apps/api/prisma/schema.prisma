@@ -160,14 +160,17 @@ model Collection {
   year        Int?
   tags        String[]     @default([])
   posterKey   String?
-  folderKey   String       @unique // relative folder path
+  /// `<drive>/<item>` for a collection ingest proposed from disk, null for one an
+  /// admin made by hand. Nullable because a collection is a library idea, not a
+  /// folder — Postgres treats NULLs as distinct, so any number may have none.
+  folderKey   String?      @unique
   state       PublishState @default(DRAFT)
   origin      MediaOrigin  @default(INGEST)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
   seasons       Season[]
-  videos        Video[]
+  videos        CollectionVideo[]
   credits       Credit[]
   listItems     ListItem[]
   watchlistedBy WatchlistItem[]
@@ -185,22 +188,50 @@ model Season {
   title        String
   description  String?
   posterKey    String?
-  folderKey    String     @unique
-  videos       Video[]
+  /// Null for a season an admin created without a folder behind it.
+  folderKey    String?    @unique
+  videos       CollectionVideo[]
 
   @@unique([collectionId, number]) // Postgres permits repeated NULLs — see the service layer
   @@unique([collectionId, slug])
   @@index([collectionId])
 }
 
+/// A video's membership of a collection.
+///
+/// A video is a standalone entity that may sit in several collections, or in
+/// none at all, so the things that are true *of a membership* rather than of the
+/// video live here: which season it is in, and where it comes in the running
+/// order. The same episode can be episode 3 of a show and item 1 of a
+/// best-of row without either fact overwriting the other.
+///
+/// `seasonId` must belong to `collectionId`. Prisma cannot express that across a
+/// relation, so it is enforced in the service layer — the same arrangement as
+/// the polymorphic CHECK constraints.
+model CollectionVideo {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  videoId      String
+  video        Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  seasonId     String?
+  season       Season?    @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  /// Deliberately not unique: a unique index collides during drag-reordering,
+  /// which is why a reorder rewrites the whole sequence in one transaction.
+  orderIndex   Int?
+  addedAt      DateTime   @default(now())
+
+  @@unique([collectionId, videoId])
+  @@index([collectionId, seasonId, orderIndex])
+  @@index([videoId])
+  @@index([seasonId])
+}
+
 model Video {
   id           String       @id @default(cuid())
-  slug         String // unique within its collection
-  collectionId String
-  collection   Collection   @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  seasonId     String?
-  season       Season?      @relation(fields: [seasonId], references: [id], onDelete: SetNull)
-  orderIndex   Int?
+  /// Unique library-wide, because a video is addressed on its own at /v/<slug>
+  /// rather than through whichever collection you happened to arrive from.
+  slug         String       @unique
   title        String
   /// normaliseTitle(title) — see the note on Collection.normalisedTitle.
   normalisedTitle String @default("")
@@ -257,9 +288,8 @@ model Video {
   events        WatchEvent[]
   listItems     ListItem[]
   watchlistedBy WatchlistItem[]
+  collections   CollectionVideo[]
 
-  @@unique([collectionId, slug])
-  @@index([collectionId, seasonId, orderIndex])
   @@index([state])
   @@index([contentTag])
   @@index([normalisedTitle])
@@ -518,7 +548,8 @@ model WatchEvent {
 /// deleted, which keeps a record of what the library used to be unhappy about.
 enum IngestIssueKind {
   ROOT_LEVEL_FILE // a video sitting directly in MEDIA_ROOT
-  PATH_TOO_DEEP // nested below collection/season/file
+  LOOSE_DRIVE_FILE // a video loose in a drive root, with no folder to take a shape from
+  PATH_TOO_DEEP // nested below drive/item/season/file
   UNREADABLE_SEASON // a season folder whose number could not be parsed
   ORPHAN_SUBTITLE // a sidecar matching no video
   AMBIGUOUS_SUBTITLE // a sidecar matching several videos equally well

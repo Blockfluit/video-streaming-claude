@@ -25,8 +25,14 @@ const VIDEO_SELECT = {
   width: true,
   height: true,
   state: true,
-  orderIndex: true,
-  collection: { select: { id: true, slug: true, title: true } },
+  collections: {
+    select: {
+      collectionId: true,
+      seasonId: true,
+      orderIndex: true,
+      collection: { select: { id: true, slug: true, title: true } },
+    },
+  },
 } as const;
 
 @Injectable()
@@ -128,8 +134,19 @@ export class WatchlistService {
     }
 
     const videos = await this.prisma.video.findMany({
-      where: { collectionId: { in: collectionIds }, ...whereVisible(role) },
-      select: { ...VIDEO_SELECT, collectionId: true },
+      where: {
+        collections: { some: { collectionId: { in: collectionIds } } },
+        ...whereVisible(role),
+      },
+      select: {
+        ...VIDEO_SELECT,
+        // Which of the watchlisted collections this video answers for, and
+        // where it sits in each — that is what picks the next episode.
+        collections: {
+          where: { collectionId: { in: collectionIds } },
+          select: { collectionId: true, seasonId: true, orderIndex: true },
+        },
+      },
     });
 
     const progressRows = await this.prisma.watchProgress.findMany({
@@ -144,11 +161,30 @@ export class WatchlistService {
       ]),
     );
 
-    const byCollection = new Map<string, typeof videos>();
+    /**
+     * Bucketed by membership, not by a column the video no longer has.
+     *
+     * A video can belong to two watchlisted collections at once, and it is the
+     * next episode of each independently — so it goes in both buckets, carrying
+     * that collection's own season and running order with it.
+     */
+    type EpisodeOf = (typeof videos)[number] & {
+      seasonId: string | null;
+      orderIndex: number | null;
+    };
+
+    const byCollection = new Map<string, EpisodeOf[]>();
     for (const video of videos) {
-      const bucket = byCollection.get(video.collectionId);
-      if (bucket) bucket.push(video);
-      else byCollection.set(video.collectionId, [video]);
+      for (const membership of video.collections) {
+        const episode = {
+          ...video,
+          seasonId: membership.seasonId,
+          orderIndex: membership.orderIndex,
+        };
+        const bucket = byCollection.get(membership.collectionId);
+        if (bucket) bucket.push(episode);
+        else byCollection.set(membership.collectionId, [episode]);
+      }
     }
 
     return items.map((item) => ({

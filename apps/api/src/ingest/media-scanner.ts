@@ -39,9 +39,10 @@ export async function scanMediaRoot(root: string): Promise<ScanResult> {
 /**
  * Depth is bounded rather than trusted: a symlink loop inside the media tree
  * would otherwise recurse until the process dies. The convention only goes
- * three levels deep, so anything past that is already an issue.
+ * four levels deep (drive/item/season/file), so anything past that is already
+ * an issue.
  */
-const MAX_WALK_DEPTH = 6;
+const MAX_WALK_DEPTH = 7;
 
 async function walk(root: string, directory: string, result: ScanResult, depth: number): Promise<void> {
   if (depth > MAX_WALK_DEPTH) return;
@@ -66,9 +67,44 @@ async function walk(root: string, directory: string, result: ScanResult, depth: 
       continue;
     }
 
-    // Symlinks are not followed. A link pointing outside the media tree would
-    // put a file in the library that the storage guard would then refuse to
-    // serve, which is a confusing way to fail.
+    /**
+     * A drive is allowed to be a symlink, and only a drive.
+     *
+     * In production every folder directly under MEDIA_ROOT is a link to a
+     * different physical disk. `readdir` reports a symlinked directory as
+     * neither `isDirectory()` nor `isFile()`, so without this the walk skips
+     * the entire disk and returns an empty scan — which reads as an empty
+     * library rather than as a failure.
+     *
+     * Depth 0 only. Deeper links are the ones that point somewhere unexpected,
+     * and a link back up its own tree is how a walk that follows everything
+     * spins until the process dies. `MAX_WALK_DEPTH` still bounds this one.
+     */
+    if (depth === 0 && entry.isSymbolicLink() && !entry.name.startsWith('.')) {
+      if (SKIP_DIRECTORIES.has(entry.name)) continue;
+
+      let target;
+      try {
+        // Follows the link, unlike the dirent above.
+        target = await stat(absolute);
+      } catch (error) {
+        // A drive that is not mounted. Worth reporting, not worth crashing over.
+        result.unreadable.push({
+          relPath: toRelPath(root, absolute),
+          reason: (error as NodeJS.ErrnoException).code ?? 'unreadable',
+        });
+        continue;
+      }
+
+      if (target.isDirectory()) {
+        await walk(root, absolute, result, depth + 1);
+        continue;
+      }
+    }
+
+    // Any other symlink is left alone. A link pointing outside the media tree
+    // would put a file in the library that the storage guard would then refuse
+    // to serve, which is a confusing way to fail.
     if (!entry.isFile()) continue;
 
     const relPath = toRelPath(root, absolute);

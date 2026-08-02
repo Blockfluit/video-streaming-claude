@@ -49,7 +49,7 @@ describe('Markers (real database)', () => {
 
     const video = await prisma.video.create({
       data: {
-        collectionId: collection.id,
+        collections: { create: { collectionId: collection.id } },
         slug: `film-${Math.round(performance.now() * 1000)}`,
         title: 'Film',
         storageKey: `Films/film-${Math.round(performance.now() * 1000)}.mp4`,

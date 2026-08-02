@@ -1,21 +1,28 @@
 <script setup lang="ts">
-import type { Page } from '@video/shared'
-
 /**
- * Uploading straight into a collection.
+ * Uploading onto a disk.
+ *
+ * An upload used to name a collection, which made it a second way of deciding
+ * what something is. It is not: the files land on the drive in the shape the
+ * folder convention expects, and the scan makes of them exactly what it would
+ * make of the same folders copied there by hand — one file a standalone video,
+ * a folder of two a collection, a folder of seasons a series.
+ *
+ * So the only thing to choose is **which disk**. Where it ends up in the
+ * library is edited afterwards, like anything else.
  *
  * `XMLHttpRequest` rather than `fetch` — `fetch` still gives no upload progress
  * events, and a 2 GB file with no progress bar looks like a hang.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin' })
 
-const { data: collections } = await useApiData<Page<{ id: string, title: string }>>(
-  'upload-collections',
-  '/collections?limit=100',
+const { data: drives } = await useApiData<{ items: { name: string }[] }>(
+  'upload-drives',
+  '/videos/upload/drives',
 )
 
-const collectionId = ref('')
-const file = ref<File | null>(null)
+const drive = ref('')
+const files = ref<File[]>([])
 const progress = ref(0)
 const uploading = ref(false)
 
@@ -26,7 +33,7 @@ const uploading = ref(false)
  * that fades after five seconds is exactly the wrong shape for the one message
  * that matters — and when it was a refusal, the file simply seemed to vanish.
  */
-const result = ref<{ ok: boolean, message: string, videoId?: string } | null>(null)
+const result = ref<{ ok: boolean, message: string, placed: string[] } | null>(null)
 
 /** The API's own message, which says what to do about it. */
 function reasonFrom(responseText: string, status: number): string {
@@ -42,20 +49,33 @@ function reasonFrom(responseText: string, status: number): string {
     : `The server refused it (HTTP ${status}).`
 }
 
-const options = computed(() =>
-  (collections.value?.items ?? []).map(c => ({ label: c.title, value: c.id })),
+const driveOptions = computed(() =>
+  (drives.value?.items ?? []).map(entry => ({ label: entry.name, value: entry.name })),
 )
 
+const totalBytes = computed(() => files.value.reduce((sum, file) => sum + file.size, 0))
+
 function pick(event: Event) {
-  file.value = (event.target as HTMLInputElement).files?.[0] ?? null
+  files.value = [...((event.target as HTMLInputElement).files ?? [])]
 }
 
 function upload() {
-  if (!file.value || !collectionId.value) return
+  if (files.value.length === 0 || !drive.value) return
 
   const body = new FormData()
-  body.append('file', file.value)
-  body.append('collectionId', collectionId.value)
+  body.append('drive', drive.value)
+  for (const file of files.value) {
+    body.append('file', file)
+    /**
+     * The folder shape travels beside the file, in the same order.
+     *
+     * multer strips both slash and backslash from a filename, so a directory
+     * upload's `webkitRelativePath` cannot survive inside it. One `paths` field
+     * per file, appended in step with them, is what keeps a season folder a
+     * season folder.
+     */
+    body.append('paths', file.webkitRelativePath || file.name)
+  }
 
   uploading.value = true
   progress.value = 0
@@ -71,23 +91,29 @@ function upload() {
     progress.value = 0
 
     if (request.status >= 200 && request.status < 300) {
-      let videoId: string | undefined
+      let placed: string[] = []
       try {
-        videoId = JSON.parse(request.responseText).id
+        placed = (JSON.parse(request.responseText).placed ?? []).map(
+          (entry: { storageKey: string }) => entry.storageKey,
+        )
       } catch {
         // A 2xx with an unreadable body still means it landed.
       }
-      result.value = { ok: true, message: `${file.value?.name ?? 'The file'} is in the library.`, videoId }
-      file.value = null
+      result.value = {
+        ok: true,
+        message: `${placed.length || files.value.length} file(s) placed on ${drive.value}. The scan has taken them from here.`,
+        placed,
+      }
+      files.value = []
       return
     }
 
-    result.value = { ok: false, message: reasonFrom(request.responseText, request.status) }
+    result.value = { ok: false, message: reasonFrom(request.responseText, request.status), placed: [] }
   })
   request.addEventListener('error', () => {
     uploading.value = false
     progress.value = 0
-    result.value = { ok: false, message: reasonFrom('', 0) }
+    result.value = { ok: false, message: reasonFrom('', 0), placed: [] }
   })
   request.send(body)
 }
@@ -100,30 +126,69 @@ useHead({ title: 'Upload' })
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Upload</h1>
       <p class="text-sm text-(--ui-text-muted)">
-        Lands in the media folder as a draft, exactly as if you had copied it there.
+        Lands on the disk you choose, exactly as if you had copied it there — and becomes
+        whatever the folder says it is.
       </p>
     </div>
 
     <UCard>
       <div class="space-y-4">
-        <UFormField label="Collection" required>
-          <USelect v-model="collectionId" :items="options" placeholder="Choose one" class="w-full" />
+        <UFormField label="Disk" required>
+          <USelect
+            v-model="drive"
+            :items="driveOptions"
+            placeholder="Choose a disk"
+            aria-label="Choose which disk to upload to"
+            class="w-full"
+          />
         </UFormField>
 
-        <UFormField label="File">
-          <label
-            class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-(--ui-border) p-8 text-center transition-colors hover:border-(--ui-border-accented)"
-          >
-            <input type="file" accept="video/*,.mkv,.mp4,.avi,.mov" class="hidden" @change="pick">
-            <UIcon name="i-lucide-upload-cloud" class="size-8 text-(--ui-text-dimmed)" />
-            <span class="text-sm">
-              {{ file ? file.name : 'Choose a video file' }}
-            </span>
-            <span v-if="file" class="text-xs text-(--ui-text-muted)">
-              {{ (file.size / 1024 ** 3).toFixed(2) }} GB
-            </span>
-          </label>
+        <UFormField label="Files">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label
+              class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-(--ui-border) p-6 text-center transition-colors hover:border-(--ui-border-accented)"
+            >
+              <input
+                type="file"
+                multiple
+                accept="video/*,.mkv,.mp4,.avi,.mov"
+                class="hidden"
+                @change="pick"
+              >
+              <UIcon name="i-lucide-file-video" class="size-7 text-(--ui-text-dimmed)" />
+              <span class="text-sm">Choose files</span>
+              <span class="text-xs text-(--ui-text-muted)">
+                Each gets a folder of its own
+              </span>
+            </label>
+
+            <!--
+              A whole folder, which is how a season or a set of films arrives.
+              `webkitdirectory` is the only way a browser will hand one over,
+              and it is why the relative paths have to be sent alongside.
+            -->
+            <label
+              class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-(--ui-border) p-6 text-center transition-colors hover:border-(--ui-border-accented)"
+            >
+              <input type="file" webkitdirectory multiple class="hidden" @change="pick">
+              <UIcon name="i-lucide-folder-up" class="size-7 text-(--ui-text-dimmed)" />
+              <span class="text-sm">Choose a folder</span>
+              <span class="text-xs text-(--ui-text-muted)">
+                Placed as it is, seasons and all
+              </span>
+            </label>
+          </div>
         </UFormField>
+
+        <div v-if="files.length" class="rounded-md bg-(--ui-bg-elevated) p-3 text-sm">
+          <p class="font-medium">{{ files.length }} file(s) — {{ (totalBytes / 1024 ** 3).toFixed(2) }} GB</p>
+          <ul class="mt-1 max-h-40 space-y-0.5 overflow-y-auto text-xs text-(--ui-text-muted)">
+            <li v-for="file in files.slice(0, 30)" :key="file.name">
+              {{ file.webkitRelativePath || file.name }}
+            </li>
+            <li v-if="files.length > 30">…and {{ files.length - 30 }} more</li>
+          </ul>
+        </div>
 
         <div v-if="uploading" class="space-y-1">
           <div class="h-2 overflow-hidden rounded-full bg-white/10">
@@ -136,7 +201,7 @@ useHead({ title: 'Upload' })
           block
           size="lg"
           :loading="uploading"
-          :disabled="!file || !collectionId"
+          :disabled="files.length === 0 || !drive"
           @click="upload"
         >
           Upload
@@ -152,14 +217,10 @@ useHead({ title: 'Upload' })
           :description="result.message"
         >
           <template v-if="result.ok" #actions>
-            <UButton
-              v-if="result.videoId"
-              size="xs"
-              :to="`/admin/videos/${result.videoId}`"
-            >
-              Open it
+            <UButton size="xs" to="/admin/drafts">All drafts</UButton>
+            <UButton size="xs" color="neutral" variant="subtle" to="/admin/media">
+              Browse the disks
             </UButton>
-            <UButton size="xs" color="neutral" variant="subtle" to="/admin/drafts">All drafts</UButton>
           </template>
         </UAlert>
       </div>

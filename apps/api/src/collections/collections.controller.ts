@@ -12,6 +12,7 @@ import {
   Res,
 } from '@nestjs/common';
 import {
+  addCollectionVideoSchema,
   createCollectionSchema,
   deleteWithFilesSchema,
   listCollectionsSchema,
@@ -19,6 +20,7 @@ import {
   resolveQuerySchema,
   reorderCollectionVideosSchema,
   updateCollectionSchema,
+  type AddCollectionVideoInput,
   type CreateCollectionInput,
   type DeleteWithFilesQuery,
   type ListCollectionsQuery,
@@ -136,6 +138,34 @@ export class CollectionsController {
     @Body(validate(reorderCollectionVideosSchema)) dto: ReorderCollectionVideosInput,
   ) {
     return this.collections.reorderVideos(id, dto);
+  }
+
+  /**
+   * Puts a video in this collection, or takes it out again.
+   *
+   * Declared before `:id/videos/:videoId` would matter if there were a conflict;
+   * `videos/order` above is a literal and cannot be read as a video id.
+   *
+   * Removing acts on the **membership**. The video keeps existing, along with
+   * every comment and progress row attached to it, and stays in whichever other
+   * collections hold it — deleting the video instead is a different operation
+   * with no undo.
+   */
+  @Post(':id/videos')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  addVideo(
+    @Param('id') id: string,
+    @Body(validate(addCollectionVideoSchema)) dto: AddCollectionVideoInput,
+  ) {
+    return this.collections.addVideo(id, dto.videoId, dto.seasonId ?? null);
+  }
+
+  @Delete(':id/videos/:videoId')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  removeVideo(@Param('id') id: string, @Param('videoId') videoId: string) {
+    return this.collections.removeVideo(id, videoId);
   }
 
   @Post(':id/publish')

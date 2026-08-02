@@ -61,7 +61,7 @@ describe('Streaming (real database)', () => {
 
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId } },
         slug: title.toLowerCase(),
         title,
         storageKey,

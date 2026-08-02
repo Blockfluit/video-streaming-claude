@@ -42,7 +42,11 @@ const ITEM_SELECT = {
       width: true,
       height: true,
       state: true,
-      collection: { select: { id: true, slug: true, title: true } },
+      // Through the membership: a video may be in several collections, or
+      // none, so a card names them rather than assuming one parent.
+      collections: {
+        select: { collection: { select: { id: true, slug: true, title: true } } },
+      },
     },
   },
 } as const;

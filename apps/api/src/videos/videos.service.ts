@@ -14,12 +14,45 @@ import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateMarkers, type Markers } from './markers';
 
+/**
+ * Every "which collection" filter, as **one** clause.
+ *
+ * They all constrain the same relation, so spread separately they overwrite
+ * each other rather than combining — `?collectionId=X&seasonId=Y` silently
+ * dropped the collection and answered about the season alone. Building the
+ * clause once is what makes that impossible rather than merely unlikely.
+ *
+ * `standalone` is the odd one: it asks for the videos in *no* collection, which
+ * is `none` over the join and cannot be expressed as a `some` at all. Omitted
+ * means "do not filter"; `false` genuinely means "in at least one".
+ */
+function membershipFilter(query: ListVideosQuery) {
+  if (query.standalone === true) return { collections: { none: {} } };
+
+  const membership = {
+    ...(query.collectionId ? { collectionId: query.collectionId } : {}),
+    ...(query.seasonId ? { seasonId: query.seasonId } : {}),
+  };
+
+  if (Object.keys(membership).length === 0 && query.standalone === undefined) return {};
+
+  return { collections: { some: membership } };
+}
+
 const VIDEO_SELECT = {
   id: true,
   slug: true,
-  collectionId: true,
-  seasonId: true,
-  orderIndex: true,
+  // Every collection it belongs to, with where it sits in each. A video with an
+  // empty array is standalone, which is an ordinary thing to be rather than a
+  // video that has lost its parent.
+  collections: {
+    select: {
+      collectionId: true,
+      seasonId: true,
+      orderIndex: true,
+      collection: { select: { id: true, slug: true, title: true, state: true } },
+    },
+  },
   title: true,
   description: true,
   tags: true,
@@ -61,8 +94,7 @@ export class VideosService {
    */
   async list(query: ListVideosQuery, role: Role): Promise<Page<unknown>> {
     const where = {
-      ...(query.collectionId ? { collectionId: query.collectionId } : {}),
-      ...(query.seasonId ? { seasonId: query.seasonId } : {}),
+      ...membershipFilter(query),
       ...(query.tag ? { tags: { has: query.tag } } : {}),
       ...(query.q
         ? {
@@ -80,15 +112,17 @@ export class VideosService {
       this.prisma.video.findMany({
         where,
         select: VIDEO_SELECT,
-        // `id` last makes the order total. `orderIndex` and `title` both repeat,
-        // and offset paging over a non-total order repeats and skips rows.
-        orderBy: [
-          { collectionId: 'asc' },
-          { seasonId: 'asc' },
-          { orderIndex: 'asc' },
-          { title: 'asc' },
-          { id: 'asc' },
-        ],
+        /**
+         * `id` last makes the order total. `title` repeats, and offset paging
+         * over a non-total order repeats and skips rows between pages.
+         *
+         * Season and running order used to lead this list, back when a video had
+         * one parent to be ordered within. They are membership facts now, and a
+         * video in two collections has two of them — there is no single order to
+         * sort a library-wide listing by. A collection's own page still shows its
+         * videos in order; that read goes through the join.
+         */
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
         take: query.limit,
         skip: query.offset,
       }),
@@ -112,28 +146,37 @@ export class VideosService {
     return this.withChecklist(video, role);
   }
 
-  async update(id: string, dto: UpdateVideoInput) {
-    const video = await this.prisma.video.findUnique({
-      where: { id },
-      select: { id: true, collectionId: true, title: true },
+  /**
+   * A video by its slug, which is how it is addressed now that it has a page of
+   * its own rather than one borrowed from a collection.
+   */
+  async findBySlug(slug: string, role: Role) {
+    const video = await this.prisma.video.findFirst({
+      where: { slug, ...whereVisible(role) },
+      select: VIDEO_SELECT,
     });
     if (!video) throw new NotFoundException('No such video');
 
-    if (dto.seasonId) {
-      // A video may only belong to a season of its own collection — otherwise
-      // it would appear under a show it is not part of.
-      const season = await this.prisma.season.findUnique({
-        where: { id: dto.seasonId },
-        select: { collectionId: true },
-      });
-      if (!season) throw new NotFoundException('No such season');
-      if (season.collectionId !== video.collectionId) {
-        throw new BadRequestException('That season belongs to a different collection');
-      }
-    }
+    return this.withChecklist(video, role);
+  }
+
+  /**
+   * Edits the video itself, and only that.
+   *
+   * Which collections it belongs to, which season, and in what order are facts
+   * about a membership — `POST/DELETE /collections/:id/videos` and
+   * `PATCH /collections/:id/videos/order` own those, and each names the
+   * collection it is acting on.
+   */
+  async update(id: string, dto: UpdateVideoInput) {
+    const video = await this.prisma.video.findUnique({
+      where: { id },
+      select: { id: true, title: true },
+    });
+    if (!video) throw new NotFoundException('No such video');
 
     const slug = dto.regenerateSlug
-      ? await this.freeSlug(video.collectionId, slugify(dto.title ?? video.title), id)
+      ? await this.freeSlug(slugify(dto.title ?? video.title), id)
       : undefined;
 
     return this.prisma.video.update({
@@ -143,10 +186,6 @@ export class VideosService {
         ...titleUpdate(dto.title),
         description: dto.description,
         tags: dto.tags,
-        orderIndex: dto.orderIndex,
-        // Explicit null moves the video out of its season, which is different
-        // from omitting the field.
-        seasonId: dto.seasonId === undefined ? undefined : dto.seasonId,
         slug,
       },
       select: VIDEO_SELECT,
@@ -245,10 +284,17 @@ export class VideosService {
     });
   }
 
-  /** Video slugs are unique within their collection — two shows may both have a `pilot`. */
-  private async freeSlug(collectionId: string, base: string, exceptId?: string): Promise<string> {
+  /**
+   * Video slugs are unique library-wide.
+   *
+   * They used to be scoped to a collection, so two shows could both have a
+   * `pilot`. A video is addressed at `/v/<slug>` on its own now, so the scope
+   * has to be the library — and `pilot-2` is what the shared numbering gives the
+   * second one.
+   */
+  private async freeSlug(base: string, exceptId?: string): Promise<string> {
     const taken = await this.prisma.video.findMany({
-      where: { collectionId, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+      where: exceptId ? { NOT: { id: exceptId } } : undefined,
       select: { slug: true },
     });
 

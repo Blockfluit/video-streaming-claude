@@ -1,6 +1,6 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, rmdir, stat } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { copyFile, mkdir, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -77,6 +77,19 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  /**
+   * Like `resolvePath`, but `''` means the root directory itself.
+   *
+   * `resolveWithinRoot` rejects the root deliberately — a *storage key* is a
+   * file or folder inside a root, never the root, and letting one resolve there
+   * would make an empty key a way to address the whole tree. Listing is the one
+   * operation that legitimately starts at the top, so it says so here rather
+   * than by loosening the containment rule for everything.
+   */
+  private listingPath(root: StorageRoot, key: string): string {
+    return key === '' ? this.roots[root] : this.resolvePath(root, key);
+  }
+
   /** Relative key for an absolute path inside a root — the inverse of `resolvePath`. */
   toKey(root: StorageRoot, absolutePath: string): string {
     const key = relative(this.roots[root], absolutePath);
@@ -100,6 +113,58 @@ export class StorageService implements OnModuleInit {
       return { size: stats.size, mtime: stats.mtime };
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The directory names directly inside `key`, sorted.
+   *
+   * A symlinked directory counts, because that is what a drive is: `readdir`
+   * reports one as neither a file nor a directory, so the dirent alone would
+   * hide every disk in production. Dotfiles are left out — they are staging and
+   * housekeeping, never content.
+   */
+  async listDirectories(root: StorageRoot, key: string): Promise<string[]> {
+    const path = this.listingPath(root, key);
+
+    let entries;
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    const directories = await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.name.startsWith('.')) return null;
+        if (entry.isDirectory()) return entry.name;
+        if (!entry.isSymbolicLink()) return null;
+
+        try {
+          return (await stat(join(path, entry.name))).isDirectory() ? entry.name : null;
+        } catch {
+          // A drive that is not mounted. It exists, but there is nothing behind
+          // it to upload into.
+          return null;
+        }
+      }),
+    );
+
+    return directories.filter((name): name is string => name !== null).sort();
+  }
+
+  /** The file names directly inside `key`, sorted. Dotfiles are never content. */
+  async listFiles(root: StorageRoot, key: string): Promise<string[]> {
+    const path = this.listingPath(root, key);
+
+    try {
+      const entries = await readdir(path, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
+        .map((entry) => entry.name)
+        .sort();
+    } catch {
+      return [];
     }
   }
 
@@ -148,7 +213,36 @@ export class StorageService implements OnModuleInit {
     const to = this.resolvePath(root, toKey);
 
     await mkdir(dirname(to), { recursive: true });
-    await rename(from, to);
+
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+    }
+
+    /**
+     * Two different filesystems, which is the normal case once each drive under
+     * `MEDIA_ROOT` is a symlink to its own physical disk. `rename` cannot cross
+     * that boundary, so the bytes have to be copied.
+     *
+     * Copied to a dot-prefixed neighbour first and renamed into place, never
+     * written straight to `to`: a copy is not atomic, and a half-written file
+     * under its final name is exactly what the scanner would ingest as a
+     * truncated video. Both the scanner and the watcher skip dotfiles, so the
+     * neighbour is invisible until the rename — which is within one filesystem,
+     * and therefore atomic.
+     */
+    const staged = join(dirname(to), `.incoming-${basename(to)}`);
+
+    try {
+      await copyFile(from, staged);
+      await rename(staged, to);
+      await rm(from, { force: true });
+    } catch (error) {
+      await rm(staged, { force: true });
+      throw error;
+    }
   }
 
   /** Deletes a file or directory. Already-gone is success, not an error. */

@@ -18,8 +18,8 @@ interface CardVideo {
   durationSec: number | null
   width?: number | null
   height?: number | null
-  collection: { slug: string, title: string } | null
-  season: { slug: string } | null
+  /** Every collection this video is in; empty for a standalone one. */
+  collections: { collection: { slug: string, title: string } }[]
 }
 
 interface HistoryItem {
@@ -76,9 +76,9 @@ const hero = computed(() => {
     return {
       eyebrow: 'Continue watching',
       title: resuming.video.title,
-      meta: resuming.video.collection?.title ?? null,
+      meta: collectionTitle(resuming.video),
       description: resuming.video.description ?? null,
-      to: watchPath(resuming.video) ?? '/browse',
+      to: watchPath(resuming.video),
       image: `/api/videos/${resuming.video.id}/thumbnail`,
       resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
     }
@@ -111,7 +111,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     return {
       // A saved show points at the episode it would play next, resolved
       // server-side against this viewer's progress.
-      to: (entry.next ? watchPath(entry.next.video) : null) ?? collectionPath(entry.collection),
+      to: entry.next ? watchPath(entry.next.video) : collectionPath(entry.collection),
       title: entry.collection.title,
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
       imageUrl: `/api/collections/${entry.collection.id}/poster`,
@@ -122,9 +122,9 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
 
   const video = entry.video as CardVideo
   return {
-    to: watchPath(video) ?? '/browse',
+    to: watchPath(video),
     title: video.title,
-    subtitle: video.collection?.title ?? null,
+    subtitle: collectionTitle(video),
     imageUrl: `/api/videos/${video.id}/thumbnail`,
     width: video.width ?? null,
     height: video.height ?? null,
@@ -201,9 +201,9 @@ useHead({ title: 'Home' })
           v-for="item in continueWatching"
           :key="item.video.id"
           class="w-56 sm:w-64"
-          :to="watchPath(item.video) ?? '/browse'"
+          :to="watchPath(item.video)"
           :title="item.video.title"
-          :subtitle="item.video.collection?.title"
+          :subtitle="collectionTitle(item.video)"
           :image-url="`/api/videos/${item.video.id}/thumbnail`"
           :width="item.video.width"
           :height="item.video.height"

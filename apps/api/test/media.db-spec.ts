@@ -70,7 +70,7 @@ describe('Media probing (real ffmpeg)', () => {
     const { size } = await storage.statOf('media', relPath).then((s) => s ?? { size: 0 });
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId } },
         slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         title,
         storageKey: relPath,
@@ -351,6 +351,78 @@ describe('Media probing (real ffmpeg)', () => {
       }
 
       await expect(storage.exists('derived', `tmp/${id}-thumbnail.jpg`)).resolves.toBe(false);
+    });
+
+    /**
+     * ffmpeg exits **0** when a seek lands past the end of a file.
+     *
+     * It prints "Output file is empty, nothing was encoded" and writes no file
+     * at all, so a wrapper that trusts the exit code reports success and leaves
+     * the *rename* to fail — surfacing as
+     * `ENOENT ... rename derived/tmp/<id>-thumbnail.jpg -> derived/thumbnails/<id>.jpg`,
+     * which names neither the timestamp nor the file and reads like a storage
+     * fault. Reported from a real library, where a poster was captured while a
+     * 1 GB file was still being copied in.
+     */
+    it('says a frame could not be read, rather than failing on the rename', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      // 400, not 500: the admin picked a moment the file has nothing at, and
+      // that is an answer about the request rather than a server fault.
+      const response = await admin
+        .post(`/videos/${id}/thumbnail/capture`)
+        .send({ atSeconds: 600 })
+        .expect(400);
+
+      const message = JSON.stringify(response.body);
+      expect(message).not.toContain('ENOENT');
+      expect(message).not.toContain('rename');
+      expect(message).toMatch(/frame/i);
+    });
+
+    it('leaves no thumbnail behind when the frame could not be read', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 600 }).expect(400);
+
+      await expect(storage.exists('derived', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `tmp/${id}-thumbnail.jpg`)).resolves.toBe(false);
+    });
+
+    /**
+     * A poster is not the probe.
+     *
+     * `generateThumbnail` ran inside the probe's own try block, so a capture
+     * that failed was written to `probeError` — on a row whose probe had just
+     * succeeded and stored a duration, dimensions and codecs. The admin then
+     * sees a file reported as broken in the ingest list while it plays and
+     * edits perfectly well, which is exactly what was reported.
+     */
+    it('does not record a failed poster as a probe failure', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      const ffmpeg = app.get(FfmpegService);
+      const capture = jest
+        .spyOn(ffmpeg, 'captureFrame')
+        .mockRejectedValue(new Error('no frame at that timestamp'));
+
+      try {
+        media.enqueue(id);
+        await media.drain();
+      } finally {
+        capture.mockRestore();
+      }
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      // The probe itself worked, and its results are the point of the row.
+      expect(video.probeError).toBeNull();
+      expect(video.durationSec).toBeGreaterThan(0);
+      expect(video.videoCodec).toBe('h264');
+      // The poster simply is not there.
+      expect(video.thumbnailKey).toBeNull();
     });
 
     /**

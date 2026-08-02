@@ -26,9 +26,10 @@ const VIDEO_DETAIL = {
   description: true,
   tags: true,
   state: true,
-  seasonId: true,
-  collectionId: true,
-  orderIndex: true,
+  // Where this video sits is a fact about a membership, not about the video, so
+  // the caller is told which collection it arrived through rather than the video
+  // claiming a single parent it no longer has.
+  collections: { select: { collectionId: true, seasonId: true, orderIndex: true } },
   durationSec: true,
   width: true,
   height: true,
@@ -80,7 +81,13 @@ export class ResolveService {
       }
 
       const video = await this.prisma.video.findFirst({
-        where: { collectionId: collection.id, seasonId: season.id, slug: second, ...whereVisible(role) },
+        where: {
+          // Through the membership: the video is its own entity now, and being
+          // in this season of this collection is a fact about the join.
+          collections: { some: { collectionId: collection.id, seasonId: season.id } },
+          slug: second,
+          ...whereVisible(role),
+        },
         select: VIDEO_DETAIL,
       });
       if (!video) throw new NotFoundException('No such video in this season');
@@ -95,7 +102,11 @@ export class ResolveService {
     }
 
     const video = await this.prisma.video.findFirst({
-      where: { collectionId: collection.id, slug: first, ...whereVisible(role) },
+      where: {
+        collections: { some: { collectionId: collection.id } },
+        slug: first,
+        ...whereVisible(role),
+      },
       select: VIDEO_DETAIL,
     });
     if (!video) throw new NotFoundException('No such path in this collection');

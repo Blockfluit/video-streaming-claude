@@ -15,8 +15,8 @@ interface CardVideo {
   durationSec: number | null
   width: number | null
   height: number | null
-  collection: { slug: string, title: string } | null
-  season: { slug: string } | null
+  /** Every collection this video is in; empty for a standalone one. */
+  collections: { collection: { slug: string, title: string } }[]
 }
 
 interface SavedItem {
@@ -68,11 +68,11 @@ useHead({ title: 'My List' })
           class="w-full"
           :to="
             item.collection
-              ? (item.next ? watchPath(item.next.video) : null) ?? collectionPath(item.collection)
-              : watchPath(item.video!) ?? '/browse'
+              ? item.next ? watchPath(item.next.video) : collectionPath(item.collection)
+              : watchPath(item.video!)
           "
           :title="item.collection?.title ?? item.video!.title"
-          :subtitle="item.collection ? item.next?.video.title : item.video!.collection?.title"
+          :subtitle="item.collection ? item.next?.video.title : collectionTitle(item.video!)"
           :image-url="
             item.collection
               ? `/api/collections/${item.collection.id}/poster`

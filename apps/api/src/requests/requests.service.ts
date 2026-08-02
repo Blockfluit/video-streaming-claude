@@ -257,8 +257,12 @@ export class RequestsService {
           slug: true,
           title: true,
           state: true,
-          collection: { select: { slug: true, title: true } },
-          season: { select: { slug: true } },
+          collections: {
+            select: {
+              collection: { select: { slug: true, title: true } },
+              season: { select: { slug: true } },
+            },
+          },
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
@@ -294,8 +298,12 @@ export class RequestsService {
           title: true,
           state: true,
           normalisedTitle: true,
-          collection: { select: { slug: true, title: true } },
-          season: { select: { slug: true } },
+          collections: {
+            select: {
+              collection: { select: { slug: true, title: true } },
+              season: { select: { slug: true } },
+            },
+          },
         },
       }),
     ]);

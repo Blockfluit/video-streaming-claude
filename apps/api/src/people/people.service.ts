@@ -86,7 +86,11 @@ export class PeopleService {
             slug: true,
             title: true,
             thumbnailKey: true,
-            collection: { select: { id: true, slug: true, title: true } },
+            // Every collection it is in: a film may appear in several, and
+            // naming one of them would be an arbitrary choice.
+            collections: {
+              select: { collection: { select: { id: true, slug: true, title: true } } },
+            },
           },
         },
       },

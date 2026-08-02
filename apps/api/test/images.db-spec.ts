@@ -96,7 +96,7 @@ describe('Artwork (real database)', () => {
 
     const video = await prisma.video.create({
       data: {
-        collectionId,
+        collections: { create: { collectionId } },
         slug: 'film',
         title: 'Film',
         storageKey: 'Films/film.mkv',

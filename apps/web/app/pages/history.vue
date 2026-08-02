@@ -13,8 +13,8 @@ interface HistoryItem {
     slug: string
     title: string
     durationSec: number | null
-    collection: { slug: string, title: string } | null
-    season: { slug: string } | null
+    /** Every collection this video is in; empty for a standalone one. */
+    collections: { collection: { slug: string, title: string } }[]
   }
   progress: {
     lastPositionSec: number
@@ -36,10 +36,10 @@ useHead({ title: 'History' })
 
     <ul v-if="items.length" class="divide-y divide-(--ui-border)">
       <li v-for="item in items" :key="item.video.id" class="py-3 flex items-center gap-4">
-        <NuxtLink :to="watchPath(item.video) ?? '/browse'" class="grow min-w-0">
+        <NuxtLink :to="watchPath(item.video)" class="grow min-w-0">
           <p class="font-medium truncate">{{ item.video.title }}</p>
           <p class="text-sm text-(--ui-text-muted) truncate">
-            {{ item.video.collection?.title }}
+            {{ collectionTitle(item.video) }}
           </p>
         </NuxtLink>
 

@@ -6,12 +6,19 @@
  * itself under the wrong collection) and the cheapest thing in the app to test
  * exhaustively, so it is written and tested before anything calls it.
  *
- * The folder convention it enforces, from docs/PLAN.md:
+ * The folder convention it enforces:
  *
- *   media/<collection>/file.mp4                  video straight in a collection
- *   media/<collection>/<season>/file.mp4         video inside a season
+ *   media/<drive>/<item>/file.mp4                video straight in an item folder
+ *   media/<drive>/<item>/<season>/file.mp4       video inside a season of an item
+ *   media/<drive>/file.mp4                       an issue — loose on the drive, triage it
  *   media/file.mp4                               an issue — nothing lives at the root
  *   anything deeper                              an issue
+ *
+ * The **drive** is the top level: in production each one is a symlink to a
+ * different physical disk. It is only where the bytes live and is never a
+ * collection. Whether an item folder becomes a collection is decided by what
+ * is inside it, which needs the whole folder at once and therefore lives in
+ * `structure.ts` rather than here.
  */
 
 /** Containers we are willing to ingest. Playability is a later question (step 10). */
@@ -64,7 +71,10 @@ export type MediaPath =
       kind: 'video';
       /** Path relative to MEDIA_ROOT, exactly as given. This is the `storageKey`. */
       storageKey: string;
-      collectionFolder: string;
+      /** Top-level folder — a physical disk in production, never a collection. */
+      driveFolder: string;
+      /** The folder the item lives in. What it becomes is `structure.ts`'s decision. */
+      itemFolder: string;
       season: SeasonInfo | null;
       basename: string;
       extension: string;
@@ -74,13 +84,18 @@ export type MediaPath =
   | {
       kind: 'subtitle';
       relPath: string;
-      collectionFolder: string;
+      driveFolder: string;
+      itemFolder: string;
       season: SeasonInfo | null;
       basename: string;
       extension: string;
     }
   | { kind: 'ignored'; relPath: string; reason: 'dotfile' | 'partial' | 'unknown-extension' }
-  | { kind: 'issue'; relPath: string; reason: 'root-level-file' | 'too-deep' | 'empty-path' };
+  | {
+      kind: 'issue';
+      relPath: string;
+      reason: 'root-level-file' | 'loose-drive-file' | 'too-deep' | 'empty-path';
+    };
 
 /**
  * Splits a relative path into segments.
@@ -190,6 +205,16 @@ export function parseMediaPath(relPath: string): MediaPath {
   const kind = classify(extension, filename);
 
   /**
+   * A dot anywhere in the path hides the whole branch, not just a file. Upload
+   * staging is `<drive>/.uploads/`, and a half-written file there must never be
+   * read as content — the scanner skips dot directories, and this keeps the
+   * parser saying the same thing to everything else that asks it.
+   */
+  if (kind !== 'ignored' && segments.some((segment) => segment.startsWith('.'))) {
+    return { kind: 'ignored', relPath, reason: 'dotfile' };
+  }
+
+  /**
    * Ignored files are ignored wherever they sit — **before** the depth rules.
    *
    * The other order raises an issue for every `.DS_Store`, `Thumbs.db` or
@@ -202,19 +227,30 @@ export function parseMediaPath(relPath: string): MediaPath {
   }
 
   if (segments.length === 1) {
-    // Nothing lives at the root — every video belongs to a collection folder.
+    // Nothing lives at the root — everything sits on a drive.
     return { kind: 'issue', relPath, reason: 'root-level-file' };
   }
 
-  if (segments.length > 3) {
+  if (segments.length === 2) {
+    /**
+     * Loose in a drive root. A drive holds unrelated things, so there is no
+     * folder for the file to take a suggestion from and nothing to say whether
+     * it belongs with its neighbours — an admin places it. Reported as its own
+     * reason so the triage queue can tell it from a root-level file.
+     */
+    return { kind: 'issue', relPath, reason: 'loose-drive-file' };
+  }
+
+  if (segments.length > 4) {
     return { kind: 'issue', relPath, reason: 'too-deep' };
   }
 
-  const collectionFolder = segments[0];
-  const season = segments.length === 3 ? parseSeasonFolder(segments[1]) : null;
+  const driveFolder = segments[0];
+  const itemFolder = segments[1];
+  const season = segments.length === 4 ? parseSeasonFolder(segments[2]) : null;
 
   if (kind === 'subtitle') {
-    return { kind: 'subtitle', relPath, collectionFolder, season, basename, extension };
+    return { kind: 'subtitle', relPath, driveFolder, itemFolder, season, basename, extension };
   }
 
   const { orderIndex, title } = parseOrderAndTitle(basename);
@@ -224,7 +260,8 @@ export function parseMediaPath(relPath: string): MediaPath {
     // Preserved verbatim: this becomes `storageKey`, which reconcile is keyed
     // on, so any normalisation here would break move detection.
     storageKey: relPath,
-    collectionFolder,
+    driveFolder,
+    itemFolder,
     season,
     basename,
     extension,

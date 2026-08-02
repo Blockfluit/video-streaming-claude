@@ -14,11 +14,13 @@ import {
   videoMissingFields,
   whereVisible,
 } from '../common/publishing';
+import { isUniqueViolation } from '../common/prisma-errors';
 import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleData, titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { MEMBERSHIP_ORDER, MEMBERSHIP_SELECT, toMemberVideo } from './membership';
 
 /**
  * A collection page shows every episode grouped by season, so the videos are
@@ -106,21 +108,11 @@ export class CollectionsService {
           orderBy: [{ number: 'asc' }, { slug: 'asc' }],
         },
         videos: {
-          where: whereVisible(role),
-          select: {
-            id: true,
-            slug: true,
-            title: true,
-            description: true,
-            seasonId: true,
-            orderIndex: true,
-            state: true,
-            durationSec: true,
-            width: true,
-            height: true,
-            thumbnailKey: true,
-          },
-          orderBy: [{ seasonId: 'asc' }, { orderIndex: 'asc' }, { title: 'asc' }, { id: 'asc' }],
+          // Filtered on the *video*, not the membership: a published collection
+          // may hold draft videos, and the join is not what has a state.
+          where: { video: whereVisible(role) },
+          select: MEMBERSHIP_SELECT,
+          orderBy: [...MEMBERSHIP_ORDER],
           // One more than the cap, so truncation can be detected rather than
           // guessed at from a suspiciously round number.
           take: MAX_EMBEDDED_VIDEOS + 1,
@@ -130,12 +122,13 @@ export class CollectionsService {
 
     if (!collection) throw new NotFoundException('No such collection');
 
-    const videosTruncated = collection.videos.length > MAX_EMBEDDED_VIDEOS;
+    const members = collection.videos.map(toMemberVideo);
+    const videosTruncated = members.length > MAX_EMBEDDED_VIDEOS;
 
     return this.withChecklist(
       {
         ...collection,
-        videos: videosTruncated ? collection.videos.slice(0, MAX_EMBEDDED_VIDEOS) : collection.videos,
+        videos: videosTruncated ? members.slice(0, MAX_EMBEDDED_VIDEOS) : members,
         // Says so out loud rather than quietly returning a partial list: the UI
         // can point at `GET /videos?collectionId=…` for the rest.
         videosTruncated,
@@ -215,7 +208,9 @@ export class CollectionsService {
 
     await this.prisma.collection.delete({ where: { id } });
 
-    if (deleteFiles) {
+    // A collection made by hand has no folder behind it, so there is nothing on
+    // disk to take with it.
+    if (deleteFiles && collection.folderKey !== null) {
       await this.storage.delete('media', collection.folderKey);
     }
   }
@@ -236,23 +231,29 @@ export class CollectionsService {
         posterKey: true,
         videos: {
           select: {
-            id: true,
-            state: true,
-            title: true,
-            description: true,
-            durationSec: true,
-            thumbnailKey: true,
+            video: {
+              select: {
+                id: true,
+                state: true,
+                title: true,
+                description: true,
+                durationSec: true,
+                thumbnailKey: true,
+              },
+            },
           },
         },
       },
     });
     if (!collection) throw new NotFoundException('No such collection');
 
-    const readyVideoIds = collection.videos
+    const members = collection.videos.map((row) => row.video);
+
+    const readyVideoIds = members
       .filter((video) => videoMissingFields(video).length === 0)
       .map((video) => video.id);
 
-    const publishableVideoCount = collection.videos.filter(
+    const publishableVideoCount = members.filter(
       (video) => video.state === 'PUBLISHED' || readyVideoIds.includes(video.id),
     ).length;
 
@@ -323,24 +324,96 @@ export class CollectionsService {
     }
 
     if (dto.videoIds.length > 0) {
-      const owned = await this.prisma.video.count({
-        where: { id: { in: dto.videoIds }, collectionId },
+      // Named parents, checked rather than trusted: without this a reorder is a
+      // way to renumber — or reseason — videos in a collection nobody mentioned.
+      const owned = await this.prisma.collectionVideo.count({
+        where: { videoId: { in: dto.videoIds }, collectionId },
       });
       if (owned !== dto.videoIds.length) {
         throw new BadRequestException('Every video must already be in this collection');
       }
     }
 
+    /**
+     * The whole sequence in one transaction, on the membership rows.
+     *
+     * Position is deliberately not unique — a unique index collides halfway
+     * through a drag — so the sequence is rewritten rather than swapped in
+     * pairs. Season and order are set together because dragging an episode into
+     * a season changes both at once.
+     */
     await this.prisma.$transaction(
-      dto.videoIds.map((id, orderIndex) =>
-        this.prisma.video.update({
-          where: { id },
+      dto.videoIds.map((videoId, orderIndex) =>
+        this.prisma.collectionVideo.update({
+          where: { collectionId_videoId: { collectionId, videoId } },
           data: { seasonId: dto.seasonId, orderIndex },
         }),
       ),
     );
 
     return { moved: dto.videoIds.length };
+  }
+
+  /**
+   * Puts an existing video into a collection.
+   *
+   * Idempotent by catching the unique violation rather than checking first:
+   * check-then-write is not atomic and a double-click lands inside the gap.
+   */
+  async addVideo(collectionId: string, videoId: string, seasonId?: string | null) {
+    await this.mustExist(collectionId);
+
+    const video = await this.prisma.video.findUnique({
+      where: { id: videoId },
+      select: { id: true },
+    });
+    if (!video) throw new NotFoundException('No such video');
+
+    if (seasonId) await this.mustOwnSeason(collectionId, seasonId);
+
+    try {
+      return await this.prisma.collectionVideo.create({
+        data: { collectionId, videoId, seasonId: seasonId ?? null },
+        select: { id: true, collectionId: true, videoId: true, seasonId: true, orderIndex: true },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+
+      return this.prisma.collectionVideo.findUniqueOrThrow({
+        where: { collectionId_videoId: { collectionId, videoId } },
+        select: { id: true, collectionId: true, videoId: true, seasonId: true, orderIndex: true },
+      });
+    }
+  }
+
+  /**
+   * Takes a video out of a collection, leaving the video itself alone.
+   *
+   * That distinction is the point of memberships: the video may be in other
+   * collections, carries its own watch history and comments, and removing it
+   * from a shelf is not a reason to lose any of that.
+   */
+  async removeVideo(collectionId: string, videoId: string) {
+    await this.mustExist(collectionId);
+
+    const { count } = await this.prisma.collectionVideo.deleteMany({
+      where: { collectionId, videoId },
+    });
+
+    return { removed: count };
+  }
+
+  /** A membership's season has to belong to the collection holding it. */
+  private async mustOwnSeason(collectionId: string, seasonId: string): Promise<void> {
+    const season = await this.prisma.season.findUnique({
+      where: { id: seasonId },
+      select: { collectionId: true },
+    });
+
+    if (!season) throw new NotFoundException('No such season');
+    if (season.collectionId !== collectionId) {
+      throw new BadRequestException('That season belongs to a different collection');
+    }
   }
 
   private async mustExist(id: string): Promise<void> {

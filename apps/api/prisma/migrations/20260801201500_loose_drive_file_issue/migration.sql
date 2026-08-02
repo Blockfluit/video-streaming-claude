@@ -1,0 +1,11 @@
+-- A video loose in a drive root gets its own issue kind.
+--
+-- It is not a ROOT_LEVEL_FILE: that one is a file nobody put on a disk at all.
+-- This one is on a disk, but with no folder around it there is nothing to say
+-- whether it stands alone or belongs with its neighbours, so an admin places it
+-- rather than the scan guessing. The triage queue needs to tell the two apart.
+--
+-- Added in its own migration because the value is used by the reconcile change
+-- that lands with it, and Postgres will not let a transaction use an enum value
+-- it added itself.
+ALTER TYPE "IngestIssueKind" ADD VALUE 'LOOSE_DRIVE_FILE';

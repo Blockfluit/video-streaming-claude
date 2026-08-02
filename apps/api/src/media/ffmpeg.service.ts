@@ -1,12 +1,23 @@
 import { execFile } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { FfmpegError } from './ffmpeg-error';
+import { FfmpegError, NoFrameError } from './ffmpeg-error';
 
 const execFileAsync = promisify(execFile);
+
+/** `8129s` reads as noise next to a runtime; `2h15m29s` is the thing the admin typed. */
+function formatSeconds(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = whole % 60;
+
+  return hours > 0 ? `${hours}h${minutes}m${rest}s` : minutes > 0 ? `${minutes}m${rest}s` : `${rest}s`;
+}
 
 /**
  * Runs one of the binaries, turning a failure into an `FfmpegError`.
@@ -213,6 +224,38 @@ export class FfmpegService {
       ],
       { timeout: THUMBNAIL_TIMEOUT_MS },
     );
+
+    /**
+     * ffmpeg exits **0** having written nothing when the seek lands past the
+     * end of the file. It says so only on stderr — "Output file is empty,
+     * nothing was encoded" — so an exit code is not enough to know a frame was
+     * captured.
+     *
+     * Without this the caller believes it succeeded and the *rename* into place
+     * fails instead, reporting
+     * `ENOENT ... rename derived/tmp/<id>-thumbnail.jpg -> derived/thumbnails/<id>.jpg`:
+     * a message that names neither the timestamp nor the video, and reads like
+     * a broken disk rather than a seek nobody could satisfy. Reported from a
+     * real library, where a poster was captured while a 1 GB file was still
+     * being copied in and the duration ran ahead of the bytes.
+     *
+     * An empty file counts as nothing: some builds create the output before
+     * discovering they have no frame for it.
+     */
+    let written;
+    try {
+      written = await stat(destination);
+    } catch {
+      throw new NoFrameError(
+        `ffmpeg captured no frame at ${formatSeconds(atSeconds)} — the file may be shorter than that, or still being written.`,
+      );
+    }
+
+    if (written.size === 0) {
+      throw new NoFrameError(
+        `ffmpeg captured an empty frame at ${formatSeconds(atSeconds)} — the file may be shorter than that, or still being written.`,
+      );
+    }
   }
 }
 

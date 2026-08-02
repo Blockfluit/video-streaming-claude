@@ -58,6 +58,17 @@ export class VideosController {
     return this.videos.list(query, user.role);
   }
 
+  /**
+   * The canonical page's lookup.
+   *
+   * Declared **before** `:id` — Express matches in order, so the other way
+   * round reads `by-slug` as a video id and 404s every canonical URL.
+   */
+  @Get('by-slug/:slug')
+  findBySlug(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
+    return this.videos.findBySlug(slug, user.role);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.videos.findOne(id, user.role);

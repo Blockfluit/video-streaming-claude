@@ -115,8 +115,8 @@ describe('Subtitles (real database)', () => {
 
   describe('binding sidecars during a scan', () => {
     it('binds a sidecar named after the video file', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
 
       await scan();
 
@@ -133,8 +133,8 @@ describe('Subtitles (real database)', () => {
     // The plan's second rule: a sidecar downloaded separately is usually named
     // after the title rather than the full filename.
     it('binds a sidecar named after the cleaned title', async () => {
-      await makeVideo('Show/01 - Pilot.mp4');
-      await put('Show/Pilot_nl_Nederlands.srt', SRT);
+      await makeVideo('disk1/Show/01 - Pilot.mp4');
+      await put('disk1/Show/Pilot_nl_Nederlands.srt', SRT);
 
       await scan();
 
@@ -142,9 +142,9 @@ describe('Subtitles (real database)', () => {
     });
 
     it('binds several languages to one video', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
-      await put('Show/Pilot_nl_Nederlands.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
+      await put('disk1/Show/Pilot_nl_Nederlands.srt', SRT);
 
       await scan();
 
@@ -156,34 +156,34 @@ describe('Subtitles (real database)', () => {
      * across folders would make all of them ambiguous.
      */
     it('does not bind a sidecar to a same-named video in another folder', async () => {
-      await makeVideo('Show A/Pilot.mp4');
-      await makeVideo('Show B/Pilot.mp4');
-      await put('Show A/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show A/Pilot.mp4');
+      await makeVideo('disk1/Show B/Pilot.mp4');
+      await put('disk1/Show A/Pilot_en_English.srt', SRT);
 
       await scan();
 
       const subtitles = await prisma.subtitle.findMany({ include: { video: true } });
       expect(subtitles).toHaveLength(1);
-      expect(subtitles[0].video.storageKey).toBe('Show A/Pilot.mp4');
+      expect(subtitles[0].video.storageKey).toBe('disk1/Show A/Pilot.mp4');
     });
 
     it('reports a sidecar that matches nothing', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Something Else_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Something Else_en_English.srt', SRT);
 
       await scan();
 
       await expect(prisma.subtitle.findMany()).resolves.toHaveLength(0);
       expect(await openIssues()).toEqual([
-        expect.objectContaining({ kind: 'ORPHAN_SUBTITLE', path: 'Show/Something Else_en_English.srt' }),
+        expect.objectContaining({ kind: 'ORPHAN_SUBTITLE', path: 'disk1/Show/Something Else_en_English.srt' }),
       ]);
     });
 
     // Binding the wrong language to the wrong episode is worse than an issue.
     it('reports an ambiguous sidecar rather than guessing', async () => {
-      await makeVideo('Show/01 - Pilot.mp4');
-      await makeVideo('Show/02 - Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/01 - Pilot.mp4');
+      await makeVideo('disk1/Show/02 - Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
 
       await scan();
 
@@ -194,8 +194,8 @@ describe('Subtitles (real database)', () => {
     });
 
     it('flags an unrecognised language code but still binds it', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_zz_Klingon.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_zz_Klingon.srt', SRT);
 
       await scan();
 
@@ -206,8 +206,8 @@ describe('Subtitles (real database)', () => {
     });
 
     it('does not duplicate on a rescan', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
 
       await scan();
       await scan();
@@ -217,12 +217,12 @@ describe('Subtitles (real database)', () => {
     });
 
     it('removes the row when the sidecar is deleted', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
       await scan();
       const [before] = await prisma.subtitle.findMany();
 
-      await rm(join(mediaRoot, 'Show/Pilot_en_English.srt'));
+      await rm(join(mediaRoot, 'disk1/Show/Pilot_en_English.srt'));
       await scan();
 
       await expect(prisma.subtitle.count()).resolves.toBe(0);
@@ -233,8 +233,8 @@ describe('Subtitles (real database)', () => {
 
   describe('conversion', () => {
     it('converts an srt into real WebVTT', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
 
       await scan();
 
@@ -253,8 +253,8 @@ describe('Subtitles (real database)', () => {
     });
 
     it('writes the servable file into DERIVED_ROOT, never the watched tree', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
 
       await scan();
 
@@ -266,8 +266,8 @@ describe('Subtitles (real database)', () => {
     // Copied rather than referenced, so everything served sits in one root and
     // survives its source being moved.
     it('copies a sidecar that is already vtt', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.vtt', 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n');
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.vtt', 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n');
 
       await scan();
 
@@ -282,7 +282,7 @@ describe('Subtitles (real database)', () => {
      * than left to chance.
      */
     it('reconverts a Windows-1252 srt so the accents survive', async () => {
-      await makeVideo('Show/Pilot.mp4');
+      await makeVideo('disk1/Show/Pilot.mp4');
       // "Café" and "naïve" in CP1252, which is invalid UTF-8.
       const cp1252 = Buffer.concat([
         Buffer.from('1\n00:00:01,000 --> 00:00:03,000\nCaf', 'latin1'),
@@ -291,7 +291,7 @@ describe('Subtitles (real database)', () => {
         Buffer.from([0xef]),
         Buffer.from('ve\n', 'latin1'),
       ]);
-      await put('Show/Pilot_fr_Francais.srt', cp1252);
+      await put('disk1/Show/Pilot_fr_Francais.srt', cp1252);
 
       await scan();
 
@@ -309,8 +309,8 @@ describe('Subtitles (real database)', () => {
     let subtitleId: string;
 
     beforeEach(async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
       await scan();
       const [subtitle] = await prisma.subtitle.findMany();
       videoId = subtitle.videoId;
@@ -356,7 +356,7 @@ describe('Subtitles (real database)', () => {
     });
 
     it('404s a subtitle that belongs to another video', async () => {
-      await makeVideo('Show/Other.mp4');
+      await makeVideo('disk1/Show/Other.mp4');
       await scan();
       const other = await prisma.video.findFirstOrThrow({ where: { title: 'Other' } });
 
@@ -368,7 +368,7 @@ describe('Subtitles (real database)', () => {
     let videoId: string;
 
     beforeEach(async () => {
-      await makeVideo('Show/Pilot.mp4');
+      await makeVideo('disk1/Show/Pilot.mp4');
       await scan();
       videoId = (await prisma.video.findFirstOrThrow()).id;
     });
@@ -491,9 +491,9 @@ describe('Subtitles (real database)', () => {
 
   describe('the scan summary', () => {
     it('counts what it bound', async () => {
-      await makeVideo('Show/Pilot.mp4');
-      await put('Show/Pilot_en_English.srt', SRT);
-      await put('Show/Pilot_nl_Nederlands.srt', SRT);
+      await makeVideo('disk1/Show/Pilot.mp4');
+      await put('disk1/Show/Pilot_en_English.srt', SRT);
+      await put('disk1/Show/Pilot_nl_Nederlands.srt', SRT);
 
       const response = await scan();
 
