@@ -10,6 +10,7 @@ import {
 import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
 import { titleUpdate } from '../common/title';
+import { VIDEO_DETAIL } from '../common/video-detail';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateMarkers, type Markers } from './markers';
@@ -110,6 +111,34 @@ export class VideosService {
     if (!video) throw new NotFoundException('No such video');
 
     return this.withChecklist(video, role);
+  }
+
+  /**
+   * What the player page needs, keyed on an id.
+   *
+   * `findOne` is the admin shape — it hands `storageKey`, `playbackKey`,
+   * `originalName` and `probeError` to anyone signed in, and it carries no
+   * `collection`, so a page built on it can construct neither a link back to
+   * the title page nor a next-episode link. This selects `VIDEO_DETAIL`
+   * instead, plus just enough of both parents to build those URLs.
+   *
+   * The collection is filtered by visibility as well as the video: a published
+   * episode inside a draft collection is not reachable through the slug route,
+   * and an id must not be the way around that.
+   */
+  async findForPlayback(id: string, role: Role) {
+    const video = await this.prisma.video.findFirst({
+      where: { id, ...whereVisible(role), collection: whereVisible(role) },
+      select: {
+        ...VIDEO_DETAIL,
+        collection: { select: { id: true, slug: true, title: true, state: true } },
+        season: { select: { id: true, slug: true, number: true, title: true } },
+      },
+    });
+    // 404 rather than 403: a video id must not confirm that a draft exists.
+    if (!video) throw new NotFoundException('No such video');
+
+    return video;
   }
 
   async update(id: string, dto: UpdateVideoInput) {

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { whereVisible } from '../common/publishing';
+import { VIDEO_DETAIL } from '../common/video-detail';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -18,26 +19,6 @@ export type ResolveResult =
   | { type: 'collection'; data: unknown }
   | { type: 'season'; data: unknown }
   | { type: 'video'; data: unknown };
-
-const VIDEO_DETAIL = {
-  id: true,
-  slug: true,
-  title: true,
-  description: true,
-  tags: true,
-  state: true,
-  seasonId: true,
-  collectionId: true,
-  orderIndex: true,
-  durationSec: true,
-  width: true,
-  height: true,
-  thumbnailKey: true,
-  introStartSec: true,
-  introEndSec: true,
-  outroStartSec: true,
-  outroEndSec: true,
-} as const;
 
 @Injectable()
 export class ResolveService {

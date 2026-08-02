@@ -19,6 +19,7 @@ import { StorageService } from '../common/storage.service';
 import { titleData, titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { nextEpisode, type EpisodeProgress } from '../watchlist/next-episode';
 
 /**
  * A collection page shows every episode grouped by season, so the videos are
@@ -142,6 +143,84 @@ export class CollectionsService {
       },
       role,
     );
+  }
+
+  /**
+   * This viewer's progress through one collection: which episode to offer, and
+   * how far they got in each.
+   *
+   * One call rather than two because the title page needs both at once — the
+   * hero's "Resume S2E4" button and the resume bar under every episode row are
+   * the same data read twice. Splitting them would have the page render a
+   * button naming one episode while the rows disagree for a moment.
+   *
+   * `next` comes from the same `nextEpisode()` the watchlist uses, so "which
+   * episode is next" has exactly one definition. Reimplementing the rule here
+   * is how the home page and the title page start disagreeing about it.
+   *
+   * Per-caller, never aggregate: this is `mine`, and the figures every viewer
+   * may see about themselves. Totals across users stay ADMIN-only.
+   */
+  async progress(slug: string, userId: string, role: Role) {
+    const collection = await this.prisma.collection.findFirst({
+      where: { slug, ...whereVisible(role) },
+      select: { id: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    // Visibility applies to the episodes too, or the button offers a draft.
+    const videos = await this.prisma.video.findMany({
+      where: { collectionId: collection.id, ...whereVisible(role) },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        orderIndex: true,
+        season: { select: { slug: true, number: true } },
+      },
+      // Same bound as the embedded list, so the two cannot describe different
+      // sets of episodes for the same collection.
+      take: MAX_EMBEDDED_VIDEOS,
+    });
+
+    const rows = await this.prisma.watchProgress.findMany({
+      where: { userId, videoId: { in: videos.map((video) => video.id) } },
+      select: {
+        videoId: true,
+        lastPositionSec: true,
+        maxPositionSec: true,
+        completed: true,
+      },
+    });
+
+    const progress = new Map<string, EpisodeProgress>(
+      rows.map((row) => [
+        row.videoId,
+        { completed: row.completed, lastPositionSec: row.lastPositionSec },
+      ]),
+    );
+
+    const next = nextEpisode(videos, progress);
+
+    return {
+      next:
+        next === null
+          ? null
+          : {
+              videoId: next.video.id,
+              slug: next.video.slug,
+              title: next.video.title,
+              seasonSlug: next.video.season?.slug ?? null,
+              seasonNumber: next.video.season?.number ?? null,
+              orderIndex: next.video.orderIndex,
+              // Zero when it has never been started, which is what makes the
+              // button read "Play" rather than "Resume".
+              lastPositionSec: next.progress?.lastPositionSec ?? 0,
+            },
+      // Only the episodes actually started have a row, so this is short even
+      // for a long-running show.
+      items: rows,
+    };
   }
 
   async create(dto: CreateCollectionInput) {

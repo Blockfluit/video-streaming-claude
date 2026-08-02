@@ -99,6 +99,16 @@ export class CollectionsController {
     return this.resolver.resolve(slug, query.path, user.role);
   }
 
+  /**
+   * The caller's own progress through this collection — which episode to offer
+   * next, and how far they got in each one. Two segments, so like `:id/poster`
+   * its position relative to `:slug` does not matter; kept adjacent for reading.
+   */
+  @Get(':slug/progress')
+  progress(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
+    return this.collections.progress(slug, user.id, user.role);
+  }
+
   @Get(':slug')
   findOne(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
     return this.collections.findBySlug(slug, user.role);

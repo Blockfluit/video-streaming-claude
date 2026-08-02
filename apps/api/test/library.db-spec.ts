@@ -80,6 +80,15 @@ describe('Library (real database)', () => {
     return response.body;
   }
 
+  /** Publishing a collection needs a description and a poster first. */
+  async function publishCollection(id: string): Promise<void> {
+    await admin
+      .patch(`/collections/${id}`)
+      .send({ description: 'A description.', posterKey: 'posters/a.jpg' })
+      .expect(200);
+    await admin.post(`/collections/${id}/publish`).expect(200);
+  }
+
   beforeEach(async () => {
     banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     workspace = await mkdtemp(join(tmpdir(), 'library-'));
@@ -500,6 +509,200 @@ describe('Library (real database)', () => {
     // a collection slug.
     it('does not shadow the collection detail route', async () => {
       await admin.get(`/collections/${south.slug}`).expect(200);
+    });
+  });
+
+  /**
+   * What the player page reads. Keyed on an id rather than a slug path,
+   * which is what makes the key set below worth pinning: `GET /videos/:id`
+   * hands out storage keys, and the whole reason this endpoint exists is that
+   * the viewer-side player must not.
+   */
+  describe('GET /videos/:id/playback', () => {
+    let south: { id: string; slug: string };
+    let episode: { id: string; slug: string };
+
+    beforeEach(async () => {
+      south = await createCollection('South Park');
+      const season = await admin
+        .post('/seasons')
+        .send({ collectionId: south.id, number: 1 })
+        .expect(201);
+      episode = await seedVideo(south.id, 'Cartman Gets an Anal Probe', {
+        seasonId: season.body.id,
+        ...publishable,
+      });
+    });
+
+    it('carries both parents, so the page can link back and link on', async () => {
+      const response = await admin.get(`/videos/${episode.id}/playback`).expect(200);
+
+      expect(response.body).toMatchObject({
+        id: episode.id,
+        title: 'Cartman Gets an Anal Probe',
+        collection: { slug: 'south-park', title: 'South Park' },
+        season: { slug: 'season-1', number: 1 },
+      });
+    });
+
+    /**
+     * Pinned as an exact set, the way `requests/serialize.spec.ts` pins its
+     * view. A `toMatchObject` would pass just as happily with `storageKey`
+     * riding along, and the way that arrives is somebody adding a column to
+     * the shared projection for an admin screen.
+     */
+    it('exposes no storage keys or probe diagnostics', async () => {
+      const response = await admin.get(`/videos/${episode.id}/playback`).expect(200);
+
+      expect(Object.keys(response.body).sort()).toEqual(
+        [
+          'collection',
+          'collectionId',
+          'description',
+          'durationSec',
+          'height',
+          'id',
+          'introEndSec',
+          'introStartSec',
+          'orderIndex',
+          'outroEndSec',
+          'outroStartSec',
+          'season',
+          'seasonId',
+          'slug',
+          'state',
+          'tags',
+          'thumbnailKey',
+          'title',
+          'width',
+        ].sort(),
+      );
+    });
+
+    it('is null-seasoned for a video sitting directly in the collection', async () => {
+      const film = await seedVideo(south.id, 'Bigger Longer Uncut', publishable);
+
+      const response = await admin.get(`/videos/${film.id}/playback`).expect(200);
+
+      expect(response.body.season).toBeNull();
+    });
+
+    it('404s a draft for a USER, so an id cannot confirm one exists', async () => {
+      const user = await asUser();
+
+      await user.get(`/videos/${episode.id}/playback`).expect(404);
+    });
+
+    /**
+     * The case a filter on the video alone gets wrong. Publishing the episode
+     * without publishing its collection leaves it unreachable through the slug
+     * route; an id must not be the way around that.
+     */
+    it('404s a published video inside a draft collection', async () => {
+      await admin.post(`/videos/${episode.id}/publish`).expect(200);
+      const user = await asUser();
+
+      await user.get(`/videos/${episode.id}/playback`).expect(404);
+    });
+
+    it('serves it once both are published', async () => {
+      await admin.post(`/videos/${episode.id}/publish`).expect(200);
+      await publishCollection(south.id);
+      const user = await asUser();
+
+      await user.get(`/videos/${episode.id}/playback`).expect(200);
+    });
+  });
+
+  /**
+   * The title page's hero button and every episode's resume bar, in one read.
+   */
+  describe('GET /collections/:slug/progress', () => {
+    let south: { id: string; slug: string };
+    let first: { id: string; slug: string };
+    let second: { id: string; slug: string };
+
+    beforeEach(async () => {
+      south = await createCollection('South Park');
+      first = await seedVideo(south.id, 'One', { orderIndex: 1, ...publishable });
+      second = await seedVideo(south.id, 'Two', { orderIndex: 2, ...publishable });
+      await admin.post(`/videos/${first.id}/publish`).expect(200);
+      await admin.post(`/videos/${second.id}/publish`).expect(200);
+      await publishCollection(south.id);
+    });
+
+    it('offers the first episode when nothing has been watched', async () => {
+      const response = await admin.get(`/collections/${south.slug}/progress`).expect(200);
+
+      expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 0 });
+      expect(response.body.items).toEqual([]);
+    });
+
+    it('offers the next unfinished one, and reports how far each got', async () => {
+      await admin
+        .post(`/videos/${first.id}/heartbeat`)
+        .send({ playSessionId: '11111111-1111-4111-8111-111111111111', positionSec: 119, deltaSec: 30 })
+        .expect(200);
+
+      const response = await admin.get(`/collections/${south.slug}/progress`).expect(200);
+
+      // 119 of 120 seconds is past the completion threshold, so the offer moves on.
+      expect(response.body.next.videoId).toBe(second.id);
+      expect(response.body.items).toEqual([
+        { videoId: first.id, lastPositionSec: 119, maxPositionSec: 119, completed: true },
+      ]);
+    });
+
+    it('resumes a half-watched episode rather than skipping it', async () => {
+      await admin
+        .post(`/videos/${first.id}/heartbeat`)
+        .send({ playSessionId: '11111111-1111-4111-8111-111111111111', positionSec: 30, deltaSec: 30 })
+        .expect(200);
+
+      const response = await admin.get(`/collections/${south.slug}/progress`).expect(200);
+
+      expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 30 });
+    });
+
+    /** One person's positions are not another's. */
+    it('is scoped to the caller', async () => {
+      await admin
+        .post(`/videos/${first.id}/heartbeat`)
+        .send({ playSessionId: '11111111-1111-4111-8111-111111111111', positionSec: 30, deltaSec: 30 })
+        .expect(200);
+      const user = await asUser();
+
+      const response = await user.get(`/collections/${south.slug}/progress`).expect(200);
+
+      expect(response.body.items).toEqual([]);
+      expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 0 });
+    });
+
+    it('never offers a draft episode to a USER', async () => {
+      const draft = await seedVideo(south.id, 'Zero', { orderIndex: 0, ...publishable });
+      const user = await asUser();
+
+      const asAdmin = await admin.get(`/collections/${south.slug}/progress`).expect(200);
+      const asViewer = await user.get(`/collections/${south.slug}/progress`).expect(200);
+
+      // The admin can see it, so the draft really is first in order.
+      expect(asAdmin.body.next.videoId).toBe(draft.id);
+      expect(asViewer.body.next.videoId).toBe(first.id);
+    });
+
+    it('404s a collection the caller cannot see', async () => {
+      const hidden = await createCollection('Hidden');
+      const user = await asUser();
+
+      await user.get(`/collections/${hidden.slug}/progress`).expect(404);
+    });
+
+    it('has nothing to offer for an empty collection', async () => {
+      const empty = await createCollection('Empty');
+
+      const response = await admin.get(`/collections/${empty.slug}/progress`).expect(200);
+
+      expect(response.body).toEqual({ next: null, items: [] });
     });
   });
 

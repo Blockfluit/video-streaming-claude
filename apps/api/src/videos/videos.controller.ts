@@ -58,6 +58,20 @@ export class VideosController {
     return this.videos.list(query, user.role);
   }
 
+  /**
+   * Everything the player page needs, and nothing else.
+   *
+   * `GET /videos/:id` is the admin read — it carries storage keys and probe
+   * diagnostics — so the viewer-side player has its own endpoint rather than
+   * borrowing that one. It returns the same video shape the slug resolver
+   * does, plus the collection and season needed to build a link back to the
+   * title page and on to the next episode.
+   */
+  @Get(':id/playback')
+  playback(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.videos.findForPlayback(id, user.role);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.videos.findOne(id, user.role);
