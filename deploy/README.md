@@ -38,8 +38,8 @@ and never touch the Traefik router.
 ### 1. Storage
 
 ```sh
-mkdir -p /srv/video-dev/media /srv/video-dev/derived
-chown -R 1000:1000 /srv/video-dev
+sudo mkdir -p /srv/docker/streaming-platform-dev/media /srv/docker/streaming-platform-dev/derived
+sudo chown -R 1000:1000 /srv/docker/streaming-platform-dev
 ```
 
 The API container runs as `node` (uid 1000) and creates and writes into both directories at boot.
@@ -53,14 +53,17 @@ Drop files into `media/` and the watcher ingests them. That works because this i
 — `inotify` does not fire reliably over NFS or SMB, so if the library ever moves to a network share,
 expect to trigger a rescan by hand.
 
-### 2. GHCR credentials
+### 2. GHCR access
 
-The repository is private, so the server cannot pull without a credential. In **Portainer →
-Registries → Add registry → Custom**:
+The repository is public, so the stack needs no Git credential. The **packages** are a separate
+setting: a package first published by Actions is private even when its repository is not, so the
+server cannot pull until you do one of these once, after the first deploy has pushed an image.
 
-- URL: `ghcr.io`
-- Username: your GitHub username
-- Password: a GitHub personal access token (classic) with **`read:packages`** only
+- **Make the packages public** — *Packages → `api` / `web` → Package settings → Change visibility*.
+  Nothing is disclosed that the public source did not already disclose, and the server then needs no
+  credential at all.
+- **Or add a registry credential** — *Portainer → Registries → Add registry → Custom*, URL `ghcr.io`,
+  your GitHub username, and a personal access token scoped to **`read:packages`** only.
 
 ### 3. The stack
 
@@ -71,7 +74,7 @@ Registries → Add registry → Custom**:
 | Repository URL | `https://github.com/Blockfluit/video-streaming-claude` |
 | Reference | `refs/heads/main` |
 | Compose path | `deploy/compose.yml` |
-| Authentication | on — same PAT as above (private repo) |
+| Authentication | off — the repository is public |
 
 Paste the contents of [`stack.env.example`](stack.env.example) into the stack's **Environment
 variables** editor, replace the placeholder hostnames with the real ones, and fill in the two
@@ -179,8 +182,8 @@ STACK_NAME=video-prd
 WEB_DOMAIN=<the production web hostname>
 API_DOMAIN=<the production API hostname>
 IMAGE_TAG=prd
-MEDIA_PATH=/srv/video-prd/media
-DERIVED_PATH=/srv/video-prd/derived
+MEDIA_PATH=/srv/docker/streaming-platform-prd/media
+DERIVED_PATH=/srv/docker/streaming-platform-prd/derived
 ```
 
 with its own secrets. `STACK_NAME` keeps the container names and Traefik routers distinct, and the
