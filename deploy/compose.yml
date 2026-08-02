@@ -1,0 +1,184 @@
+# Portainer stack — one file, one environment per stack.
+#
+# Deployed as a Git-backed stack pointed at this repository (compose path
+# `deploy/compose.yml`). Every value that differs between dev and production is
+# a variable, so production is a second stack with a different stack.env and
+# nothing forked.
+#
+# Portainer turns the stack's environment variables into a stack.env file and
+# hands it to compose as --env-file, so `${VAR}` interpolation always works no
+# matter where that file lands. Everything load-bearing therefore arrives that
+# way, and the required values use `${VAR:?message}` so a missing one fails the
+# deploy with a sentence rather than booting broken.
+#
+# `env_file:` is a second, optional path for tuning knobs only. It is declared
+# twice with `required: false` because the file sits beside the compose file in
+# a web-editor stack and one directory up in a Git-backed stack, and env_file
+# resolves relative to the compose file.
+#
+# See deploy/stack.env.example for the full list, and deploy/README.md for the
+# one-time server setup.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: ${STACK_NAME}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the stack environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the stack environment}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in the stack environment}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The API exits non-zero when it cannot reach the database, so without
+      # this the stack spends its first minute in a restart loop.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      # Deliberately not on the traefik network. Nothing outside this stack has
+      # any business reaching the database, and there is no published port here
+      # either — the local development compose file publishes 5432, this does not.
+      - internal
+
+  # The service name `api` is load-bearing. apps/web bakes NUXT_API_TARGET into
+  # the Nitro bundle at image-build time (default http://api:4000), so renaming
+  # this service breaks every request the frontend makes, at runtime, with no
+  # build-time warning. Rename it only alongside a rebuild with a matching
+  # --build-arg.
+  api:
+    image: ${IMAGE_REGISTRY}/api:${IMAGE_TAG}
+    container_name: ${STACK_NAME}-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Matches the `node` user baked into the image. The bind-mounted host
+    # directories must be owned by this uid — see deploy/README.md step 1.
+    user: '1000:1000'
+    # Optional, and optional in *both* places on purpose. Portainer writes
+    # stack.env into the stack folder root. For a web-editor stack that is
+    # beside the compose file; for a Git-backed stack the compose file is one
+    # directory down, in deploy/. `env_file` resolves relative to the compose
+    # file, so no single path is correct in both cases — and `required: false`
+    # means whichever one is absent costs nothing instead of failing the deploy.
+    #
+    # This carries only the optional tuning knobs. Everything the app cannot
+    # start without is interpolated below instead, which works in either layout
+    # because Portainer always hands stack.env to compose as --env-file.
+    env_file:
+      - path: ./stack.env
+        required: false
+      - path: ../stack.env
+        required: false
+    environment:
+      # `:?` fails the deploy with this message when the value is missing,
+      # rather than booting and throwing — or worse, booting without it.
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in the stack environment}
+
+      # Fixed by the topology rather than by the operator. compose gives
+      # `environment` precedence over `env_file`, so nothing in stack.env can
+      # quietly override one of these.
+      NODE_ENV: production
+      PORT: '4000'
+
+      # Without this the session cookie is never set — see the comment in
+      # apps/api/src/main.ts. It is the difference between a working login and
+      # one that returns 200 and does nothing.
+      TRUST_PROXY: 'true'
+
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+      # Absolute, always. Both resolve against process.cwd() when relative, and
+      # DERIVED_ROOT inside MEDIA_ROOT is refused at boot — generated thumbnails
+      # landing in the watched tree is a watcher feedback loop.
+      MEDIA_ROOT: /media
+      DERIVED_ROOT: /derived
+
+      # On a volume rather than the container filesystem so the token survives a
+      # restart. It is deleted the moment it is redeemed.
+      BOOTSTRAP_TOKEN_FILE: /state/.bootstrap-token
+    volumes:
+      - ${MEDIA_PATH}:/media
+      - ${DERIVED_PATH}:/derived
+      - apistate:/state
+    networks:
+      - internal
+      - traefik
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=traefik'
+      - 'traefik.http.services.${STACK_NAME}-api.loadbalancer.server.port=4000'
+
+      # The API on its own hostname. Nothing in the app uses this — it is for
+      # reaching the API directly with curl or an HTTP client.
+      - 'traefik.http.routers.${STACK_NAME}-api.rule=Host(`${API_DOMAIN}`)'
+      - 'traefik.http.routers.${STACK_NAME}-api.entrypoints=websecure'
+      - 'traefik.http.routers.${STACK_NAME}-api.tls=true'
+      - 'traefik.http.routers.${STACK_NAME}-api.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.${STACK_NAME}-api.service=${STACK_NAME}-api'
+
+      # `/api/**` on the *web* hostname, sent straight here instead of through
+      # Nuxt. Same origin as far as the browser is concerned — same host, same
+      # cookie, same path the app already calls — but two things improve:
+      #
+      #  - Uploads stop being buffered in memory. Nitro's proxy calls h3's
+      #    getRequestWebStream, which falls back to readRawBody on the
+      #    node-server preset and reads the whole body into RAM. Measured: a
+      #    600 MB upload grew the web container by ~575 MB, and a 256 MB
+      #    container was OOM-killed by it. `streamRequest: true` in
+      #    nuxt.config.ts is the documented fix and does not take that branch.
+      #    A 2 GB upload is allowed, and no amount of RAM makes buffering it
+      #    sensible.
+      #  - Video streaming loses a hop. Every range request a seeking viewer
+      #    makes was being relayed by a second Node process for no reason.
+      #
+      # SSR still goes through the Nitro route rule to http://api:4000 — those
+      # are small JSON reads, in-process, and never touch this router.
+      #
+      # StripPrefix because the API has no global prefix: /api/videos here is
+      # /videos there. Priority is explicit rather than trusting Traefik's
+      # rule-length heuristic to beat the web router's bare Host() match.
+      - 'traefik.http.routers.${STACK_NAME}-apipath.rule=Host(`${WEB_DOMAIN}`) && PathPrefix(`/api`)'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.priority=100'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.entrypoints=websecure'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.tls=true'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.middlewares=${STACK_NAME}-apistrip'
+      - 'traefik.http.routers.${STACK_NAME}-apipath.service=${STACK_NAME}-api'
+      - 'traefik.http.middlewares.${STACK_NAME}-apistrip.stripprefix.prefixes=/api'
+
+  web:
+    image: ${IMAGE_REGISTRY}/web:${IMAGE_TAG}
+    container_name: ${STACK_NAME}-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    # No env_file on purpose. This container needs nothing from the stack
+    # variables, and there is no reason for POSTGRES_PASSWORD to sit in the
+    # environment of the process that faces the internet.
+    environment:
+      NITRO_PORT: '3000'
+      NITRO_HOST: '0.0.0.0'
+    networks:
+      - internal
+      - traefik
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=traefik'
+      - 'traefik.http.routers.${STACK_NAME}-web.rule=Host(`${WEB_DOMAIN}`)'
+      - 'traefik.http.routers.${STACK_NAME}-web.entrypoints=websecure'
+      - 'traefik.http.routers.${STACK_NAME}-web.tls=true'
+      - 'traefik.http.routers.${STACK_NAME}-web.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.${STACK_NAME}-web.loadbalancer.server.port=3000'
+
+networks:
+  internal:
+  traefik:
+    external: true
+
+volumes:
+  pgdata:
+  apistate:

@@ -28,6 +28,29 @@ export default defineNuxtConfig({
     // Everything the browser touches is same-origin on :3000. This is not just
     // convenience: a cross-origin <track> fails silently, and <video>/<track>
     // cannot send Authorization headers — which is why auth is cookie-based.
-    '/api/**': { proxy: `${process.env.NUXT_API_TARGET ?? 'http://localhost:4000'}/**` },
+    //
+    // NUXT_API_TARGET is read while `nuxt build` runs and baked into the Nitro
+    // output; setting it on a running container does nothing. That is why the
+    // API service is named `api` in every deployment — see deploy/README.md.
+    //
+    // `streamRequest` asks h3 not to buffer the request body. Measured: it
+    // does not currently help on the node-server preset. getRequestWebStream
+    // falls back to readRawBody when the incoming request looks like it has a
+    // raw body, which reads the whole thing into memory anyway — a 600 MB
+    // upload grew this process by ~575 MB, and a 256 MB container was
+    // OOM-killed by it. It is set because it is the correct declaration and
+    // costs nothing if h3 fixes that path.
+    //
+    // Production does not depend on it: Traefik routes `/api` on the web
+    // hostname straight to the API, so browser uploads never pass through here
+    // at all (see deploy/compose.yml). What still comes through this rule is
+    // SSR — small JSON reads, in-process — and `npm run dev`, where a large
+    // upload does buffer.
+    '/api/**': {
+      proxy: {
+        to: `${process.env.NUXT_API_TARGET ?? 'http://localhost:4000'}/**`,
+        streamRequest: true,
+      },
+    },
   },
 })

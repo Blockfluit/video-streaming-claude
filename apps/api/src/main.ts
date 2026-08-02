@@ -44,6 +44,34 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
+  /*
+   * Trust the reverse proxy in front of us, when there is one.
+   *
+   * This looks like boilerplate and is not. Two things break without it once a
+   * proxy terminates TLS:
+   *
+   *  - The session cookie is `secure` when NODE_ENV=production, and
+   *    express-session refuses to *set* a secure cookie unless it believes the
+   *    connection is HTTPS. It only believes that when `trust proxy` lets it
+   *    read `X-Forwarded-Proto`. Without this, /auth/login answers 200 and
+   *    sends no cookie back, which reads as "my password stopped working".
+   *  - The throttler keys unauthenticated routes (/auth/login, /auth/redeem)
+   *    on `req.ip`. Behind a proxy that is the proxy's address for everyone,
+   *    so the whole internet shares one login bucket.
+   *
+   * Off by default so a direct `npm run dev` is untouched: forwarded headers
+   * are client-supplied, and trusting them with nothing in front is how a
+   * caller spoofs its own source address.
+   */
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    // 'true' trusts every hop, which is right when the only route in is the
+    // proxy (it overwrites X-Forwarded-* rather than passing yours through).
+    // A number is a hop count, for a chain you want to be precise about.
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isInteger(hops) ? hops : trustProxy === 'true');
+  }
+
   // Must be registered before routes, which Nest maps during listen().
   app.use(app.get(SessionStoreService).createMiddleware());
 

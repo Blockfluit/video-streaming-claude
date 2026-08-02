@@ -1,0 +1,53 @@
+# The build installs and compiles from source. Anything here that came from a
+# host build is at best wasted context and at worst a stale artifact copied
+# over a fresh one.
+
+node_modules
+**/node_modules
+
+# Build output — all of it is regenerated inside the image.
+dist
+**/dist
+.output
+**/.output
+.nuxt
+**/.nuxt
+.nitro
+**/.nitro
+.cache
+**/.cache
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Prisma's generated client. Gitignored, regenerated in the build stage, and
+# emitted as TypeScript — a host copy compiled against a different schema is a
+# genuinely confusing failure.
+apps/api/src/prisma/generated
+
+# Secrets. None of these belong in an image layer, and a layer is forever even
+# if a later step deletes the file.
+.env
+.env.*
+!.env.example
+.bootstrap-token
+deploy/stack.env
+
+# The media library. Potentially terabytes, and the container mounts it.
+media
+derived
+
+# Test and tooling output
+coverage
+test-results
+playwright-report
+**/e2e/.auth
+
+# Not needed to build, and .git in particular is large and changes every commit.
+.git
+.github
+.gitignore
+.gitattributes
+.claude
+docs
+*.md
+!README.md
