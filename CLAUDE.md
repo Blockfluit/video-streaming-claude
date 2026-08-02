@@ -496,6 +496,44 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   every lookup and every write must go through `normaliseUsername()`; querying the raw input makes login
   silently case-sensitive. `displayName` is what gets rendered and is seeded from the username as typed.
 
+**Deployment** (`Dockerfile`, `deploy/`, `.github/workflows/` — see [`deploy/README.md`](deploy/README.md))
+
+- `TRUST_PROXY` must be set behind a TLS-terminating proxy, and the failure without it is silent.
+  The session cookie is `secure` when `NODE_ENV=production`, and express-session refuses to *set* a
+  secure cookie unless it believes the connection is HTTPS — which it only does when `trust proxy`
+  lets it read `X-Forwarded-Proto`. `/auth/login` then answers **200 and sends no cookie**, which
+  reads as "my password stopped working". Verified both ways: with the header, `Set-Cookie … Secure`;
+  without it, a 200 and nothing. It also fixes throttling, which otherwise keys `/auth/login` on the
+  proxy's address for every visitor on earth.
+- Traefik routes `/api` on the **web** hostname straight to the API, bypassing Nuxt. Not a
+  micro-optimisation: **Nitro's proxy buffers the whole request body in memory**, and
+  `streamRequest: true` does not prevent it on the node-server preset — h3's `getRequestWebStream`
+  falls back to `readRawBody`. Measured: a 600 MB upload grew the web container ~575 MB and
+  OOM-killed it at a 256 MB limit; via Traefik the same upload peaked at 55 MB. Uploads are capped at
+  2 GB. The route rule stays for SSR, which is small JSON in-process.
+- **`NUXT_API_TARGET` is baked in at build time**, not read at runtime — Nuxt freezes it into the
+  Nitro bundle's route rules. Setting it on a running container does nothing, which is why the API
+  service is named `api` in every stack and the image is built with `http://api:4000`.
+- `prisma generate` runs **before** `nest build` in the image: the generated client is gitignored,
+  so it can never arrive in the build context. `prisma` and `dotenv` are *runtime* dependencies of
+  apps/api rather than dev ones, so `--omit=dev` leaves the entrypoint able to run
+  `prisma migrate deploy` and `prisma.config.ts` able to load.
+- The production install is `npm ci --omit=dev -w @video/api --include-workspace-root`. A bare
+  `--omit=dev` at the root installs *every* workspace's production dependencies, dragging Nuxt and
+  ~300 MB into the API image.
+- The entrypoint pins `PRISMA_SCHEMA_ENGINE_BINARY` by glob. Left to resolve the engine itself the
+  CLI probes `@prisma/engines` for write access, which a non-root container against a root-owned
+  `node_modules` fails — reporting *"please make sure you install prisma with the right permissions"*,
+  which describes a broken install rather than the unwritable directory it actually found.
+- `/state` is created **in the image**, owned by `node`. Docker seeds a fresh named volume from the
+  image's directory including its ownership, but creates the mount point root-owned when it does not
+  exist — and the bootstrap token write then fails with `EACCES` on first boot. Bind mounts are never
+  chowned by Docker at all, so `MEDIA_PATH` and `DERIVED_PATH` must be `chown 1000:1000` on the host.
+- Alpine is wrong for the API image: `@node-rs/argon2` ships prebuilt **glibc** binaries. The runtime
+  image also needs `ffmpeg`, which is most of its size.
+- Deploying is a **manual** `workflow_dispatch`; GitHub's "Use workflow from" dropdown is the branch
+  picker. Nothing ships on a push.
+
 ## Conventions
 
 - Pure logic (`path-parser`, subtitle matcher, `qualityLabel`, `needsConversion`) lives in testable functions
@@ -510,8 +548,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   failures look nothing like a collision: `/auth/redeem` starts answering **400 "That invite token is not
   valid"** (the other run redeemed it, or truncated it away) or the token file simply vanishes, and a whole
   green suite goes red on code that is fine. Give a parallel checkout its own database with
-  `TEST_DATABASE_URL=…/video_test_<name>` — `test/db/global-setup.ts` already reads it — and remember the
-  `/tmp` token paths still collide, which is what the two ffmpeg suites trip over.
+  `TEST_DATABASE_URL=…/video_test_<name>` — `test/db/global-setup.ts` already reads it — **and set
+  `TMPDIR` to a private directory**, which fixes the token paths too: they are built from
+  `os.tmpdir()`, and Node resolves that from `TMPDIR` on Linux. The two together are full isolation.
+  Confirmed the hard way: a db tier run against a concurrent one from another worktree failed at
+  `transcode.db-spec.ts` (a cancelled job's temp file) and then, on retry, somewhere else entirely —
+  the same code passed 458/458 the moment both variables were set. **A db-tier failure that moves
+  between runs is this, not your change.**
 - `NUXT_DEV_PORT` and `NUXT_API_TARGET` exist for the same reason: :3000 and :4000 are hardcoded defaults,
   and a second checkout cannot start either server without them. Both default to the old values.
 - Validation: **zod schemas in `packages/shared`** are the source of truth, so a form and the endpoint

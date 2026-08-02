@@ -1,0 +1,75 @@
+# The test suite, as a reusable workflow.
+#
+# Called by ci.yml (on pull requests) and by deploy-dev.yml (before it ships).
+# One definition rather than two copies: two copies drift, and the one that
+# drifts is always the copy guarding the deploy.
+
+name: Tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The `.db-spec.ts` tier creates and migrates `video_test` itself, so the
+      # maintenance URL needs an account that may CREATE DATABASE — hence the
+      # superuser rather than the `video` role the dev compose file sets up.
+      TEST_MAINTENANCE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/video_test?schema=public
+      # There is no apps/api/.env in CI, and both of these throw at construction
+      # when unset. The value is irrelevant; its presence is not.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/video_test?schema=public
+      SESSION_SECRET: test-secret-not-used-anywhere-real
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The probe, thumbnail and transcode suites spawn the real binaries.
+      # ubuntu-latest does not ship them.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - run: npm ci
+
+      # Both of these are gitignored and so cannot arrive with the checkout.
+      # `typecheck` needs them: apps/api resolves @video/shared to its emitted
+      # .d.ts, and imports the generated Prisma client from src/. The test
+      # scripts have a `pretest` hook that builds shared, but nothing generates.
+      - name: Build shared package
+        run: npm run build -w @video/shared
+
+      - name: Generate Prisma client
+        run: npm run db:generate -w @video/api
+
+      - run: npm run typecheck
+
+      # All three API tiers, in order. Running one is not enough — a change can
+      # pass the unit and database tiers and break the stubbed-HTTP one.
+      - name: API tests (unit, e2e, db)
+        run: npm run test:all
+
+      - name: Web unit tests
+        run: npm run test -w @video/web
