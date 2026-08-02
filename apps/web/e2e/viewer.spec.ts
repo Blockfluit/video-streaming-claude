@@ -35,11 +35,37 @@ async function startPlaying(page: Page): Promise<void> {
 }
 
 /**
- * Opens the first video card on the current page.
+ * The title page of some video in the library, chosen from the data.
  *
- * Continue Watching cards now point at `/watch/`, so "the first card" has to
- * mean the first one that goes to a title page — otherwise this walks straight
- * past the thing under test on any account that has watched something.
+ * Not "the first `/c/` link on the home page": that is as likely to be a
+ * *collection* now, because a saved show links to its collection rather than to
+ * an episode. Taking the first one on trust sent the back-link test to a
+ * collection page and then waited for a URL it could never reach.
+ */
+async function aVideoTitlePage(page: Page): Promise<string> {
+  await visit(page, '/browse')
+  const path = await page.evaluate(async () => {
+    const body = await (await fetch('/api/videos?limit=100')).json()
+    for (const video of body.items ?? []) {
+      // `/videos?` carries `collectionId` and no slugs at all, so the collection
+      // has to be asked for. `playback` answers with both parents, which is
+      // exactly what a title-page URL is made of.
+      const detail = await (await fetch(`/api/videos/${video.id}/playback`)).json()
+      if (!detail?.collection?.slug) continue
+      return `/c/${[detail.collection.slug, detail.season?.slug, detail.slug].filter(Boolean).join('/')}`
+    }
+    return null
+  })
+  expect(path, 'the library holds no video inside a collection').not.toBeNull()
+  return path!
+}
+
+/**
+ * Opens the first card on the current page that leads to a title page.
+ *
+ * Continue Watching cards point at `/watch/` now, so "the first card" has to
+ * mean the first one that goes somewhere readable — otherwise this walks
+ * straight past the thing under test on any account that has watched something.
  */
 async function openFirstTitlePage(page: Page): Promise<void> {
   const card = page.locator('main a[href^="/c/"]').first()
@@ -94,15 +120,17 @@ test.describe('viewer', () => {
   })
 
   test('the player links back to the title page it came from', async ({ page }) => {
-    await visit(page, '/')
-    await openFirstTitlePage(page)
-    const titlePage = new URL(page.url()).pathname
+    const titlePage = await aVideoTitlePage(page)
+    await visit(page, titlePage)
 
     await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
     await page.waitForURL(/\/watch\//)
 
     await page.getByRole('link', { name: 'Details' }).click()
     await page.waitForURL(url => url.pathname === titlePage)
+    // Wait for the title page's own content before judging the player's
+    // absence: the URL changes before the outgoing component is torn down.
+    await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
     await expect(page.locator('video')).toHaveCount(0)
   })
 
@@ -254,11 +282,9 @@ test.describe('viewer', () => {
      * the narrow aside it was.
      */
     test('the More from shelf moves between videos in the collection', async ({ page }) => {
-      await visit(page, '/')
-      await openFirstTitlePage(page)
-
       /**
-       * The skip is decided from the *data*, not from the DOM.
+       * The skip is decided from the *data*, not from the DOM, and the page it
+       * opens is chosen from that same data.
        *
        * This guard used to be `await page.getByText('More from').count() === 0`,
        * run immediately after `waitForURL`. `count()` does not retry, and the
@@ -267,18 +293,34 @@ test.describe('viewer', () => {
        * reporting "only one video in this collection" about a collection
        * holding five. A test that never runs is worse than no test: it reports
        * green.
+       *
+       * Asking only whether *some* collection holds two is not enough either:
+       * opening whichever card the home page shows first can land on a
+       * single-video collection, where the shelf is correctly absent and the
+       * test fails having proved nothing.
        */
-      const inCollection = await page.evaluate(async () => {
-        const response = await fetch('/api/videos?limit=100')
-        const body = await response.json()
-        const counts = new Map<string, number>()
-        for (const video of body.items ?? []) {
-          const key = video.collection?.slug ?? '(none)'
-          counts.set(key, (counts.get(key) ?? 0) + 1)
+      await visit(page, '/browse')
+      const target = await page.evaluate(async () => {
+        const list = await (await fetch('/api/collections?limit=100')).json()
+        for (const collection of list.items ?? []) {
+          // The detail read is what carries the seasons *with their slugs*; a
+          // video row knows only its `seasonId`, and a URL built without the
+          // slug drops the season segment and 404s.
+          const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+          const videos = detail.videos ?? []
+          if (videos.length < 2) continue
+          const seasonSlug = new Map(
+            (detail.seasons ?? []).map((s: { id: string, slug: string }) => [s.id, s.slug]),
+          )
+          const first = videos[0]
+          const path = [collection.slug, seasonSlug.get(first.seasonId), first.slug].filter(Boolean)
+          return `/c/${path.join('/')}`
         }
-        return Math.max(0, ...counts.values())
+        return null
       })
-      test.skip(inCollection < 2, 'no collection here holds two videos')
+      test.skip(target === null, 'no collection here holds two videos')
+
+      await visit(page, target!)
 
       // Now wait for it properly — `expect` retries where `count()` does not.
       const shelf = page.getByRole('heading', { name: /^More from / })
@@ -315,6 +357,10 @@ test.describe('viewer', () => {
   })
 
   test('a season can be chosen when the collection has seasons', async ({ page }) => {
+    // Somewhere in the app first: a relative `fetch` inside `page.evaluate` has
+    // no base URL to resolve against on `about:blank`.
+    await visit(page, '/browse')
+
     const withSeasons = await page.evaluate(async () => {
       const body = await (await fetch('/api/collections?limit=100')).json()
       for (const collection of body.items ?? []) {

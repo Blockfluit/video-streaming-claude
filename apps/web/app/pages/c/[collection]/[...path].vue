@@ -23,7 +23,8 @@ interface ResolvedVideo {
   height: number | null
   orderIndex: number | null
   seasonId: string | null
-  collection: { id: string, slug: string, title: string }
+  thumbnailKey?: string | null
+  collection: { id: string, slug: string, title: string, posterKey?: string | null }
   season?: { id: string, slug: string, number: number | null } | null
 }
 
@@ -33,6 +34,7 @@ interface ResolvedCollection {
   title: string
   description: string | null
   year?: number | null
+  posterKey?: string | null
   state: string
 }
 
@@ -132,6 +134,7 @@ const collectionView = computed(() => ({
   title: collection.value.title,
   description: collection.value.description ?? null,
   year: detail.value?.year ?? null,
+  posterKey: collection.value.posterKey,
 }))
 
 useHead(() => ({ title: video.value?.title ?? collection.value?.title ?? 'Library' }))

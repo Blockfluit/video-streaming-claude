@@ -19,6 +19,8 @@ interface SummaryVideo {
   height: number | null
   orderIndex: number | null
   seasonId: string | null
+  /** Null means there is none; absent means this payload does not say. */
+  thumbnailKey?: string | null
 }
 
 interface SummarySeason {
@@ -29,7 +31,14 @@ interface SummarySeason {
 }
 
 const props = defineProps<{
-  collection: { id: string, slug: string, title: string, description: string | null, year?: number | null }
+  collection: {
+    id: string
+    slug: string
+    title: string
+    description: string | null
+    year?: number | null
+    posterKey?: string | null
+  }
   seasons: SummarySeason[]
   /** Every video in the collection, already ordered. */
   videos: SummaryVideo[]
@@ -110,9 +119,11 @@ const playSubtitle = computed(() => {
  * aspect, the way a title page reads. Falls back to the stretched poster for a
  * collection with nothing in it yet.
  */
+const posterUrl = computed(() => collectionPoster(props.collection))
+
 const backdrop = computed(() => {
-  const first = next.value?.videoId ?? props.videos[0]?.id
-  return first ? `/api/videos/${first}/thumbnail` : `/api/collections/${props.collection.id}/poster`
+  const first = props.videos.find(video => video.id === next.value?.videoId) ?? props.videos[0]
+  return videoThumbnail(first) ?? posterUrl.value
 })
 
 /**
@@ -191,8 +202,8 @@ const heading = computed(() => {
         -->
         <div class="aspect-2/3 w-32 shrink-0 overflow-hidden rounded-lg bg-(--ui-bg-elevated) shadow-2xl ring-1 ring-(--ui-border) sm:w-44">
           <img
-            v-if="!posterBroken"
-            :src="`/api/collections/${collection.id}/poster`"
+            v-if="posterUrl && !posterBroken"
+            :src="posterUrl"
             alt=""
             class="size-full object-cover"
             @error="posterBroken = true"
@@ -267,7 +278,7 @@ const heading = computed(() => {
               :to="linkTo(entry)"
               :title="entry.title"
               :number="index + 1"
-              :image-url="`/api/videos/${entry.id}/thumbnail`"
+              :image-url="videoThumbnail(entry)"
               :duration-sec="entry.durationSec"
               :description="entry.description"
               :progress="progressPercent(progressByVideo.get(entry.id)?.lastPositionSec ?? null, entry.durationSec)"
@@ -286,7 +297,7 @@ const heading = computed(() => {
             :to="linkTo(entry)"
             :title="entry.title"
             :subtitle="runtime(entry.durationSec)"
-            :image-url="`/api/videos/${entry.id}/thumbnail`"
+            :image-url="videoThumbnail(entry)"
             :width="entry.width"
             :height="entry.height"
             :progress="progressPercent(progressByVideo.get(entry.id)?.lastPositionSec ?? null, entry.durationSec)"

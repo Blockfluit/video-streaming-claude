@@ -168,14 +168,29 @@ test.describe('admin', () => {
      * page happens to show first. Those are two different orderings and they
      * disagree — the first draft of this test credited Chinatown and then
      * asserted against South Park.
+     *
+     * That worry no longer applies, and the home page can no longer answer the
+     * question anyway: a saved show links to its *collection* now and a resumed
+     * video links to `/watch/`, so a home page can hold no card that names a
+     * video at all. Since the test only ever opens `/admin/videos/:id`, one
+     * source for the id is both sufficient and self-consistent — there is no
+     * second ordering left to disagree with.
      */
     await visit(page, '/')
-    const titlePath = await page.locator('main a[href^="/c/"]').first().getAttribute('href') as string
-    const [, collectionSlug, ...rest] = new URL(titlePath, 'http://x').pathname.split('/').filter(Boolean)
-    const videoId = await page.evaluate(async ({ slug, path }) => {
-      const response = await fetch(`/api/collections/${slug}/resolve?path=${encodeURIComponent(path)}`)
-      return (await response.json()).data.id as string
-    }, { slug: collectionSlug as string, path: rest.join('/') })
+    const target = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=100')).json()
+      for (const video of body.items ?? []) {
+        // `/videos?` carries `collectionId` but no slugs; `playback` carries
+        // both parents, which is what a title-page URL is built from.
+        const detail = await (await fetch(`/api/videos/${video.id}/playback`)).json()
+        if (!detail?.collection?.slug) continue
+        const path = [detail.collection.slug, detail.season?.slug, detail.slug].filter(Boolean)
+        return { id: video.id as string, titlePage: `/c/${path.join('/')}` }
+      }
+      return null
+    })
+    expect(target, 'the library holds no video inside a collection').not.toBeNull()
+    const videoId = target!.id
 
     await visit(page, `/admin/videos/${videoId}`)
 
@@ -202,8 +217,9 @@ test.describe('admin', () => {
       page.getByRole('button', { name: 'Add credit' }).click())
     await expect(page.getByText(name)).toBeVisible()
 
-    // And it must reach the viewer-facing panel, not just the editor.
-    await visit(page, watchPath)
+    // And it must reach the viewer-facing panel, not just the editor. That
+    // panel lives on the title page now rather than beside the player.
+    await visit(page, target!.titlePage)
     await expect(page.getByRole('heading', { name: 'Cast and crew' })).toBeVisible()
     await expect(page.getByText(name)).toBeVisible()
     await expect(page.getByText('as Herself')).toBeVisible()

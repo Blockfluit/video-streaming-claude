@@ -12,6 +12,8 @@ interface CollectionCard {
   year: number | null
   tags: string[]
   state: string
+  /** Null means there is none, so the card does not ask for it. */
+  posterKey: string | null
 }
 
 const route = useRoute()
@@ -72,7 +74,7 @@ useHead({ title: 'Browse' })
         :to="collectionPath(collection)"
         :title="collection.title"
         :subtitle="collection.year ? String(collection.year) : null"
-        :image-url="`/api/collections/${collection.id}/poster`"
+        :image-url="collectionPoster(collection)"
         :badge="collection.state === 'PUBLISHED' ? null : collection.state"
       />
     </div>

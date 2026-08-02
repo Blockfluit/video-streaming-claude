@@ -54,7 +54,15 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
       <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent" />
 
       <div class="absolute top-2 right-2 flex gap-1">
-        <UBadge v-if="badge" color="neutral" variant="solid" size="sm" class="bg-black/70">
+        <!--
+          `text-white` is load-bearing. `variant="solid"` supplies a light
+          background *and the dark text to sit on it*, and overriding only the
+          background with `bg-black/70` left that dark text on a near-black
+          chip — 1.14:1, which is not a legible badge, it is a smudge. The
+          legibility audit had never reached this page to say so: a collection
+          with no poster made the request watchdog fail the test first.
+        -->
+        <UBadge v-if="badge" color="neutral" variant="solid" size="sm" class="bg-black/70 text-white">
           {{ badge }}
         </UBadge>
         <QualityBadge :width="width" :height="height" />

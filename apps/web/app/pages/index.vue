@@ -20,6 +20,8 @@ interface CardVideo {
   height?: number | null
   collection: { slug: string, title: string } | null
   season: { slug: string } | null
+  /** Null means there is none, so the card does not ask for it. */
+  thumbnailKey?: string | null
 }
 
 interface HistoryItem {
@@ -30,7 +32,7 @@ interface HistoryItem {
 interface SavedItem {
   id: string
   video: CardVideo | null
-  collection: { id: string, slug: string, title: string, year: number | null } | null
+  collection: { id: string, slug: string, title: string, year: number | null, posterKey?: string | null } | null
   next: { id: string, video: CardVideo } | null
 }
 
@@ -41,7 +43,7 @@ interface CuratedRow {
   items: {
     id: string
     video: CardVideo | null
-    collection: { id: string, slug: string, title: string, year: number | null } | null
+    collection: { id: string, slug: string, title: string, year: number | null, posterKey?: string | null } | null
   }[]
 }
 
@@ -51,6 +53,7 @@ interface FeaturedCollection {
   title: string
   description: string | null
   year: number | null
+  posterKey: string | null
 }
 
 const [{ data: history }, { data: watchlist }, { data: rows }, { data: collections }] = await Promise.all([
@@ -81,7 +84,7 @@ const hero = computed(() => {
       // Straight into playback. Someone resuming has already decided what they
       // want; a title page in the way is a page they have read.
       to: playPath(resuming.video),
-      image: `/api/videos/${resuming.video.id}/thumbnail`,
+      image: videoThumbnail(resuming.video),
       resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
     }
   }
@@ -95,7 +98,7 @@ const hero = computed(() => {
     meta: featured.year ? String(featured.year) : null,
     description: featured.description,
     to: collectionPath(featured),
-    image: `/api/collections/${featured.id}/poster`,
+    image: collectionPoster(featured),
     resume: 0,
   }
 })
@@ -123,7 +126,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
       to: collectionPath(entry.collection),
       title: entry.collection.title,
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
-      imageUrl: `/api/collections/${entry.collection.id}/poster`,
+      imageUrl: collectionPoster(entry.collection),
       width: entry.next?.video.width ?? null,
       height: entry.next?.video.height ?? null,
     }
@@ -134,7 +137,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     to: watchPath(video) ?? '/browse',
     title: video.title,
     subtitle: video.collection?.title ?? null,
-    imageUrl: `/api/videos/${video.id}/thumbnail`,
+    imageUrl: videoThumbnail(video),
     width: video.width ?? null,
     height: video.height ?? null,
   }
@@ -189,7 +192,7 @@ useHead({ title: 'Home' })
           action="play"
           :title="item.video.title"
           :subtitle="item.video.collection?.title"
-          :image-url="`/api/videos/${item.video.id}/thumbnail`"
+          :image-url="videoThumbnail(item.video)"
           :width="item.video.width"
           :height="item.video.height"
           :progress="progressPercent(item.progress.lastPositionSec, item.video.durationSec)"

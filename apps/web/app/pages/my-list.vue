@@ -17,12 +17,13 @@ interface CardVideo {
   height: number | null
   collection: { slug: string, title: string } | null
   season: { slug: string } | null
+  thumbnailKey: string | null
 }
 
 interface SavedItem {
   id: string
   video: CardVideo | null
-  collection: { id: string, slug: string, title: string, year: number | null } | null
+  collection: { id: string, slug: string, title: string, year: number | null, posterKey: string | null } | null
   next: { id: string, video: CardVideo } | null
 }
 
@@ -81,8 +82,8 @@ useHead({ title: 'My List' })
           :subtitle="item.collection ? item.next?.video.title : item.video!.collection?.title"
           :image-url="
             item.collection
-              ? `/api/collections/${item.collection.id}/poster`
-              : `/api/videos/${item.video!.id}/thumbnail`
+              ? collectionPoster(item.collection)
+              : videoThumbnail(item.video!)
           "
           :width="item.collection ? item.next?.video.width : item.video!.width"
           :height="item.collection ? item.next?.video.height : item.video!.height"

@@ -19,6 +19,8 @@ interface SummaryVideo {
   height: number | null
   orderIndex: number | null
   seasonId: string | null
+  /** Null means there is none; absent means this payload does not say. */
+  thumbnailKey?: string | null
 }
 
 const props = defineProps<{
@@ -76,7 +78,7 @@ const otherEpisodes = computed(() => props.siblings.filter(entry => entry.id !==
 
 <template>
   <div>
-    <HeroBackdrop :image="`/api/videos/${video.id}/thumbnail`" size="tall">
+    <HeroBackdrop :image="videoThumbnail(video)" size="tall">
       <div class="rise max-w-2xl space-y-4">
         <!--
           The collection in muted text with a red rule beside it, never in red
@@ -160,7 +162,7 @@ const otherEpisodes = computed(() => props.siblings.filter(entry => entry.id !==
           :to="linkTo(entry)"
           :title="entry.title"
           :subtitle="runtime(entry.durationSec)"
-          :image-url="`/api/videos/${entry.id}/thumbnail`"
+          :image-url="videoThumbnail(entry)"
           :width="entry.width"
           :height="entry.height"
           :badge="entry.state === 'PUBLISHED' ? null : entry.state"

@@ -86,7 +86,23 @@ const AUDIT = `(() => {
       opacity *= Number(getComputedStyle(node).opacity)
     }
 
-    const interactive = el.matches('button, a[href], input, select, textarea')
+    /*
+     * A control that is out of the tab order *and* out of the accessibility
+     * tree is decoration for the mouse, and decoration is allowed to fade in on
+     * hover. Both conditions are required: either one alone still leaves
+     * somebody landing on something they cannot see.
+     *
+     * This is not a way around the rule below. That rule exists to catch a
+     * hover-revealed control whose hover never fires — invisible to *everyone*
+     * while toBeVisible() happily passes. Anything a keyboard or a screen
+     * reader can still reach is judged exactly as before.
+     *
+     * (No backticks in this file's comments: the audit is one template string
+     * evaluated in the page, and a stray backtick ends it mid-comment.)
+     */
+    const decorative = el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0
+
+    const interactive = el.matches('button, a[href], input, select, textarea') && !decorative
     if (interactive && opacity < OPAQUE_ENOUGH && el.offsetParent !== null) {
       problems.push({
         kind: 'invisible-control',
