@@ -362,6 +362,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   and item 1 of a best-of row. `seasonId` must belong to `collectionId`; Prisma cannot say that across a
   relation, so the service does. Deleting a collection takes its seasons and memberships and **leaves the
   videos standing** — a shelf is not the books.
+- Every "which collection" filter on `GET /videos` is built as **one** clause (`membershipFilter`). They all
+  constrain the same relation, so spread separately they overwrite each other rather than combining —
+  `?collectionId=X&seasonId=Y` silently dropped the collection and answered about the season alone.
+  `?standalone=true` is the odd one: it asks for the videos in **no** collection, which is `none` over the
+  join and cannot be written as a `some` at all. There is no column saying a video is standalone, and there
+  must not be — "on no shelf" is a fact about the join, and a column would be a second answer to drift.
 - `GET /collections/:slug/resolve` checks **season slugs before video slugs**, and the literal `:slug/resolve`
   route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
@@ -382,6 +388,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - A video is shown at **`/v/<slug>`**, its own page. `watchPath` therefore cannot return null any more — it
   used to, for a video that arrived without a collection, which is now simply what a standalone film is.
   `/c/<collection>/…` still resolves so shared links do not rot, and redirects a video to its canonical URL.
+- **`browse.vue` lists collections *and* standalone videos**, merged into one grid. It listed only
+  collections, so a standalone film — the thing a folder holding one video becomes — could never appear
+  there however often it was published: it is on no shelf to be listed under. Reported as "I published it
+  and browse does not show it", which is what the whole model looks like when one screen disagrees with it.
+  Episodes stay out deliberately: they are reachable through their collection, and listing them would bury
+  four films under forty episodes of one show. `q` and `tag` are passed to **both** requests, or searching
+  quietly stops finding half the library.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
 **Frontend** (`apps/web`, in addition to the notes above)

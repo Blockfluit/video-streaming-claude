@@ -70,6 +70,32 @@ describe('Library (real database)', () => {
     });
   }
 
+  /**
+   * A video in no collection at all — a standalone film, which is what a folder
+   * holding one video becomes. It is an ordinary row with no membership, not a
+   * special kind of video.
+   */
+  async function seedStandaloneVideo(
+    title: string,
+    overrides: Record<string, unknown> = {},
+  ): Promise<{ id: string; slug: string }> {
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return prisma.video.create({
+      data: {
+        slug,
+        title,
+        storageKey: `loose/${title}-${Math.round(performance.now() * 1000)}.mp4`,
+        contentTag: 'tag',
+        originalName: `${title}.mp4`,
+        mimeType: 'video/mp4',
+        sizeBytes: BigInt('9007199254740993'),
+        fileMtime: new Date('2026-01-01T00:00:00Z'),
+        ...overrides,
+      },
+      select: { id: true, slug: true },
+    });
+  }
+
   /** A video with everything publish gating asks for. */
   const publishable = {
     description: 'A description.',
@@ -742,6 +768,54 @@ describe('Library (real database)', () => {
 
       const bySearch = await admin.get('/videos?q=cart').expect(200);
       expect(bySearch.body.items).toHaveLength(1);
+    });
+
+    /**
+     * The filter a catalogue listing needs.
+     *
+     * Browse shows collections, and a standalone film has none — so without a
+     * way to ask for "the videos that are in no collection", publishing one
+     * puts it nowhere anybody can find it. `some`/`none` over the join is the
+     * only thing that can answer it: there is no column saying so, which is the
+     * whole point of memberships.
+     */
+    it('filters down to the videos that belong to no collection', async () => {
+      const south = await createCollection('South Park');
+      await seedVideo(south.id, 'Cartman');
+      await seedStandaloneVideo('Chinatown');
+
+      const standalone = await admin.get('/videos?standalone=true').expect(200);
+      expect(standalone.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Chinatown',
+      ]);
+      expect(standalone.body.total).toBe(1);
+
+      // The opposite has to mean the opposite. `z.coerce.boolean()` would read
+      // "false" as true and hand back the standalone film as well.
+      const inACollection = await admin.get('/videos?standalone=false').expect(200);
+      expect(inACollection.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Cartman',
+      ]);
+
+      // Omitted is not the same as false: it means "do not filter".
+      const everything = await admin.get('/videos').expect(200);
+      expect(everything.body.items).toHaveLength(2);
+    });
+
+    /**
+     * A standalone video is only interesting to browse once it is published,
+     * and the visibility rule is not something the new filter may weaken.
+     */
+    it('keeps the visibility rule when filtering to standalone videos', async () => {
+      await seedStandaloneVideo('Draft Film');
+      const live = await seedStandaloneVideo('Live Film', publishable);
+      await admin.post(`/videos/${live.id}/publish`).expect(200);
+
+      const user = await asUser();
+      const visible = await user.get('/videos?standalone=true').expect(200);
+      expect(visible.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Live Film',
+      ]);
     });
   });
 

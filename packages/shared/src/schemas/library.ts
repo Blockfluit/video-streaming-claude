@@ -65,6 +65,16 @@ export const listVideosSchema = pageQuerySchema.extend({
   state: publishStateSchema.optional(),
   collectionId: idSchema.optional(),
   seasonId: idSchema.optional(),
+  /**
+   * "In no collection at all" — a standalone film, which is what a folder
+   * holding one video becomes.
+   *
+   * A catalogue listing shows collections, so without this a standalone video
+   * has nowhere to appear: it is not in one, and there is no column that says
+   * so. Only the membership join can answer it. Omitted means "do not filter";
+   * `false` is the genuine opposite and asks for the videos that *are* in one.
+   */
+  standalone: booleanParam.optional(),
   q: z.string().trim().max(200).optional(),
   tag: z.string().trim().max(50).optional(),
 });

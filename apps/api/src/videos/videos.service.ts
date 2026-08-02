@@ -14,6 +14,31 @@ import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateMarkers, type Markers } from './markers';
 
+/**
+ * Every "which collection" filter, as **one** clause.
+ *
+ * They all constrain the same relation, so spread separately they overwrite
+ * each other rather than combining — `?collectionId=X&seasonId=Y` silently
+ * dropped the collection and answered about the season alone. Building the
+ * clause once is what makes that impossible rather than merely unlikely.
+ *
+ * `standalone` is the odd one: it asks for the videos in *no* collection, which
+ * is `none` over the join and cannot be expressed as a `some` at all. Omitted
+ * means "do not filter"; `false` genuinely means "in at least one".
+ */
+function membershipFilter(query: ListVideosQuery) {
+  if (query.standalone === true) return { collections: { none: {} } };
+
+  const membership = {
+    ...(query.collectionId ? { collectionId: query.collectionId } : {}),
+    ...(query.seasonId ? { seasonId: query.seasonId } : {}),
+  };
+
+  if (Object.keys(membership).length === 0 && query.standalone === undefined) return {};
+
+  return { collections: { some: membership } };
+}
+
 const VIDEO_SELECT = {
   id: true,
   slug: true,
@@ -69,13 +94,7 @@ export class VideosService {
    */
   async list(query: ListVideosQuery, role: Role): Promise<Page<unknown>> {
     const where = {
-      // Both filters now ask about a membership. `some` rather than a column
-      // because the answer is "is it in this collection", and it may be in
-      // several.
-      ...(query.collectionId
-        ? { collections: { some: { collectionId: query.collectionId } } }
-        : {}),
-      ...(query.seasonId ? { collections: { some: { seasonId: query.seasonId } } } : {}),
+      ...membershipFilter(query),
       ...(query.tag ? { tags: { has: query.tag } } : {}),
       ...(query.q
         ? {
