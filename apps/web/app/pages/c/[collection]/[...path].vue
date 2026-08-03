@@ -28,9 +28,23 @@ interface ResolvedCollection {
   state: string
 }
 
+/**
+ * A season is **not** a collection with extra fields, however similar the two
+ * look from a distance. It has its own id and its own slug, and its parent is
+ * the nested `collection` — which is what the poster route and the My List
+ * button need. Typing it as a collection let a season's id be used as one.
+ */
+interface ResolvedSeason {
+  id: string
+  slug: string
+  number: number | null
+  title: string | null
+  collection: ResolvedCollection
+}
+
 type Resolved =
   | { type: 'collection', data: ResolvedCollection }
-  | { type: 'season', data: ResolvedCollection & { collection: ResolvedCollection } }
+  | { type: 'season', data: ResolvedSeason }
   | { type: 'video', data: ResolvedVideo }
 
 const route = useRoute()
@@ -55,13 +69,22 @@ if (resolved.value?.type === 'video') {
   await navigateTo(watchPath(resolved.value.data as ResolvedVideo), { redirectCode: 301 })
 }
 
-const collection = computed(() => resolved.value!.data as ResolvedCollection)
-
 /** Set only when the URL named a season; the page then scopes its list to it. */
 const season = computed(() =>
-  resolved.value?.type === 'season'
-    ? (resolved.value.data as ResolvedCollection & { number: number | null })
-    : null,
+  resolved.value?.type === 'season' ? (resolved.value.data as ResolvedSeason) : null,
+)
+
+/**
+ * The collection this page is about — the season's **parent** when the URL named
+ * a season, not the season itself.
+ *
+ * This used to read `data` whichever arm resolved. That was survivable while the
+ * page rendered only a title and a description, and stopped being so the moment
+ * the id was used for anything: the poster becomes
+ * `/api/collections/<a season id>/poster`, and My List saves a season.
+ */
+const collection = computed(() =>
+  season.value ? season.value.collection : (resolved.value!.data as ResolvedCollection),
 )
 
 /**
