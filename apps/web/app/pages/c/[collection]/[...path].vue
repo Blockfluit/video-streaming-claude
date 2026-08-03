@@ -23,12 +23,28 @@ interface ResolvedCollection {
   slug: string
   title: string
   description: string | null
+  year?: number | null
+  posterKey?: string | null
   state: string
+}
+
+/**
+ * A season is **not** a collection with extra fields, however similar the two
+ * look from a distance. It has its own id and its own slug, and its parent is
+ * the nested `collection` — which is what the poster route and the My List
+ * button need. Typing it as a collection let a season's id be used as one.
+ */
+interface ResolvedSeason {
+  id: string
+  slug: string
+  number: number | null
+  title: string | null
+  collection: ResolvedCollection
 }
 
 type Resolved =
   | { type: 'collection', data: ResolvedCollection }
-  | { type: 'season', data: ResolvedCollection & { collection: ResolvedCollection } }
+  | { type: 'season', data: ResolvedSeason }
   | { type: 'video', data: ResolvedVideo }
 
 const route = useRoute()
@@ -50,11 +66,26 @@ if (error.value) {
 
 // A shared link to a video lands on the video's own page.
 if (resolved.value?.type === 'video') {
-  await navigateTo(watchPath(resolved.value.data as ResolvedVideo), { redirectCode: 301 })
+  await navigateTo(videoPath(resolved.value.data as ResolvedVideo), { redirectCode: 301 })
 }
 
-const collection = computed(() => resolved.value!.data as ResolvedCollection)
-const collectionView = collection
+/** Set only when the URL named a season; the page then scopes its list to it. */
+const season = computed(() =>
+  resolved.value?.type === 'season' ? (resolved.value.data as ResolvedSeason) : null,
+)
+
+/**
+ * The collection this page is about — the season's **parent** when the URL named
+ * a season, not the season itself.
+ *
+ * This used to read `data` whichever arm resolved. That was survivable while the
+ * page rendered only a title and a description, and stopped being so the moment
+ * the id was used for anything: the poster becomes
+ * `/api/collections/<a season id>/poster`, and My List saves a season.
+ */
+const collection = computed(() =>
+  season.value ? season.value.collection : (resolved.value!.data as ResolvedCollection),
+)
 
 /**
  * The whole collection: what to list on the page, in the order the collection
@@ -62,15 +93,19 @@ const collectionView = collection
  * from here rather than from a plain video listing.
  */
 const { data: detail } = await useApiData<{
-  seasons: { id: string, slug: string, number: number | null }[]
+  year: number | null
+  posterKey: string | null
+  seasons: { id: string, slug: string, number: number | null, title: string | null }[]
   videos: {
     id: string
     slug: string
     title: string
+    description: string | null
     state: string
     durationSec: number | null
     width: number | null
     height: number | null
+    thumbnailKey: string | null
     seasonId: string | null
     orderIndex: number | null
   }[]
@@ -88,43 +123,27 @@ const ordered = computed(() =>
   ),
 )
 
+/**
+ * The collection as the title page wants it. `year` and `posterKey` come back on
+ * the detail read rather than from `resolve`, so they are grafted on.
+ */
+const collectionView = computed(() => ({
+  id: collection.value.id,
+  slug: collection.value.slug,
+  title: collection.value.title,
+  description: collection.value.description ?? null,
+  year: detail.value?.year ?? null,
+  posterKey: detail.value?.posterKey ?? null,
+}))
+
 useHead(() => ({ title: collection.value?.title ?? 'Library' }))
 </script>
 
 <template>
-  <div class="page-shell pt-24 pb-24">
-    <div class="flex flex-col gap-6 sm:flex-row sm:items-end">
-      <img
-        :src="`/api/collections/${collection.id}/poster`"
-        alt=""
-        class="aspect-2/3 w-44 shrink-0 rounded-lg object-cover bg-(--ui-bg-elevated) ring-1 ring-(--ui-border)"
-      >
-      <div class="space-y-3">
-        <h1 class="text-4xl font-bold tracking-tight">{{ collection.title }}</h1>
-        <p v-if="collectionView?.description" class="max-w-2xl text-(--ui-text-muted)">
-          {{ collectionView.description }}
-        </p>
-        <AddToListButton :collection-id="collection.id" label />
-      </div>
-    </div>
-
-    <div class="mt-10 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4">
-      <MediaCard
-        v-for="entry in ordered"
-        :key="entry.id"
-        class="w-full"
-        :to="watchPath(entry)"
-        :title="entry.title"
-        :subtitle="runtime(entry.durationSec)"
-        :image-url="`/api/videos/${entry.id}/thumbnail`"
-        :width="entry.width"
-        :height="entry.height"
-        :badge="entry.state === 'PUBLISHED' ? null : entry.state"
-      />
-    </div>
-
-    <p v-if="ordered.length === 0" class="py-20 text-center text-(--ui-text-muted)">
-      Nothing in this collection yet.
-    </p>
-  </div>
+  <CollectionSummary
+    :collection="collectionView"
+    :seasons="detail?.seasons ?? []"
+    :videos="ordered"
+    :season="season"
+  />
 </template>

@@ -17,12 +17,13 @@ interface CardVideo {
   height: number | null
   /** Every collection this video is in; empty for a standalone one. */
   collections: { collection: { slug: string, title: string } }[]
+  thumbnailKey: string | null
 }
 
 interface SavedItem {
   id: string
   video: CardVideo | null
-  collection: { id: string, slug: string, title: string, year: number | null } | null
+  collection: { id: string, slug: string, title: string, year: number | null, posterKey: string | null } | null
   next: { id: string, video: CardVideo } | null
 }
 
@@ -68,25 +69,31 @@ useHead({ title: 'My List' })
           class="w-full"
           :to="
             item.collection
-              ? item.next ? watchPath(item.next.video) : collectionPath(item.collection)
-              : watchPath(item.video!)
+              ? collectionPath(item.collection)
+              : videoPath(item.video!)
           "
           :title="item.collection?.title ?? item.video!.title"
           :subtitle="item.collection ? item.next?.video.title : collectionTitle(item.video!)"
           :image-url="
             item.collection
-              ? `/api/collections/${item.collection.id}/poster`
-              : `/api/videos/${item.video!.id}/thumbnail`
+              ? collectionPoster(item.collection)
+              : videoThumbnail(item.video!)
           "
           :width="item.collection ? item.next?.video.width : item.video!.width"
           :height="item.collection ? item.next?.video.height : item.video!.height"
         />
 
+        <!--
+          Visible at rest, not only on hover. This is the *only* way to take
+          something off the list, and gating it behind hover left a control a
+          keyboard user could tab to and see nothing of — an invisible tab stop.
+          It stays quiet at 70% and comes forward on hover.
+        -->
         <UButton
           icon="i-lucide-x"
           color="neutral"
           size="xs"
-          class="absolute top-1.5 left-1.5 opacity-0 group-hover/item:opacity-100 transition"
+          class="absolute top-1.5 left-1.5 opacity-70 transition group-hover/item:opacity-100 focus-visible:opacity-100"
           :aria-label="`Remove ${item.collection?.title ?? item.video!.title}`"
           @click="remove(item)"
         />

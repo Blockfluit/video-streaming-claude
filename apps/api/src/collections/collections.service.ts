@@ -20,6 +20,7 @@ import { StorageService } from '../common/storage.service';
 import { titleData, titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { nextEpisode, type EpisodeProgress } from '../watchlist/next-episode';
 import { MEMBERSHIP_ORDER, MEMBERSHIP_SELECT, toMemberVideo } from './membership';
 
 /**
@@ -135,6 +136,98 @@ export class CollectionsService {
       },
       role,
     );
+  }
+
+  /**
+   * This viewer's progress through one collection: which video to offer next,
+   * and how far they got in each.
+   *
+   * One call rather than two because the title page needs both at once — the
+   * hero's "Resume" button and the resume bar under every episode row are the
+   * same data read twice. Split, the page would render a button naming one
+   * episode while the rows below it disagreed for a moment.
+   *
+   * `next` comes from the same `nextEpisode()` the watchlist uses, so "which
+   * episode is next" has exactly one definition. Reimplementing the rule here is
+   * how the home page and the title page start disagreeing about it.
+   *
+   * Order comes through the **membership**, not the video: where a video sits is
+   * a fact about this collection, and the same episode may sit somewhere else
+   * entirely in another. That is also why `orderIndex` is read off the join.
+   *
+   * Per-caller, never aggregate: these are the figures every viewer may see
+   * about themselves. Totals across users stay ADMIN-only.
+   */
+  async progress(slug: string, userId: string, role: Role) {
+    const collection = await this.prisma.collection.findFirst({
+      where: { slug, ...whereVisible(role) },
+      select: { id: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    // Filtered on the video, not the membership — the join has no state.
+    const memberships = await this.prisma.collectionVideo.findMany({
+      where: { collectionId: collection.id, video: whereVisible(role) },
+      select: {
+        orderIndex: true,
+        season: { select: { slug: true, number: true } },
+        video: { select: { id: true, slug: true, title: true } },
+      },
+      orderBy: [...MEMBERSHIP_ORDER],
+      // The same bound as the embedded list, so the two cannot describe
+      // different sets of episodes for one collection.
+      take: MAX_EMBEDDED_VIDEOS,
+    });
+
+    const rows = await this.prisma.watchProgress.findMany({
+      where: { userId, videoId: { in: memberships.map((m) => m.video.id) } },
+      select: {
+        videoId: true,
+        lastPositionSec: true,
+        maxPositionSec: true,
+        completed: true,
+      },
+    });
+
+    const progress = new Map<string, EpisodeProgress>(
+      rows.map((row) => [
+        row.videoId,
+        { completed: row.completed, lastPositionSec: row.lastPositionSec },
+      ]),
+    );
+
+    // `nextEpisode` orders by `orderIndex` and needs an `id`, so it is given the
+    // membership flattened onto the video it points at.
+    const ordered = memberships.map((m) => ({
+      id: m.video.id,
+      orderIndex: m.orderIndex,
+      slug: m.video.slug,
+      title: m.video.title,
+      seasonSlug: m.season?.slug ?? null,
+      seasonNumber: m.season?.number ?? null,
+    }));
+
+    const next = nextEpisode(ordered, progress);
+
+    return {
+      next:
+        next === null
+          ? null
+          : {
+              videoId: next.video.id,
+              slug: next.video.slug,
+              title: next.video.title,
+              seasonSlug: next.video.seasonSlug,
+              seasonNumber: next.video.seasonNumber,
+              orderIndex: next.video.orderIndex,
+              // Zero when never started, which is what makes the button read
+              // "Play" rather than "Resume".
+              lastPositionSec: next.progress?.lastPositionSec ?? 0,
+            },
+      // Only the videos actually started have a row, so this stays short even
+      // for a long-running show.
+      items: rows,
+    };
   }
 
   async create(dto: CreateCollectionInput) {

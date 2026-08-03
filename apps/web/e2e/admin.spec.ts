@@ -4,6 +4,7 @@ import {
   expectsRequest,
   fillStable,
   removeSeasonWithFolder,
+  savesThenRestores,
   test,
   toast,
   USERNAME,
@@ -52,12 +53,16 @@ test.describe('admin', () => {
     await page.getByRole('link', { name: 'Edit' }).first().click()
     await page.waitForURL(/\/admin\/videos\//)
 
-    const description = page.getByRole('textbox').nth(1)
-    await description.fill(`Edited by the tests ${Date.now()}`)
-
-    await expectsRequest(page, /\/videos\/[^/]+$/, 'PATCH', () =>
-      page.getByRole('button', { name: 'Save details' }).click())
-    await expect(toast(page, 'Saved')).toBeVisible()
+    // Restores the description afterwards: this runs against the real library,
+    // and the text it types is otherwise still on the film the next time anyone
+    // opens it.
+    await savesThenRestores(
+      page,
+      page.getByRole('textbox').nth(1),
+      `Edited by the tests ${Date.now()}`,
+      /\/videos\/[^/]+$/,
+      'Save details',
+    )
   })
 
   test('the marker editor sets and clears a marker', async ({ page }) => {
@@ -169,13 +174,19 @@ test.describe('admin', () => {
      * disagree — the first draft of this test credited Chinatown and then
      * asserted against South Park.
      */
+    /*
+     * A video addresses itself now, so one listing answers both halves: the id
+     * to credit against, and the page to check the panel on. There is no second
+     * ordering left to disagree with.
+     */
     await visit(page, '/')
-    const watchPath = await page.locator('main a[href^="/c/"]').first().getAttribute('href') as string
-    const [, collectionSlug, ...rest] = new URL(watchPath, 'http://x').pathname.split('/').filter(Boolean)
-    const videoId = await page.evaluate(async ({ slug, path }) => {
-      const response = await fetch(`/api/collections/${slug}/resolve?path=${encodeURIComponent(path)}`)
-      return (await response.json()).data.id as string
-    }, { slug: collectionSlug as string, path: rest.join('/') })
+    const target = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      const video = body.items?.[0]
+      return video ? { id: video.id as string, page: `/v/${video.slug}` } : null
+    })
+    expect(target, 'the library holds no video to credit').not.toBeNull()
+    const videoId = target!.id
 
     await visit(page, `/admin/videos/${videoId}`)
 
@@ -202,8 +213,9 @@ test.describe('admin', () => {
       page.getByRole('button', { name: 'Add credit' }).click())
     await expect(page.getByText(name)).toBeVisible()
 
-    // And it must reach the viewer-facing panel, not just the editor.
-    await visit(page, watchPath)
+    // And it must reach the viewer-facing panel, not just the editor. That
+    // panel lives on the video's own page rather than beside the player.
+    await visit(page, target!.page)
     await expect(page.getByRole('heading', { name: 'Cast and crew' })).toBeVisible()
     await expect(page.getByText(name)).toBeVisible()
     await expect(page.getByText('as Herself')).toBeVisible()
@@ -228,12 +240,15 @@ test.describe('admin', () => {
     await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible()
 
     // Saving has to reach the API — a form that only updates itself is the
-    // exact failure this suite exists to catch.
-    const description = `Edited by the tests ${Date.now()}`
-    await fillStable(page, 'textarea', description)
-    await expectsRequest(page, /\/collections\/[^/]+$/, 'PATCH', () =>
-      page.getByRole('button', { name: 'Save changes' }).click())
-    await expect(toast(page, 'Saved')).toBeVisible()
+    // exact failure this suite exists to catch — and then the collection's own
+    // description goes back, for the same reason as on the video editor.
+    await savesThenRestores(
+      page,
+      page.locator('textarea'),
+      `Edited by the tests ${Date.now()}`,
+      /\/collections\/[^/]+$/,
+      'Save changes',
+    )
 
     // Aggregate figures are ADMIN-only and had no reader anywhere in the app.
     await expect(page.getByText('Viewers')).toBeVisible()
@@ -399,9 +414,17 @@ test.describe('admin', () => {
     // Post one through the real UI so there is something to moderate, and so
     // the test does not depend on what a previous run left behind.
     const body = `Moderate me ${Date.now()}`
-    await visit(page, '/')
-    await page.locator('main a[href^="/c/"]').first().click()
-    await page.waitForURL(/\/c\/.+\/.+/)
+    // Comments live with the player, so posting one means getting there: a
+    // video's page describes it, and Play opens the player. Somewhere in the
+    // app first — a relative fetch has no base URL to resolve on about:blank.
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    await visit(page, `/v/${slug}`)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
     await fillStable(page, 'textarea', body)
     await expectsRequest(page, /\/comments$/, 'POST', () =>
       page.getByRole('button', { name: 'Post' }).click())

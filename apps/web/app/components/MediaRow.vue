@@ -61,10 +61,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
         <slot />
       </div>
 
+      <!--
+        Both chevrons are `aria-hidden` and out of the tab order, deliberately.
+        They duplicate scrolling the track already does by trackpad, wheel and
+        arrow key, and they fade in on hover — so leaving them focusable made
+        them **invisible tab stops**: a keyboard user landed on a control with
+        `opacity: 0` and nothing to see. Decoration for the mouse, and nothing
+        is lost by hiding them from anyone not using one.
+      -->
       <button
         v-show="!atStart"
         type="button"
-        aria-label="Scroll left"
+        aria-hidden="true"
+        tabindex="-1"
         class="absolute inset-y-3 left-0 z-2 grid w-10 place-items-center bg-gradient-to-r from-black/85 to-transparent opacity-0 transition-opacity group-hover/row:opacity-100"
         @click="nudge(-1)"
       >
@@ -73,7 +82,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
       <button
         v-show="!atEnd"
         type="button"
-        aria-label="Scroll right"
+        aria-hidden="true"
+        tabindex="-1"
         class="absolute inset-y-3 right-0 z-2 grid w-10 place-items-center bg-gradient-to-l from-black/85 to-transparent opacity-0 transition-opacity group-hover/row:opacity-100"
         @click="nudge(1)"
       >

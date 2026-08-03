@@ -19,6 +19,13 @@ const props = defineProps<{
   badge?: string | null
   /** `poster` is 2:3 for collections; the default 16:9 suits a video still. */
   shape?: 'still' | 'poster'
+  /**
+   * What the card does when clicked, which is not the same everywhere: a
+   * Continue Watching tile resumes playback, while a browse or My List tile
+   * opens a page describing the thing. Promising a play glyph and delivering a
+   * page of text is a small lie that makes the app feel slow.
+   */
+  action?: 'play' | 'open'
 }>()
 
 const broken = ref(false)
@@ -47,7 +54,13 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
       <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent" />
 
       <div class="absolute top-2 right-2 flex gap-1">
-        <UBadge v-if="badge" color="neutral" variant="solid" size="sm" class="bg-black/70">
+        <!--
+          `text-white` is load-bearing. `variant="solid"` supplies a light
+          background *and the dark text to sit on it*, and overriding only the
+          background with `bg-black/70` left that dark text on a near-black
+          chip — 1.14:1, which is not a legible badge, it is a smudge.
+        -->
+        <UBadge v-if="badge" color="neutral" variant="solid" size="sm" class="bg-black/70 text-white">
           {{ badge }}
         </UBadge>
         <QualityBadge :width="width" :height="height" />
@@ -58,7 +71,12 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
         class="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
       >
         <span class="grid size-11 place-items-center rounded-full bg-white/95 shadow-lg">
-          <UIcon name="i-lucide-play" class="size-5 text-black translate-x-px" />
+          <UIcon
+            v-if="action === 'play'"
+            name="i-lucide-play"
+            class="size-5 text-black translate-x-px"
+          />
+          <UIcon v-else name="i-lucide-info" class="size-5 text-black" />
         </span>
       </div>
 

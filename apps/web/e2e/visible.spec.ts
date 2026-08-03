@@ -86,7 +86,17 @@ const AUDIT = `(() => {
       opacity *= Number(getComputedStyle(node).opacity)
     }
 
-    const interactive = el.matches('button, a[href], input, select, textarea')
+    /*
+     * A control out of the tab order *and* out of the accessibility tree is
+     * decoration for the mouse, and decoration may fade in on hover. Both are
+     * required: either alone still leaves somebody landing on something they
+     * cannot see. Anything a keyboard or screen reader reaches is judged as
+     * before. (No backticks in this file's comments — the audit is one template
+     * string evaluated in the page.)
+     */
+    const decorative = el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0
+
+    const interactive = el.matches('button, a[href], input, select, textarea') && !decorative
     if (interactive && opacity < OPAQUE_ENOUGH && el.offsetParent !== null) {
       problems.push({
         kind: 'invisible-control',
@@ -199,10 +209,48 @@ test.describe('legibility', () => {
     })
   }
 
+  /** The pages no static route list can reach: each is behind a click. */
+  test("a video's own page too", async ({ page }) => {
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    await visit(page, `/v/${slug}`)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `video page:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
+  test('a collection page too', async ({ page }) => {
+    await visit(page, '/browse')
+    const card = page.locator('main a[href^="/c/"]').first()
+    const href = await card.getAttribute('href')
+    await card.click()
+    await page.waitForURL(url => url.pathname === href)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `collection page:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
   test('the player page too', async ({ page }) => {
-    await visit(page, '/')
-    await page.locator('main a[href^="/c/"]').first().click()
-    await page.waitForURL(/\/c\/.+\/.+/)
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    await visit(page, `/v/${slug}`)
+    // Playback is a deliberate second press now, so the audit has to take it.
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
 
     // Post a comment so its controls are on the page to be judged. Unique per
     // run, or repeated runs pile up identical text and the locator turns
