@@ -15,7 +15,7 @@ export interface VideoPublishFields {
   title: string | null;
   description: string | null;
   durationSec: number | null;
-  thumbnailKey: string | null;
+  bannerKey: string | null;
 }
 
 export interface CollectionPublishFields {
@@ -44,7 +44,7 @@ export function videoMissingFields(video: VideoPublishFields): string[] {
   if (isBlank(video.description)) missing.push('description');
   // Zero means the probe found no usable stream, not a very short film.
   if (video.durationSec === null || video.durationSec <= 0) missing.push('durationSec');
-  if (isBlank(video.thumbnailKey)) missing.push('thumbnailKey');
+  if (isBlank(video.bannerKey)) missing.push('bannerKey');
 
   return missing;
 }

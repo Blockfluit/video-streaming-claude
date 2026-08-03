@@ -202,7 +202,18 @@ export class FfmpegService {
    * `-ss` before `-i` seeks by keyframe index rather than decoding up to the
    * timestamp — the difference between instant and minutes on a long file.
    */
-  async captureFrame(source: string, atSeconds: number, destination: string): Promise<void> {
+  async captureFrame(
+    source: string,
+    atSeconds: number,
+    destination: string,
+    /**
+     * The `-vf` chain, from `captureFilter()`. Passed in rather than chosen
+     * here: this class is a thin wrapper around a binary and has no business
+     * knowing what a poster is, and the expression is fiddly enough to deserve
+     * its own unit tests away from a process spawn.
+     */
+    filter: string,
+  ): Promise<void> {
     await run(
       'ffmpeg',
       this.ffmpeg,
@@ -219,7 +230,7 @@ export class FfmpegService {
         '3',
         // Even width and height: some JPEG encoders reject odd dimensions.
         '-vf',
-        'scale=640:-2',
+        filter,
         destination,
       ],
       { timeout: THUMBNAIL_TIMEOUT_MS },

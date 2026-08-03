@@ -331,7 +331,7 @@ export class CollectionsService {
                 title: true,
                 description: true,
                 durationSec: true,
-                thumbnailKey: true,
+                bannerKey: true,
               },
             },
           },

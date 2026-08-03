@@ -9,7 +9,7 @@ const publishableVideo = {
   title: 'Philosophers Stone',
   description: 'A boy discovers he is a wizard.',
   durationSec: 9152,
-  thumbnailKey: 'derived/hp/1.jpg',
+  bannerKey: 'derived/hp/1.jpg',
 };
 
 const publishableCollection = {
@@ -24,7 +24,7 @@ describe('videoMissingFields', () => {
     expect(videoMissingFields(publishableVideo)).toEqual([]);
   });
 
-  it.each(['title', 'description', 'durationSec', 'thumbnailKey'] as const)(
+  it.each(['title', 'description', 'durationSec', 'bannerKey'] as const)(
     'reports a missing %s',
     (field) => {
       expect(videoMissingFields({ ...publishableVideo, [field]: null })).toEqual([field]);
@@ -37,9 +37,9 @@ describe('videoMissingFields', () => {
         title: '',
         description: null,
         durationSec: null,
-        thumbnailKey: null,
+        bannerKey: null,
       }),
-    ).toEqual(['title', 'description', 'durationSec', 'thumbnailKey']);
+    ).toEqual(['title', 'description', 'durationSec', 'bannerKey']);
   });
 
   // A title of spaces passes a NOT NULL check and fails a human one.

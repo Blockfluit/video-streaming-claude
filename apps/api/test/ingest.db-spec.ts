@@ -328,7 +328,7 @@ describe('Ingest (real database)', () => {
       const [video] = await videos();
       await prisma.video.update({
         where: { id: video.id },
-        data: { state: 'PUBLISHED', description: 'd', durationSec: 10, thumbnailKey: 't.jpg' },
+        data: { state: 'PUBLISHED', description: 'd', durationSec: 10, bannerKey: 't.jpg' },
       });
 
       await remove('disk1/Inception/Inception.mp4');

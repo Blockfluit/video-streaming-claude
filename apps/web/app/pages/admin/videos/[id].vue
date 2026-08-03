@@ -24,7 +24,7 @@ interface VideoDetail {
   audioTracks: number | null
   needsConversion: boolean
   probeError: string | null
-  thumbnailSource: string
+  bannerSource: string
   playbackKey: string | null
   storageKey: string
   introStartSec: number | null
@@ -364,7 +364,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         <UCard>
           <template #header>
             <h2 class="font-semibold">Poster</h2>
-            <p class="text-xs text-(--ui-text-muted)">{{ video.thumbnailSource }}</p>
+            <p class="text-xs text-(--ui-text-muted)">{{ video.bannerSource }}</p>
           </template>
 
           <img

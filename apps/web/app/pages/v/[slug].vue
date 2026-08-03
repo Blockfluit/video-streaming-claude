@@ -32,7 +32,7 @@ interface VideoDetail {
   durationSec: number | null
   width: number | null
   height: number | null
-  thumbnailKey?: string | null
+  bannerKey?: string | null
   collections: Membership[]
 }
 
@@ -67,7 +67,7 @@ const { data: siblings } = await useApiData<{
     width: number | null
     height: number | null
     state: string
-    thumbnailKey?: string | null
+    bannerKey?: string | null
   }[]
 }>(
   () => `siblings-${primary.value?.collectionId ?? 'none'}`,

@@ -10,6 +10,13 @@ import {
 
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  ARTWORK_SHAPES,
+  type ArtworkShape,
+  artworkDirectory,
+  artworkKey,
+  captureFilter,
+} from './artwork';
 import { NoFrameError } from './ffmpeg-error';
 import { FfmpegService } from './ffmpeg.service';
 import { needsConversion } from './needs-conversion';
@@ -122,8 +129,10 @@ export class MediaService implements OnModuleDestroy {
         id: true,
         storageKey: true,
         playbackKey: true,
-        thumbnailKey: true,
-        thumbnailSource: true,
+        posterKey: true,
+        posterSource: true,
+        bannerKey: true,
+        bannerSource: true,
       },
     });
     if (!video) return;
@@ -190,39 +199,65 @@ export class MediaService implements OnModuleDestroy {
      * A missing poster is a missing picture. It is not a reason to call the
      * video broken, and `probeError` is the field that says it is.
      */
-    try {
-      await this.generateThumbnail(video, durationSec);
-    } catch (error) {
-      this.logger.warn(`Thumbnail failed for ${key}: ${describe(error)}`);
-    }
+    await this.generateArtwork(video, durationSec);
   }
 
   /**
-   * Generates the poster frame — **only** when the source is `AUTO`.
+   * Generates both shapes from the frame 10% in — each **only** while its own
+   * source is `AUTO`.
    *
-   * A thumbnail someone chose by hand is never overwritten by a reprobe. That
-   * is the difference between re-running a scan and losing an afternoon of
-   * curation.
+   * Artwork someone chose by hand is never overwritten by a reprobe, and the two
+   * are tracked separately so that rule can apply to one and not the other: an
+   * admin picks a real poster for a film and still gets a fresh banner whenever
+   * the file is re-probed.
+   *
+   * Each shape is attempted and reported independently. Sharing one `try` meant
+   * a poster that failed took the banner with it, and a video would come out of
+   * a probe with neither picture because one crop went wrong.
+   *
+   * The failures are logged, never written to `probeError`. That field says the
+   * *file* is unreadable, and a video whose probe just succeeded — duration,
+   * dimensions, codecs all stored — must not be listed as broken because a
+   * picture could not be cut from it. It read that way in a real library once.
    */
-  private async generateThumbnail(
-    video: { id: string; storageKey: string; playbackKey: string | null; thumbnailSource: string },
+  private async generateArtwork(
+    video: {
+      id: string;
+      storageKey: string;
+      playbackKey: string | null;
+      posterSource: string;
+      bannerSource: string;
+    },
     durationSec: number | null,
   ): Promise<void> {
-    if (video.thumbnailSource !== 'AUTO') return;
     if (durationSec === null) return;
 
-    const key = `thumbnails/${video.id}.jpg`;
     const source = this.storage.resolvePath(
       video.playbackKey ? 'derived' : 'media',
       video.playbackKey ?? video.storageKey,
     );
+    const atSeconds = durationSec * THUMBNAIL_POSITION;
+    const sources: Record<ArtworkShape, string> = {
+      poster: video.posterSource,
+      banner: video.bannerSource,
+    };
 
-    await this.writeThumbnail(video.id, source, durationSec * THUMBNAIL_POSITION);
+    for (const shape of ARTWORK_SHAPES) {
+      if (sources[shape] !== 'AUTO') continue;
 
-    await this.prisma.video.update({
-      where: { id: video.id },
-      data: { thumbnailKey: key, thumbnailSource: 'AUTO' },
-    });
+      try {
+        const key = await this.writeArtwork(video.id, source, atSeconds, shape);
+        await this.prisma.video.update({
+          where: { id: video.id },
+          data:
+            shape === 'poster'
+              ? { posterKey: key, posterSource: 'AUTO' }
+              : { bannerKey: key, bannerSource: 'AUTO' },
+        });
+      } catch (error) {
+        this.logger.warn(`${shape} failed for ${video.storageKey}: ${describe(error)}`);
+      }
+    }
   }
 
   /**
@@ -240,17 +275,28 @@ export class MediaService implements OnModuleDestroy {
    * one filesystem; a reader either sees the old poster or the new one, never
    * neither. A failed capture leaves the live file untouched.
    */
-  private async writeThumbnail(videoId: string, source: string, atSeconds: number): Promise<void> {
-    const key = `thumbnails/${videoId}.jpg`;
-    const temporaryKey = `tmp/${videoId}-thumbnail.jpg`;
+  private async writeArtwork(
+    videoId: string,
+    source: string,
+    atSeconds: number,
+    shape: ArtworkShape,
+  ): Promise<string> {
+    const key = artworkKey(shape, videoId);
+    // Per shape, or capturing both at once has them writing the same temp file.
+    const temporaryKey = `tmp/${videoId}-${shape}.jpg`;
 
     // Into DERIVED_ROOT, never the watched media tree — generated output
     // landing there feeds the ingest watcher its own work.
-    await this.storage.ensureDirectory('derived', 'thumbnails');
+    await this.storage.ensureDirectory('derived', artworkDirectory(shape));
     await this.storage.ensureDirectory('derived', 'tmp');
 
     try {
-      await this.ffmpeg.captureFrame(source, atSeconds, this.storage.resolvePath('derived', temporaryKey));
+      await this.ffmpeg.captureFrame(
+        source,
+        atSeconds,
+        this.storage.resolvePath('derived', temporaryKey),
+        captureFilter(shape),
+      );
       await this.storage.move('derived', temporaryKey, key);
     } catch (error) {
       // A half-written frame must not be left where the next run might rename
@@ -258,6 +304,8 @@ export class MediaService implements OnModuleDestroy {
       await this.storage.delete('derived', temporaryKey);
       throw error;
     }
+
+    return key;
   }
 
   /** Re-runs a probe on demand, and waits for it — the admin clicked a button and expects an answer. */
@@ -273,24 +321,28 @@ export class MediaService implements OnModuleDestroy {
   }
 
   /**
-   * Captures a poster frame at a chosen timestamp and marks it MANUAL, so a
-   * later reprobe leaves it alone.
+   * Captures one shape at a chosen timestamp and marks it MANUAL, so a later
+   * reprobe leaves it alone.
+   *
+   * Only the shape asked for. Capturing both from one click would silently undo
+   * a poster the admin had already chosen by hand, on the way to fixing a
+   * banner.
    */
-  async captureThumbnail(videoId: string, atSeconds: number): Promise<string> {
+  async captureArtwork(videoId: string, atSeconds: number, shape: ArtworkShape): Promise<string> {
     const video = await this.prisma.video.findUnique({
       where: { id: videoId },
       select: { id: true, storageKey: true, playbackKey: true, durationSec: true },
     });
     if (!video) throw new NotFoundException('No such video');
 
-    const key = `thumbnails/${video.id}.jpg`;
     const source = this.storage.resolvePath(
       video.playbackKey ? 'derived' : 'media',
       video.playbackKey ?? video.storageKey,
     );
 
+    let key: string;
     try {
-      await this.writeThumbnail(video.id, source, atSeconds);
+      key = await this.writeArtwork(video.id, source, atSeconds, shape);
     } catch (error) {
       /**
        * A timestamp with no frame at it is a bad request, not a server fault.
@@ -305,53 +357,71 @@ export class MediaService implements OnModuleDestroy {
 
     await this.prisma.video.update({
       where: { id: video.id },
-      data: { thumbnailKey: key, thumbnailSource: 'MANUAL' },
+      data: manual(shape, key),
     });
 
     return key;
   }
 
-  /** Stores an uploaded image as the poster. Also MANUAL — someone chose it. */
-  async setThumbnail(videoId: string, image: Buffer, extension: string): Promise<string> {
+  /** Stores an uploaded image as one shape. Also MANUAL — someone chose it. */
+  async setArtwork(
+    videoId: string,
+    image: Buffer,
+    extension: string,
+    shape: ArtworkShape,
+  ): Promise<string> {
     const video = await this.prisma.video.findUnique({
       where: { id: videoId },
       select: { id: true },
     });
     if (!video) throw new NotFoundException('No such video');
 
-    const key = `thumbnails/${video.id}.${extension}`;
+    // An uploaded picture keeps its own extension, so the key is not quite
+    // `artworkKey()` — that one names the JPEG a capture always produces.
+    const key = `${artworkDirectory(shape)}/${video.id}.${extension}`;
     await this.storage.save('derived', key, image);
 
     await this.prisma.video.update({
       where: { id: video.id },
-      data: { thumbnailKey: key, thumbnailSource: 'MANUAL' },
+      data: manual(shape, key),
     });
 
     return key;
   }
 
   /**
-   * Drops the poster and returns the video to automatic.
+   * Drops one shape and returns it to automatic.
    *
    * Deliberately does not regenerate here — the next probe will, and doing both
    * would make "remove" mean "replace".
    */
-  async clearThumbnail(videoId: string): Promise<void> {
+  async clearArtwork(videoId: string, shape: ArtworkShape): Promise<void> {
     const video = await this.prisma.video.findUnique({
       where: { id: videoId },
-      select: { id: true, thumbnailKey: true },
+      select: { id: true, posterKey: true, bannerKey: true },
     });
     if (!video) throw new NotFoundException('No such video');
 
-    if (video.thumbnailKey) {
-      await this.storage.delete('derived', video.thumbnailKey);
+    const existing = shape === 'poster' ? video.posterKey : video.bannerKey;
+    if (existing) {
+      await this.storage.delete('derived', existing);
     }
 
     await this.prisma.video.update({
       where: { id: video.id },
-      data: { thumbnailKey: null, thumbnailSource: 'AUTO' },
+      data:
+        shape === 'poster'
+          ? { posterKey: null, posterSource: 'AUTO' }
+          : { bannerKey: null, bannerSource: 'AUTO' },
     });
   }
+}
+
+/** The update for "an admin chose this one", for whichever shape they chose. */
+function manual(shape: ArtworkShape, key: string) {
+  return shape === 'poster'
+    ? { posterKey: key, posterSource: 'MANUAL' as const }
+    : { bannerKey: key, bannerSource: 'MANUAL' as const };
 }
 
 function describe(error: unknown): string {

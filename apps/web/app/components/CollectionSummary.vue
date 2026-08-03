@@ -30,7 +30,7 @@ interface SummaryVideo {
   orderIndex: number | null
   seasonId: string | null
   /** Null means there is none; absent means this payload does not say. */
-  thumbnailKey?: string | null
+  bannerKey?: string | null
 }
 
 interface SummarySeason {

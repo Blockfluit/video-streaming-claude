@@ -35,13 +35,13 @@ describe('collectionPoster', () => {
 
 describe('videoThumbnail', () => {
   it('points at the thumbnail route when there is one', () => {
-    expect(videoThumbnail({ id: 'vid_1', thumbnailKey: 'thumbs/a.jpg' })).toBe(
+    expect(videoThumbnail({ id: 'vid_1', bannerKey: 'thumbs/a.jpg' })).toBe(
       '/api/videos/vid_1/thumbnail',
     )
   })
 
   it('does not ask when the API has said there is none', () => {
-    expect(videoThumbnail({ id: 'vid_1', thumbnailKey: null })).toBeNull()
+    expect(videoThumbnail({ id: 'vid_1', bannerKey: null })).toBeNull()
   })
 
   it('still asks when the payload does not say', () => {

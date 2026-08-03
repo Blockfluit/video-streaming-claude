@@ -27,8 +27,8 @@ export function collectionPoster(
 }
 
 export function videoThumbnail(
-  video: { id: string, thumbnailKey?: string | null } | null | undefined,
+  video: { id: string, bannerKey?: string | null } | null | undefined,
 ): string | null {
-  if (!video || video.thumbnailKey === null) return null
+  if (!video || video.bannerKey === null) return null
   return `/api/videos/${video.id}/thumbnail`
 }

@@ -38,7 +38,7 @@ const ITEM_SELECT = {
       slug: true,
       title: true,
       durationSec: true,
-      thumbnailKey: true,
+      bannerKey: true,
       width: true,
       height: true,
       state: true,

@@ -34,7 +34,7 @@ interface VideoCard {
   durationSec: number | null
   tags: string[]
   state: string
-  thumbnailKey: string | null
+  bannerKey: string | null
 }
 
 /** One grid, so the two kinds sort together rather than in separate blocks. */

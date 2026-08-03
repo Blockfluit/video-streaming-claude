@@ -21,7 +21,7 @@ interface CardVideo {
   /** Every collection this video is in; empty for a standalone one. */
   collections: { collection: { slug: string, title: string } }[]
   /** Null means there is none, so the card does not ask for it. */
-  thumbnailKey?: string | null
+  bannerKey?: string | null
 }
 
 interface HistoryItem {

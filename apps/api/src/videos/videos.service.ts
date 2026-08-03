@@ -73,8 +73,8 @@ const VIDEO_SELECT = {
   probedAt: true,
   probeError: true,
   missingSince: true,
-  thumbnailKey: true,
-  thumbnailSource: true,
+  bannerKey: true,
+  bannerSource: true,
   introStartSec: true,
   introEndSec: true,
   outroStartSec: true,
@@ -252,7 +252,7 @@ export class VideosService {
   async publish(id: string) {
     const video = await this.prisma.video.findUnique({
       where: { id },
-      select: { id: true, title: true, description: true, durationSec: true, thumbnailKey: true },
+      select: { id: true, title: true, description: true, durationSec: true, bannerKey: true },
     });
     if (!video) throw new NotFoundException('No such video');
 
@@ -310,7 +310,7 @@ export class VideosService {
       title: string;
       description: string | null;
       durationSec: number | null;
-      thumbnailKey: string | null;
+      bannerKey: string | null;
     },
   >(video: T, role: Role) {
     return role === 'ADMIN' ? { ...video, missingFields: videoMissingFields(video) } : video;

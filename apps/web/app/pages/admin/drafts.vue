@@ -75,7 +75,7 @@ const FIELD_LABELS: Record<string, string> = {
   title: 'title',
   description: 'description',
   durationSec: 'not probed',
-  thumbnailKey: 'no poster',
+  bannerKey: 'no poster',
 }
 
 useHead({ title: 'Drafts' })

@@ -33,7 +33,7 @@ const VIDEO_DETAIL = {
   durationSec: true,
   width: true,
   height: true,
-  thumbnailKey: true,
+  bannerKey: true,
   introStartSec: true,
   introEndSec: true,
   outroStartSec: true,

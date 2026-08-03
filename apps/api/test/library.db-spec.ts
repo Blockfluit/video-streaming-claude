@@ -100,7 +100,7 @@ describe('Library (real database)', () => {
   const publishable = {
     description: 'A description.',
     durationSec: 120,
-    thumbnailKey: 'thumbs/a.jpg',
+    bannerKey: 'thumbs/a.jpg',
   };
 
   async function createCollection(title: string, extra: Record<string, unknown> = {}) {
@@ -679,7 +679,7 @@ describe('Library (real database)', () => {
       const response = await admin.post(`/videos/${video.id}/publish`).expect(400);
 
       expect(response.body.missingFields).toEqual(
-        expect.arrayContaining(['description', 'durationSec', 'thumbnailKey']),
+        expect.arrayContaining(['description', 'durationSec', 'bannerKey']),
       );
     });
 
@@ -698,7 +698,7 @@ describe('Library (real database)', () => {
 
       const response = await admin.get(`/videos/${video.id}`).expect(200);
 
-      expect(response.body.missingFields).toContain('thumbnailKey');
+      expect(response.body.missingFields).toContain('bannerKey');
     });
 
     it('refuses a collection with nothing publishable in it', async () => {

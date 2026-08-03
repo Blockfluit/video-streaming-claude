@@ -17,7 +17,7 @@ interface CardVideo {
   height: number | null
   /** Every collection this video is in; empty for a standalone one. */
   collections: { collection: { slug: string, title: string } }[]
-  thumbnailKey: string | null
+  bannerKey: string | null
 }
 
 interface SavedItem {

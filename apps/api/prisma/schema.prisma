@@ -46,7 +46,9 @@ enum MediaOrigin {
   EXTRACTED
 }
 
-enum ThumbnailSource {
+/// Where a piece of artwork came from, tracked per image rather than per video:
+/// an admin can hand-pick a poster and still let the banner regenerate.
+enum ArtworkSource {
   AUTO
   MANUAL
 }
@@ -159,7 +161,12 @@ model Collection {
   description String?
   year        Int?
   tags        String[]     @default([])
+  /// The admin's override, not the whole answer. Null means "not overridden": the
+  /// artwork then resolves to the first video's, and to the stock image for a
+  /// collection holding none. A collection is a shelf, so its picture follows what
+  /// is on it until somebody chooses one.
   posterKey   String?
+  bannerKey   String?
   /// `<drive>/<item>` for a collection ingest proposed from disk, null for one an
   /// admin made by hand. Nullable because a collection is a library idea, not a
   /// folder — Postgres treats NULLs as distinct, so any number may have none.
@@ -266,8 +273,14 @@ model Video {
   needsConversion Boolean   @default(false)
   sourceDeletedAt DateTime? // source reclaimed after conversion — exempt from the missing sweep
 
-  thumbnailKey    String?
-  thumbnailSource ThumbnailSource @default(AUTO) // MANUAL is never clobbered by a reprobe
+  /// Two shapes, both captured from the same frame 10% in and both replaceable.
+  /// The banner is 16:9 (the old `thumbnailKey`, renamed for what it is); the
+  /// poster is a 2:3 centre crop of the same frame. MANUAL is never clobbered by
+  /// a reprobe, and the two sources move independently.
+  posterKey    String?
+  posterSource ArtworkSource @default(AUTO)
+  bannerKey    String?
+  bannerSource ArtworkSource @default(AUTO)
 
   introStartSec Float? // all four markers are independently optional
   introEndSec   Float?
