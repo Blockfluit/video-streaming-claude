@@ -96,7 +96,7 @@ function matchPath(match: RequestView['libraryMatch']): string | null {
 
   return match.kind === 'collection'
     ? collectionPath(match)
-    : watchPath({ slug: match.slug })
+    : videoPath({ slug: match.slug })
 }
 
 useHead({ title: 'Requests' })

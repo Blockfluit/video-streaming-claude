@@ -115,6 +115,18 @@ const episodeLabel = computed(() => {
   return position < 0 ? null : `Episode ${position + 1}`
 })
 
+/**
+ * The textual half of the meta line, joined with `·`.
+ *
+ * Rendered as one string rather than as gapped `<span>`s: separators make it
+ * read as a single line of facts, where equal gaps read as three fragments that
+ * happen to be adjacent. The badges stay as chips after it — they are marks, not
+ * prose, and running a `·` between a word and a chip looks like a mistake.
+ */
+const metaLine = computed(() =>
+  [episodeLabel.value, runtime(video.value?.durationSec)].filter(Boolean).join(' · '),
+)
+
 const { isAdmin } = useSession()
 
 useHead(() => ({ title: video.value?.title ?? 'Library' }))
@@ -122,7 +134,13 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
 
 <template>
   <div v-if="video">
-    <HeroBackdrop :image="videoThumbnail(video)" size="tall">
+    <!--
+      `full` rather than `tall`: a standalone film has no cast, no tags and no
+      siblings, so everything below the hero is empty and a shorter band left the
+      title floating mid-screen with nothing under it. Where there *is* something
+      below, it scrolls up from the bottom edge the ordinary way.
+    -->
+    <HeroBackdrop :image="videoThumbnail(video)" size="full">
       <div class="rise max-w-2xl space-y-4">
         <!--
           Every collection holding this video, not a guessed single parent. In
@@ -147,16 +165,22 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
 
         <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">{{ video.title }}</h1>
 
-        <div class="flex flex-wrap items-center gap-3 text-sm text-(--ui-text-muted)">
-          <span v-if="episodeLabel">{{ episodeLabel }}</span>
-          <span v-if="runtime(video.durationSec)">{{ runtime(video.durationSec) }}</span>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-(--ui-text-muted)">
+          <span v-if="metaLine">{{ metaLine }}</span>
           <QualityBadge :width="video.width" :height="video.height" />
           <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
             {{ video.state }}
           </UBadge>
         </div>
 
-        <p v-if="video.description" class="text-(--ui-text-toned)">{{ video.description }}</p>
+        <!--
+          Narrower than the block around it and clamped. A synopsis set to the
+          full width of a wide screen is a line too long to track back from, and
+          an overlong one would otherwise push the buttons off the hero.
+        -->
+        <p v-if="video.description" class="line-clamp-3 max-w-xl text-(--ui-text-toned)">
+          {{ video.description }}
+        </p>
 
         <div class="flex flex-wrap items-center gap-3 pt-2">
           <!-- The one real call to action on the screen, so it is the solid one. -->
@@ -203,11 +227,17 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
         :empty="false"
         :to="collectionPath(primary.collection)"
       >
+        <!--
+          These play. The shelf only exists when this video is in a collection,
+          so picking from it is the same act as picking an episode on the
+          collection's own page — and that plays.
+        -->
         <MediaCard
           v-for="entry in otherVideos"
           :key="entry.id"
           class="w-56 sm:w-64"
-          :to="watchPath(entry)"
+          :to="playPath(entry)"
+          action="play"
           :title="entry.title"
           :subtitle="runtime(entry.durationSec)"
           :image-url="videoThumbnail(entry)"

@@ -70,7 +70,7 @@ const nextTo = computed(() => {
 })
 
 /** Back to this video's own page, which is where the cast and synopsis are. */
-const backTo = computed(() => (video.value ? watchPath(video.value) : '/browse'))
+const backTo = computed(() => (video.value ? videoPath(video.value) : '/browse'))
 
 const player = ref<{ seek?: (s: number) => void } | null>(null)
 const currentTime = ref(0)

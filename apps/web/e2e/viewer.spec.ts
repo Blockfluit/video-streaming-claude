@@ -279,14 +279,21 @@ test.describe('viewer', () => {
 
       // Scoped to the shelf's own section, so it cannot pick up a card from
       // elsewhere on the page and still pass.
-      const card = page.locator('section').filter({ has: shelf }).locator('a[href^="/v/"]').first()
+      const card = page.locator('section').filter({ has: shelf }).locator('a[href^="/watch/"]').first()
       await expect(card).toBeVisible()
 
       const href = await card.getAttribute('href')
       await card.click()
       await page.waitForURL(url => url.pathname === href)
-      // Another video's page, and it offers to play what it describes.
-      await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
+
+      /*
+       * Straight into playback, not onto another page of description. The shelf
+       * only appears when this video is in a collection, so choosing from it is
+       * the same act as choosing an episode on the collection's own page — and
+       * that plays. This asserted a `Play` link here while the cards went to
+       * `/v/`; both halves changed together.
+       */
+      await expect(page.locator('video')).toBeVisible()
     })
   })
 
@@ -304,6 +311,53 @@ test.describe('viewer', () => {
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     // A page describing it, not a player.
     await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * What a collection page is for: you opened the show and picked the episode,
+   * and that *is* the decision — so it plays, rather than handing you a second
+   * page describing the thing you just chose.
+   *
+   * One test covers both shapes. A collection with seasons draws `EpisodeRow`s
+   * and one without draws a grid of `MediaCard`s, and after this change every
+   * entry in either is a link to `/watch/`.
+   */
+  test('picking a video inside a collection plays it', async ({ page }) => {
+    // Somewhere in the app first: a relative fetch inside page.evaluate has no
+    // base URL to resolve against on about:blank.
+    await visit(page, '/browse')
+
+    // Decided from the data, never from `locator.count()` — that does not retry,
+    // so a guard written with it runs before the list renders and skips every
+    // time, which is how the sidebar test reported green for weeks while
+    // testing nothing. A collection showing a *list* is what is needed: a lone
+    // film in a collection is just the hero.
+    const slug = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        const listed = (detail.videos ?? []).length > 1 || (detail.seasons ?? []).length > 0
+        if (listed && (detail.videos ?? []).length > 0) return collection.slug as string
+      }
+      return null
+    })
+    test.skip(slug === null, 'no collection here lists more than one video')
+
+    await visit(page, `/c/${slug}`)
+
+    /*
+     * Scoped past the hero. Its Play button is also a `/watch/` link, so an
+     * unscoped `.first()` would click that and pass without ever touching an
+     * episode row — the thing under test. The hero is the `<section>`; the list
+     * is in the `<div>` that follows it.
+     */
+    const entry = page.locator('main section ~ div a[href^="/watch/"]').first()
+    await expect(entry).toBeVisible()
+
+    const href = await entry.getAttribute('href')
+    await entry.click()
+    await page.waitForURL(url => url.pathname === href)
+    await expect(page.locator('video')).toBeVisible()
   })
 
   test('a season can be chosen when the collection has seasons', async ({ page }) => {

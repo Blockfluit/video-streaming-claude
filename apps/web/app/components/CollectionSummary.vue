@@ -8,9 +8,15 @@
  * it. This is the same data laid out the way people actually pick something:
  * artwork and a Play button first, then episodes as rows you can read.
  *
- * Every row links to the video's own page. Where a video sits — its season and
- * its running order — is a fact about *this* collection and arrives on the
- * membership; the video itself is addressed by nothing but its slug.
+ * Every row **plays**. Opening a show and picking an episode from it is the
+ * decision; putting a page describing that episode in between asks someone to
+ * choose twice. The page that describes a video is still there at `/v/:slug`,
+ * and it is where browse and My List send you — the surfaces where the question
+ * is genuinely still what to watch.
+ *
+ * Where a video sits — its season and its running order — is a fact about *this*
+ * collection and arrives on the membership; the video itself is addressed by
+ * nothing but its slug.
  */
 interface SummaryVideo {
   id: string
@@ -199,13 +205,22 @@ const heading = computed(() => {
     <HeroBackdrop :image="backdrop" size="tall">
       <div class="rise flex flex-col gap-6 sm:flex-row sm:items-end">
         <!--
-          A collection with no poster yet is normal, and the endpoint 404s for
-          one. Without the fallback the browser draws its own broken-image
-          glyph, which is the most conspicuous thing on the page.
+          Drawn only when there is a poster to draw.
+
+          The placeholder behind it is for an image that *fails*: the browser's
+          own broken-image glyph is the most conspicuous thing on a page, so a
+          404 from the poster route has to be caught. A collection that simply
+          has no poster is a different thing, and reserving the space for one
+          gave both Avatar and Chernobyl a large empty grey rectangle as the
+          first element of their title page. Nothing is better than a box saying
+          nothing.
         -->
-        <div class="aspect-2/3 w-32 shrink-0 overflow-hidden rounded-lg bg-(--ui-bg-elevated) shadow-2xl ring-1 ring-(--ui-border) sm:w-44">
+        <div
+          v-if="posterUrl"
+          class="aspect-2/3 w-32 shrink-0 overflow-hidden rounded-lg bg-(--ui-bg-elevated) shadow-2xl ring-1 ring-(--ui-border) sm:w-44"
+        >
           <img
-            v-if="posterUrl && !posterBroken"
+            v-if="!posterBroken"
             :src="posterUrl"
             alt=""
             class="size-full object-cover"
@@ -278,7 +293,7 @@ const heading = computed(() => {
         <ul v-if="asEpisodes" class="divide-y divide-(--ui-border)">
           <li v-for="(entry, index) in listed" :key="entry.id">
             <EpisodeRow
-              :to="watchPath(entry)"
+              :to="playPath(entry)"
               :title="entry.title"
               :number="index + 1"
               :image-url="videoThumbnail(entry)"
@@ -297,7 +312,8 @@ const heading = computed(() => {
             v-for="entry in listed"
             :key="entry.id"
             class="w-full"
-            :to="watchPath(entry)"
+            :to="playPath(entry)"
+            action="play"
             :title="entry.title"
             :subtitle="runtime(entry.durationSec)"
             :image-url="videoThumbnail(entry)"

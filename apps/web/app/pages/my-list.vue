@@ -70,7 +70,7 @@ useHead({ title: 'My List' })
           :to="
             item.collection
               ? collectionPath(item.collection)
-              : watchPath(item.video!)
+              : videoPath(item.video!)
           "
           :title="item.collection?.title ?? item.video!.title"
           :subtitle="item.collection ? item.next?.video.title : collectionTitle(item.video!)"

@@ -127,7 +127,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
 
   const video = entry.video as CardVideo
   return {
-    to: watchPath(video),
+    to: videoPath(video),
     title: video.title,
     subtitle: collectionTitle(video),
     imageUrl: videoThumbnail(video),

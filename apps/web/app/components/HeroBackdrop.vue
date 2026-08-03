@@ -14,12 +14,35 @@
 const props = defineProps<{
   /** Absent is normal — nothing probed yet, or no poster chosen. */
   image?: string | null
-  /** `wide` is the home hero; `tall` gives a title page room for its metadata. */
-  size?: 'wide' | 'tall'
+  /**
+   * `wide` is the home hero. `tall` gives a collection page room for its
+   * metadata while leaving its episode list near the fold — a list nobody can
+   * see without scrolling is the thing that page is for, hidden.
+   *
+   * `full` is for a video's page, which has no such list: a standalone film has
+   * no cast, no tags and no siblings, so a `tall` hero left its text stranded
+   * mid-screen above a few hundred pixels of empty background. Filling the
+   * viewport makes that a composition rather than a gap.
+   */
+  size?: 'wide' | 'tall' | 'full'
 }>()
 
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
+
+/**
+ * `svh` rather than `vh` for the full-height hero: `vh` ignores a mobile
+ * browser's collapsing address bar, so the hero is taller than the screen on
+ * first paint and the page starts out scrolled by the height of the toolbar.
+ */
+const band = computed(() => ({
+  wide: 'h-[58vh] min-h-100',
+  tall: 'min-h-125 pt-28 pb-10 sm:min-h-140',
+  full: 'min-h-[88svh] pt-28 pb-10',
+}[props.size ?? 'wide']))
+
+/** Home centres its hero; a title page sits its text on the floor of the frame. */
+const anchor = computed(() => (props.size === 'wide' || !props.size ? 'items-center' : 'items-end'))
 
 watch(
   () => props.image,
@@ -40,10 +63,7 @@ watch(
     nothing — which left a title page's hero text stranded at the top of a tall
     band of artwork.
   -->
-  <section
-    class="relative flex w-full flex-col overflow-hidden"
-    :class="size === 'tall' ? 'min-h-125 pt-28 pb-10 sm:min-h-140' : 'h-[58vh] min-h-100'"
-  >
+  <section class="relative flex w-full flex-col overflow-hidden" :class="band">
     <img
       v-if="showImage"
       :src="image!"
@@ -66,10 +86,7 @@ watch(
       style="background: linear-gradient(to top, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 55%, transparent) 55%, transparent 100%)"
     />
 
-    <div
-      class="relative flex flex-1"
-      :class="size === 'tall' ? 'items-end' : 'items-center'"
-    >
+    <div class="relative flex flex-1" :class="anchor">
       <div class="page-shell w-full">
         <slot />
       </div>

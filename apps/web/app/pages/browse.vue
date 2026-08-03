@@ -107,7 +107,7 @@ const cards = computed<Card[]>(() => {
 
   const videos: Card[] = (loose.value?.items ?? []).map(video => ({
     key: `v:${video.id}`,
-    to: watchPath(video),
+    to: videoPath(video),
     title: video.title,
     subtitle: runtime(video.durationSec),
     imageUrl: videoThumbnail(video),

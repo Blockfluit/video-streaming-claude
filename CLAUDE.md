@@ -385,9 +385,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `headers: useRequestHeaders(['cookie'])` — wrap it once in a `useApi()` composable.
 - Everything is same-origin via the Nuxt `/api/**` proxy. Keep it that way: a cross-origin `<track>` fails
   silently, and `<video>`/`<track>` cannot send `Authorization` headers (this is why auth is cookie-based).
-- A video is shown at **`/v/<slug>`**, its own page. `watchPath` therefore cannot return null any more — it
+- A video is shown at **`/v/<slug>`**, its own page. `videoPath` therefore cannot return null any more — it
   used to, for a video that arrived without a collection, which is now simply what a standalone film is.
   `/c/<collection>/…` still resolves so shared links do not rot, and redirects a video to its canonical URL.
+- `videoPath` (`/v/<slug>`, describes) and `playPath` (`/watch/<slug>`, plays) are picked between on a rule,
+  not by feel: **inside a collection it plays** — an episode row, a collection's grid, the "more from"
+  shelf — as do Continue Watching and History, because the choice was already made. **Browse, My List and
+  curated rows describe**, because there the question is still what to watch. `videoPath` was called
+  `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
+  that; every bug here is "which of the two did I call", so the names have to point at their own routes.
 - **`browse.vue` lists collections *and* standalone videos**, merged into one grid. It listed only
   collections, so a standalone film — the thing a folder holding one video becomes — could never appear
   there however often it was published: it is on no shelf to be listed under. Reported as "I published it

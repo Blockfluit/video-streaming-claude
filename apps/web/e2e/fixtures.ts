@@ -1,4 +1,4 @@
-import { expect, test as base, type Page } from '@playwright/test'
+import { expect, test as base, type Locator, type Page } from '@playwright/test'
 
 /**
  * Shared setup: a signed-in admin, and a console watchdog.
@@ -145,6 +145,47 @@ export async function expectsRequest(
   )
   await action()
   await waiting
+}
+
+/**
+ * Saves an edit to a text field, then puts back what was there before.
+ *
+ * This suite runs against the **dev servers**, which point at the real library —
+ * so a test that fills in a description leaves that text on a real video, where
+ * the next person to open the page reads it as content. It was reported exactly
+ * that way: "Edited by the tests 1785700580460" sitting under a film's title,
+ * taken for an audit trail the app does not have and would not want.
+ *
+ * Proving the save reached the API still needs a real edit, so the fix is to
+ * restore rather than to stop editing. Two round trips instead of one, and the
+ * library is left as its owner arranged it.
+ *
+ * Restoring is a save in its own right and is asserted like one: a restore that
+ * quietly failed would put this right back where it started, one run later.
+ */
+export async function savesThenRestores(
+  page: Page,
+  field: Locator,
+  value: string,
+  endpoint: RegExp,
+  button: string,
+): Promise<void> {
+  const original = await field.inputValue()
+
+  const save = async (next: string) => {
+    await expect(async () => {
+      await field.fill(next)
+      await expect(field).toHaveValue(next, { timeout: 1000 })
+    }).toPass({ timeout: 15_000 })
+
+    await expectsRequest(page, endpoint, 'PATCH', () =>
+      page.getByRole('button', { name: button }).click())
+    await expect(toast(page, 'Saved')).toBeVisible()
+  }
+
+  await save(value)
+  await save(original)
+  await expect(field).toHaveValue(original)
 }
 
 /**

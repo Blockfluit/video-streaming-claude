@@ -6,8 +6,9 @@
  * one by reading what happens in it, which a 14rem tile has no room for. The
  * still is there to be recognised, not read, so it stays small.
  *
- * The whole row is the link, and it goes to the episode's title page like every
- * other card in the app. The play glyph over the still is decoration.
+ * The whole row is the link and it goes straight to the player, so the play
+ * glyph over the still is an honest promise rather than decoration — which is
+ * what it was while the row opened a page of text instead.
  */
 const props = defineProps<{
   to: string

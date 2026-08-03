@@ -4,6 +4,7 @@ import {
   expectsRequest,
   fillStable,
   removeSeasonWithFolder,
+  savesThenRestores,
   test,
   toast,
   USERNAME,
@@ -52,12 +53,16 @@ test.describe('admin', () => {
     await page.getByRole('link', { name: 'Edit' }).first().click()
     await page.waitForURL(/\/admin\/videos\//)
 
-    const description = page.getByRole('textbox').nth(1)
-    await description.fill(`Edited by the tests ${Date.now()}`)
-
-    await expectsRequest(page, /\/videos\/[^/]+$/, 'PATCH', () =>
-      page.getByRole('button', { name: 'Save details' }).click())
-    await expect(toast(page, 'Saved')).toBeVisible()
+    // Restores the description afterwards: this runs against the real library,
+    // and the text it types is otherwise still on the film the next time anyone
+    // opens it.
+    await savesThenRestores(
+      page,
+      page.getByRole('textbox').nth(1),
+      `Edited by the tests ${Date.now()}`,
+      /\/videos\/[^/]+$/,
+      'Save details',
+    )
   })
 
   test('the marker editor sets and clears a marker', async ({ page }) => {
@@ -235,12 +240,15 @@ test.describe('admin', () => {
     await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible()
 
     // Saving has to reach the API — a form that only updates itself is the
-    // exact failure this suite exists to catch.
-    const description = `Edited by the tests ${Date.now()}`
-    await fillStable(page, 'textarea', description)
-    await expectsRequest(page, /\/collections\/[^/]+$/, 'PATCH', () =>
-      page.getByRole('button', { name: 'Save changes' }).click())
-    await expect(toast(page, 'Saved')).toBeVisible()
+    // exact failure this suite exists to catch — and then the collection's own
+    // description goes back, for the same reason as on the video editor.
+    await savesThenRestores(
+      page,
+      page.locator('textarea'),
+      `Edited by the tests ${Date.now()}`,
+      /\/collections\/[^/]+$/,
+      'Save changes',
+    )
 
     // Aggregate figures are ADMIN-only and had no reader anywhere in the app.
     await expect(page.getByText('Viewers')).toBeVisible()

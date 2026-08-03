@@ -66,7 +66,7 @@ if (error.value) {
 
 // A shared link to a video lands on the video's own page.
 if (resolved.value?.type === 'video') {
-  await navigateTo(watchPath(resolved.value.data as ResolvedVideo), { redirectCode: 301 })
+  await navigateTo(videoPath(resolved.value.data as ResolvedVideo), { redirectCode: 301 })
 }
 
 /** Set only when the URL named a season; the page then scopes its list to it. */
