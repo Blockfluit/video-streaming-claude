@@ -17,7 +17,7 @@ interface CardVideo {
   height: number | null
   /** Every collection this video is in; empty for a standalone one. */
   collections: { collection: { slug: string, title: string } }[]
-  thumbnailKey: string | null
+  bannerKey: string | null
 }
 
 interface SavedItem {
@@ -77,7 +77,7 @@ useHead({ title: 'My List' })
           :image-url="
             item.collection
               ? collectionPoster(item.collection)
-              : videoThumbnail(item.video!)
+              : videoPoster(item.video!)
           "
           :width="item.collection ? item.next?.video.width : item.video!.width"
           :height="item.collection ? item.next?.video.height : item.video!.height"

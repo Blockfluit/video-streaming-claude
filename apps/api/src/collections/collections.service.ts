@@ -331,7 +331,7 @@ export class CollectionsService {
                 title: true,
                 description: true,
                 durationSec: true,
-                thumbnailKey: true,
+                bannerKey: true,
               },
             },
           },
@@ -543,7 +543,6 @@ export class CollectionsService {
       missingFields: collectionMissingFields({
         title: collection.title,
         description: collection.description,
-        posterKey: collection.posterKey,
         publishableVideoCount: collection.videos.length,
       }),
     };

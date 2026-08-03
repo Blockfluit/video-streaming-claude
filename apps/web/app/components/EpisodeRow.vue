@@ -6,9 +6,12 @@
  * one by reading what happens in it, which a 14rem tile has no room for. The
  * still is there to be recognised, not read, so it stays small.
  *
- * The whole row is the link and it goes straight to the player, so the play
- * glyph over the still is an honest promise rather than decoration — which is
- * what it was while the row opened a page of text instead.
+ * The whole row is the link and it goes straight to the player.
+ *
+ * The image is the **banner** — the one place in the app that shows one rather
+ * than a poster. Inside a show you are choosing a moment, not a title, and a
+ * wide frame of the episode says more about it than a 2:3 poster cut from the
+ * same footage would.
  */
 const props = defineProps<{
   to: string
@@ -50,7 +53,15 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
       aria-hidden="true"
     >{{ number ?? '' }}</span>
 
-    <div class="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) sm:w-40">
+    <!--
+      Wide enough to read as artwork rather than as a thumbnail. The banner is a
+      16:9 frame of the episode and it was drawn at 8rem, which is a size that
+      says "icon". The text still sits beside it, so a synopsis keeps its room.
+
+      Hover is the ring, matching the cards. There was a play glyph in the middle
+      of this frame, which covered the picture on the row you were pointing at.
+    -->
+    <div class="relative aspect-video w-40 shrink-0 overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) transition-shadow group-hover:ring-2 group-hover:ring-(--ui-primary) group-focus-visible:ring-2 group-focus-visible:ring-(--ui-primary) sm:w-48 lg:w-64">
       <img
         v-if="showImage"
         :src="imageUrl!"
@@ -61,12 +72,6 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
       >
       <div v-else class="grid size-full place-items-center text-(--ui-text-dimmed)">
         <UIcon name="i-lucide-clapperboard" class="size-6" />
-      </div>
-
-      <div class="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        <span class="grid size-9 place-items-center rounded-full bg-white/95 shadow-lg">
-          <UIcon name="i-lucide-play" class="size-4 translate-x-px text-black" />
-        </span>
       </div>
 
       <!-- Absent at zero rather than drawn empty, like the cards. -->

@@ -85,7 +85,7 @@ export class PeopleService {
             id: true,
             slug: true,
             title: true,
-            thumbnailKey: true,
+            bannerKey: true,
             // Every collection it is in: a film may appear in several, and
             // naming one of them would be an arbitrary choice.
             collections: {

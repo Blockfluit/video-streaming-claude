@@ -22,7 +22,7 @@ export const MEMBER_VIDEO_COLUMNS = {
   durationSec: true,
   width: true,
   height: true,
-  thumbnailKey: true,
+  bannerKey: true,
 } as const;
 
 /** Selects a membership row together with the video it points at. */

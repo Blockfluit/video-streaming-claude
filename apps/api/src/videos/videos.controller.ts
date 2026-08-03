@@ -34,11 +34,37 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { ImagesService } from '../common/images.service';
 import { validate } from '../common/zod-validation.pipe';
+import type { ArtworkShape } from '../media/artwork';
 import { MediaService } from '../media/media.service';
 import { JobsService } from '../transcode/jobs.service';
 import { StreamingService } from './streaming.service';
 import { VideosService } from './videos.service';
 import { ThrottleExpensive } from '../common/throttling';
+
+/**
+ * Shared by both upload routes.
+ *
+ * Declared above the class because a decorator argument is evaluated when the
+ * class is defined, not when the route runs — below it, this is still in its
+ * temporal dead zone.
+ *
+ * The client's filename is metadata and never a path component: the extension
+ * comes from the mime type, which is the one thing here the server chose.
+ */
+const IMAGE_UPLOAD = {
+  limits: { fileSize: MAX_THUMBNAIL_BYTES, files: 1 },
+  fileFilter: (
+    _request: unknown,
+    file: { mimetype: string },
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    const extension = MIME_TO_EXTENSION[file.mimetype];
+    callback(
+      extension ? null : new BadRequestException('Unsupported image type'),
+      Boolean(extension),
+    );
+  },
+};
 
 @Controller('videos')
 export class VideosController {
@@ -101,24 +127,38 @@ export class VideosController {
   }
 
   /**
-   * The poster frame. Every card in the app asks for one of these, which is
-   * why it revalidates with an ETag rather than carrying a lifetime: the
-   * storage key is stable across replacements, so a cached copy would outlive
-   * the picture it shows.
-   */
-  /*
-   * Never throttled either. Every card on every shelf asks for one of these, so
-   * a single home page is dozens of requests before anyone has clicked
-   * anything. They are cheap static reads behind an ETag.
+   * The two shapes of artwork: a 2:3 poster and a 16:9 banner.
+   *
+   * Both revalidate with an ETag rather than carrying a lifetime — the storage
+   * key is stable across replacements, so any cached copy outlives the picture
+   * it shows and an admin who has just fixed a poster keeps seeing the old one.
+   *
+   * Never throttled. Every card on every shelf asks for one, so a single home
+   * page is dozens of requests before anyone has clicked anything; they are
+   * cheap static reads behind an ETag, and a limit here would break the shelves
+   * without protecting anything.
+   *
+   * Neither 404s. Artwork falls back — to the stock image at worst — because a
+   * card that asks and gets nothing has already paid for the round trip.
    */
   @SkipThrottle()
-  @Get(':id/thumbnail')
-  thumbnail(
+  @Get(':id/poster')
+  poster(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
     @Res() response: Response,
   ): Promise<void> {
-    return this.images.videoThumbnail(id, user.role, response);
+    return this.images.videoArtwork(id, 'poster', user.role, response);
+  }
+
+  @SkipThrottle()
+  @Get(':id/banner')
+  banner(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.videoArtwork(id, 'banner', user.role, response);
   }
 
   @Patch(':id')
@@ -178,44 +218,64 @@ export class VideosController {
     return this.videos.findOne(id, user.role);
   }
 
-  /** Uploads a poster image. Marked MANUAL, so no later probe overwrites it. */
+  /**
+   * Uploads an image for one shape. Marked MANUAL, so no later probe overwrites
+   * it — and only that shape, so a hand-picked poster survives a banner being
+   * replaced.
+   */
   @ThrottleExpensive()
-  @Post(':id/thumbnail')
+  @Post(':id/poster')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: MAX_THUMBNAIL_BYTES, files: 1 },
-      fileFilter: (_request, file, callback) => {
-        // The client's filename is metadata, never a path component — the
-        // extension is taken from the mime type instead.
-        const extension = MIME_TO_EXTENSION[file.mimetype];
-        callback(extension ? null : new BadRequestException('Unsupported image type'), Boolean(extension));
-      },
-    }),
-  )
-  async uploadThumbnail(
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD))
+  uploadPoster(
     @Param('id') id: string,
     @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
   ) {
-    if (!file) throw new BadRequestException('No image uploaded');
-
-    const key = await this.media.setThumbnail(id, file.buffer, MIME_TO_EXTENSION[file.mimetype]);
-    return { thumbnailKey: key, thumbnailSource: 'MANUAL' };
+    return this.storeArtwork(id, file, 'poster');
   }
 
-  /** Grabs a frame at a chosen moment. Also MANUAL — someone picked it. */
-  /** One ffmpeg invocation per call. */
   @ThrottleExpensive()
-  @Post(':id/thumbnail/capture')
+  @Post(':id/banner')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
-  async captureThumbnail(
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD))
+  uploadBanner(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    return this.storeArtwork(id, file, 'banner');
+  }
+
+  /**
+   * Grabs a frame at a chosen moment. Also MANUAL — someone picked it.
+   *
+   * One ffmpeg invocation per call, hence the expensive-throttle. The poster is
+   * cropped from the frame and the banner is the whole of it, so capturing the
+   * same timestamp twice gives two different pictures rather than one repeated.
+   */
+  @ThrottleExpensive()
+  @Post(':id/poster/capture')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async capturePoster(
     @Param('id') id: string,
     @Body(validate(captureThumbnailSchema)) dto: CaptureThumbnailInput,
   ) {
-    const key = await this.media.captureThumbnail(id, dto.atSeconds);
-    return { thumbnailKey: key, thumbnailSource: 'MANUAL' };
+    const key = await this.media.captureArtwork(id, dto.atSeconds, 'poster');
+    return { posterKey: key, posterSource: 'MANUAL' };
+  }
+
+  @ThrottleExpensive()
+  @Post(':id/banner/capture')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async captureBanner(
+    @Param('id') id: string,
+    @Body(validate(captureThumbnailSchema)) dto: CaptureThumbnailInput,
+  ) {
+    const key = await this.media.captureArtwork(id, dto.atSeconds, 'banner');
+    return { bannerKey: key, bannerSource: 'MANUAL' };
   }
 
   /**
@@ -255,12 +315,39 @@ export class VideosController {
     return this.jobs.reclaimSource(id);
   }
 
-  /** Drops the poster and returns the video to AUTO; the next probe regenerates one. */
-  @Delete(':id/thumbnail')
+  /** Drops one shape and returns it to AUTO; the next probe regenerates it. */
+  @Delete(':id/poster')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
-  clearThumbnail(@Param('id') id: string): Promise<void> {
-    return this.media.clearThumbnail(id);
+  clearPoster(@Param('id') id: string): Promise<void> {
+    return this.media.clearArtwork(id, 'poster');
+  }
+
+  @Delete(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearBanner(@Param('id') id: string): Promise<void> {
+    return this.media.clearArtwork(id, 'banner');
+  }
+
+  /** The half of an upload that is the same whichever shape it is for. */
+  private async storeArtwork(
+    id: string,
+    file: { buffer: Buffer; mimetype: string } | undefined,
+    shape: ArtworkShape,
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+
+    const key = await this.media.setArtwork(
+      id,
+      file.buffer,
+      MIME_TO_EXTENSION[file.mimetype],
+      shape,
+    );
+
+    return shape === 'poster'
+      ? { posterKey: key, posterSource: 'MANUAL' }
+      : { bannerKey: key, bannerSource: 'MANUAL' };
   }
 }
 

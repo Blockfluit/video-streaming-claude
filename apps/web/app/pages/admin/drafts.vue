@@ -75,7 +75,7 @@ const FIELD_LABELS: Record<string, string> = {
   title: 'title',
   description: 'description',
   durationSec: 'not probed',
-  thumbnailKey: 'no poster',
+  bannerKey: 'no poster',
 }
 
 useHead({ title: 'Drafts' })
@@ -132,7 +132,7 @@ useHead({ title: 'Drafts' })
             <td class="p-3">
               <div class="flex items-center gap-3">
                 <img
-                  :src="`/api/videos/${video.id}/thumbnail`"
+                  :src="`/api/videos/${video.id}/banner`"
                   alt=""
                   loading="lazy"
                   class="aspect-video w-20 shrink-0 rounded bg-(--ui-bg-accented) object-cover"

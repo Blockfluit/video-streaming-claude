@@ -261,8 +261,8 @@ describe('Media probing (real ffmpeg)', () => {
     });
   });
 
-  describe('thumbnails', () => {
-    it('generates one automatically after a probe', async () => {
+  describe('artwork', () => {
+    it('generates both shapes automatically after a probe', async () => {
       await makeVideo('Films/bars.mp4', { seconds: 2 });
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
@@ -270,9 +270,61 @@ describe('Media probing (real ffmpeg)', () => {
       await media.drain();
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
-      expect(video.thumbnailKey).toBe(`thumbnails/${id}.jpg`);
-      expect(video.thumbnailSource).toBe('AUTO');
-      await expect(storage.exists('derived', video.thumbnailKey!)).resolves.toBe(true);
+
+      expect(video.bannerKey).toBe(`banners/${id}.jpg`);
+      expect(video.bannerSource).toBe('AUTO');
+      await expect(storage.exists('derived', video.bannerKey!)).resolves.toBe(true);
+
+      expect(video.posterKey).toBe(`posters/${id}.jpg`);
+      expect(video.posterSource).toBe('AUTO');
+      await expect(storage.exists('derived', video.posterKey!)).resolves.toBe(true);
+    });
+
+    /**
+     * The poster is a 2:3 **crop** of the same frame, not a copy of the banner.
+     *
+     * Checked through the file size rather than by decoding: two JPEGs of
+     * different dimensions from the same source cannot come out byte-identical,
+     * and a crop filter that silently did nothing is exactly the failure this
+     * catches.
+     */
+    it('cuts the poster to a different shape from the banner', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      media.enqueue(id);
+      await media.drain();
+
+      const banner = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
+      const poster = await readFile(storage.resolvePath('derived', `posters/${id}.jpg`));
+
+      expect(poster).not.toEqual(banner);
+    });
+
+    /**
+     * The two sources move independently, which is the point of tracking them
+     * separately: an admin picks a real poster for a film and still gets a fresh
+     * banner out of the next probe.
+     */
+    it('regenerates the banner while leaving a MANUAL poster alone', async () => {
+      await makeVideo('Films/bars.mp4', { seconds: 2 });
+      const id = await seedVideo('Films/bars.mp4', 'Bars');
+
+      media.enqueue(id);
+      await media.drain();
+
+      await admin.post(`/videos/${id}/poster/capture`).send({ atSeconds: 1 }).expect(200);
+      const chosen = await readFile(storage.resolvePath('derived', `posters/${id}.jpg`));
+
+      media.enqueue(id);
+      await media.drain();
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id } });
+      expect(video.posterSource).toBe('MANUAL');
+      expect(video.bannerSource).toBe('AUTO');
+
+      const after = await readFile(storage.resolvePath('derived', `posters/${id}.jpg`));
+      expect(after).toEqual(chosen);
     });
 
     // Into DERIVED_ROOT, never the watched tree — generated output landing
@@ -284,14 +336,14 @@ describe('Media probing (real ffmpeg)', () => {
       media.enqueue(id);
       await media.drain();
 
-      await expect(storage.exists('media', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('media', `banners/${id}.jpg`)).resolves.toBe(false);
     });
 
     /**
      * Captures land atomically, or not at all.
      *
      * ffmpeg truncates its output the moment it opens it, so writing straight
-     * to `thumbnails/<id>.jpg` left the live poster missing for as long as the
+     * to `banners/<id>.jpg` left the live poster missing for as long as the
      * capture took — and every card in the app asks for that URL, so a routine
      * re-probe made artwork across the library flicker to a **404**, not merely
      * a stale picture. Three viewer tests caught it when a boot-time reconcile
@@ -304,8 +356,8 @@ describe('Media probing (real ffmpeg)', () => {
       await makeVideo('Films/bars.mp4', { seconds: 2 });
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
-      await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(200);
-      const before = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
+      const before = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
 
       /*
        * Fails the way ffmpeg actually fails: it opens its output, truncates it,
@@ -322,12 +374,12 @@ describe('Media probing (real ffmpeg)', () => {
         });
 
       try {
-        await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(500);
+        await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(500);
       } finally {
         capture.mockRestore();
       }
 
-      const after = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const after = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
       expect(after.equals(before)).toBe(true);
     });
 
@@ -345,12 +397,12 @@ describe('Media probing (real ffmpeg)', () => {
         });
 
       try {
-        await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 1 }).expect(500);
+        await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(500);
       } finally {
         capture.mockRestore();
       }
 
-      await expect(storage.exists('derived', `tmp/${id}-thumbnail.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `tmp/${id}-banner.jpg`)).resolves.toBe(false);
     });
 
     /**
@@ -359,7 +411,7 @@ describe('Media probing (real ffmpeg)', () => {
      * It prints "Output file is empty, nothing was encoded" and writes no file
      * at all, so a wrapper that trusts the exit code reports success and leaves
      * the *rename* to fail — surfacing as
-     * `ENOENT ... rename derived/tmp/<id>-thumbnail.jpg -> derived/thumbnails/<id>.jpg`,
+     * `ENOENT ... rename derived/tmp/<id>-banner.jpg -> derived/banners/<id>.jpg`,
      * which names neither the timestamp nor the file and reads like a storage
      * fault. Reported from a real library, where a poster was captured while a
      * 1 GB file was still being copied in.
@@ -371,7 +423,7 @@ describe('Media probing (real ffmpeg)', () => {
       // 400, not 500: the admin picked a moment the file has nothing at, and
       // that is an answer about the request rather than a server fault.
       const response = await admin
-        .post(`/videos/${id}/thumbnail/capture`)
+        .post(`/videos/${id}/banner/capture`)
         .send({ atSeconds: 600 })
         .expect(400);
 
@@ -385,10 +437,10 @@ describe('Media probing (real ffmpeg)', () => {
       await makeVideo('Films/bars.mp4', { seconds: 2 });
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
-      await admin.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 600 }).expect(400);
+      await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 600 }).expect(400);
 
-      await expect(storage.exists('derived', `thumbnails/${id}.jpg`)).resolves.toBe(false);
-      await expect(storage.exists('derived', `tmp/${id}-thumbnail.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `banners/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `tmp/${id}-banner.jpg`)).resolves.toBe(false);
     });
 
     /**
@@ -422,7 +474,7 @@ describe('Media probing (real ffmpeg)', () => {
       expect(video.durationSec).toBeGreaterThan(0);
       expect(video.videoCodec).toBe('h264');
       // The poster simply is not there.
-      expect(video.thumbnailKey).toBeNull();
+      expect(video.bannerKey).toBeNull();
     });
 
     /**
@@ -434,16 +486,16 @@ describe('Media probing (real ffmpeg)', () => {
       await makeVideo('Films/bars.mp4', { seconds: 2 });
       const id = await seedVideo('Films/bars.mp4', 'Bars');
       await admin
-        .post(`/videos/${id}/thumbnail/capture`)
+        .post(`/videos/${id}/banner/capture`)
         .send({ atSeconds: 1 })
         .expect(200);
-      const chosen = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const chosen = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
 
       await admin.post(`/videos/${id}/reprobe`).expect(200);
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
-      expect(video.thumbnailSource).toBe('MANUAL');
-      const after = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      expect(video.bannerSource).toBe('MANUAL');
+      const after = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
       expect(after.equals(chosen)).toBe(true);
     });
 
@@ -452,12 +504,12 @@ describe('Media probing (real ffmpeg)', () => {
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
       const response = await admin
-        .post(`/videos/${id}/thumbnail/capture`)
+        .post(`/videos/${id}/banner/capture`)
         .send({ atSeconds: 1 })
         .expect(200);
 
-      expect(response.body).toMatchObject({ thumbnailSource: 'MANUAL' });
-      await expect(storage.exists('derived', response.body.thumbnailKey)).resolves.toBe(true);
+      expect(response.body).toMatchObject({ bannerSource: 'MANUAL' });
+      await expect(storage.exists('derived', response.body.bannerKey)).resolves.toBe(true);
     });
 
     it('accepts an uploaded poster', async () => {
@@ -470,13 +522,13 @@ describe('Media probing (real ffmpeg)', () => {
       );
 
       const response = await admin
-        .post(`/videos/${id}/thumbnail`)
+        .post(`/videos/${id}/banner`)
         .attach('file', png, { filename: 'poster.png', contentType: 'image/png' })
         .expect(200);
 
       expect(response.body).toMatchObject({
-        thumbnailKey: `thumbnails/${id}.png`,
-        thumbnailSource: 'MANUAL',
+        bannerKey: `banners/${id}.png`,
+        bannerSource: 'MANUAL',
       });
     });
 
@@ -485,7 +537,7 @@ describe('Media probing (real ffmpeg)', () => {
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
       await admin
-        .post(`/videos/${id}/thumbnail`)
+        .post(`/videos/${id}/banner`)
         .attach('file', Buffer.from('#!/bin/sh'), { filename: 'evil.sh', contentType: 'text/x-sh' })
         .expect(400);
     });
@@ -496,11 +548,11 @@ describe('Media probing (real ffmpeg)', () => {
       media.enqueue(id);
       await media.drain();
 
-      await admin.delete(`/videos/${id}/thumbnail`).expect(204);
+      await admin.delete(`/videos/${id}/banner`).expect(204);
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
-      expect(video).toMatchObject({ thumbnailKey: null, thumbnailSource: 'AUTO' });
-      await expect(storage.exists('derived', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      expect(video).toMatchObject({ bannerKey: null, bannerSource: 'AUTO' });
+      await expect(storage.exists('derived', `banners/${id}.jpg`)).resolves.toBe(false);
     });
   });
 
@@ -525,8 +577,8 @@ describe('Media probing (real ffmpeg)', () => {
         .expect(201);
 
       await user.post(`/videos/${id}/reprobe`).expect(403);
-      await user.delete(`/videos/${id}/thumbnail`).expect(403);
-      await user.post(`/videos/${id}/thumbnail/capture`).send({ atSeconds: 0 }).expect(403);
+      await user.delete(`/videos/${id}/banner`).expect(403);
+      await user.post(`/videos/${id}/banner/capture`).send({ atSeconds: 0 }).expect(403);
     });
 
     it('404s an unknown video', async () => {
@@ -571,7 +623,7 @@ describe('Media probing (real ffmpeg)', () => {
 
       const video = await prisma.video.findFirstOrThrow({ where: { title: 'Pilot' } });
       expect(video).toMatchObject({ width: 1920, height: 1080, videoCodec: 'h264' });
-      expect(video.thumbnailKey).not.toBeNull();
+      expect(video.bannerKey).not.toBeNull();
     });
   });
 });

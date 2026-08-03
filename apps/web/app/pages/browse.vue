@@ -34,7 +34,7 @@ interface VideoCard {
   durationSec: number | null
   tags: string[]
   state: string
-  thumbnailKey: string | null
+  bannerKey: string | null
 }
 
 /** One grid, so the two kinds sort together rather than in separate blocks. */
@@ -110,7 +110,7 @@ const cards = computed<Card[]>(() => {
     to: videoPath(video),
     title: video.title,
     subtitle: runtime(video.durationSec),
-    imageUrl: videoThumbnail(video),
+    imageUrl: videoPoster(video),
     badge: video.state === 'PUBLISHED' ? null : video.state,
   }))
 

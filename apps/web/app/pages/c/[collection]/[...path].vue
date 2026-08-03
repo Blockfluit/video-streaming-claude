@@ -105,7 +105,7 @@ const { data: detail } = await useApiData<{
     durationSec: number | null
     width: number | null
     height: number | null
-    thumbnailKey: string | null
+    bannerKey: string | null
     seasonId: string | null
     orderIndex: number | null
   }[]

@@ -73,7 +73,7 @@ describe('Streaming (real database)', () => {
         state: 'PUBLISHED',
         description: 'A description.',
         durationSec: 120,
-        thumbnailKey: 'thumbs/a.jpg',
+        bannerKey: 'thumbs/a.jpg',
         ...overrides,
       },
       select: { id: true, storageKey: true },

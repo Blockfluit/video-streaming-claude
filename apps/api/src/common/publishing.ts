@@ -15,13 +15,12 @@ export interface VideoPublishFields {
   title: string | null;
   description: string | null;
   durationSec: number | null;
-  thumbnailKey: string | null;
+  bannerKey: string | null;
 }
 
 export interface CollectionPublishFields {
   title: string | null;
   description: string | null;
-  posterKey: string | null;
   /** Videos in this collection that are published, or ready to be. */
   publishableVideoCount: number;
 }
@@ -44,7 +43,7 @@ export function videoMissingFields(video: VideoPublishFields): string[] {
   if (isBlank(video.description)) missing.push('description');
   // Zero means the probe found no usable stream, not a very short film.
   if (video.durationSec === null || video.durationSec <= 0) missing.push('durationSec');
-  if (isBlank(video.thumbnailKey)) missing.push('thumbnailKey');
+  if (isBlank(video.bannerKey)) missing.push('bannerKey');
 
   return missing;
 }
@@ -54,9 +53,23 @@ export function collectionMissingFields(collection: CollectionPublishFields): st
 
   if (isBlank(collection.title)) missing.push('title');
   if (isBlank(collection.description)) missing.push('description');
-  if (isBlank(collection.posterKey)) missing.push('posterKey');
   // An empty shelf is not a collection.
   if (collection.publishableVideoCount < 1) missing.push('videos');
+
+  /*
+   * `posterKey` is deliberately **not** required.
+   *
+   * It used to be, and the rule was unsatisfiable: nothing generated a
+   * collection poster and no endpoint accepted one, so the only collections that
+   * could ever be published were those whose ingest folder happened to contain a
+   * poster file. Every collection in the real library sat in DRAFT because of
+   * it, and the error named a field with no way to fill it.
+   *
+   * It is also no longer meaningful. A collection's `posterKey` is the admin's
+   * *override*; with none it shows its first video's artwork, and the check
+   * above already guarantees there is a video. Artwork is not a thing a
+   * collection can now lack, so it is not a thing to block publishing on.
+   */
 
   return missing;
 }

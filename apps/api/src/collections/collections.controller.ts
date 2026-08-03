@@ -63,7 +63,12 @@ export class CollectionsController {
    * two segments and `:slug` is one, so Express cannot confuse them. Checked
    * rather than assumed: moving it below `:slug` fails nothing.
    */
-  /** Not throttled, for the same reason as video thumbnails: one per card. */
+  /**
+   * Not throttled, for the same reason as video artwork: one per card.
+   *
+   * Neither of these 404s. A collection with no poster of its own shows its
+   * first video's, and the stock image only when it holds nothing.
+   */
   @SkipThrottle()
   @Get(':id/poster')
   poster(
@@ -71,7 +76,17 @@ export class CollectionsController {
     @CurrentUser() user: AuthUser,
     @Res() response: Response,
   ): Promise<void> {
-    return this.images.collectionPoster(id, user.role, response);
+    return this.images.collectionArtwork(id, 'poster', user.role, response);
+  }
+
+  @SkipThrottle()
+  @Get(':id/banner')
+  banner(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.images.collectionArtwork(id, 'banner', user.role, response);
   }
 
   @Get()

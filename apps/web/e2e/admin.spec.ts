@@ -92,21 +92,36 @@ test.describe('admin', () => {
     await expect(toast(page, 'Reprobed')).toBeVisible()
   })
 
-  test('capturing a poster replaces the picture', async ({ page }) => {
-    await visit(page, '/admin/library')
-    await page.getByRole('link', { name: 'Edit' }).first().click()
-    await page.waitForURL(/\/admin\/videos\//)
+  /**
+   * Both shapes, and each on its own.
+   *
+   * The sources are tracked per shape so an admin can hand-pick a poster and
+   * still let the banner regenerate, which means capturing one must not disturb
+   * the other — including its cache-buster, or the screen would claim a change
+   * that never happened.
+   */
+  for (const shape of ['poster', 'banner'] as const) {
+    test(`capturing a ${shape} replaces that picture and no other`, async ({ page }) => {
+      await visit(page, '/admin/library')
+      await page.getByRole('link', { name: 'Edit' }).first().click()
+      await page.waitForURL(/\/admin\/videos\//)
 
-    const poster = page.locator('img[src*="/thumbnail?v="]')
-    const before = await poster.getAttribute('src')
+      const target = page.locator(`img[src*="/${shape}?v="]`)
+      const other = page.locator(`img[src*="/${shape === 'poster' ? 'banner' : 'poster'}?v="]`)
+      await expect(target).toBeVisible()
 
-    await expectsRequest(page, /\/thumbnail\/capture$/, 'POST', () =>
-      page.getByRole('button', { name: /Capture at/ }).click())
+      const before = await target.getAttribute('src')
+      const otherBefore = await other.getAttribute('src')
 
-    // The storage key never changes, so the src has to, or the browser keeps
-    // showing the picture that was just replaced.
-    await expect(poster).not.toHaveAttribute('src', before!)
-  })
+      await expectsRequest(page, new RegExp(`/${shape}/capture$`), 'POST', () =>
+        page.getByRole('button', { name: /Capture at/ }).nth(shape === 'poster' ? 0 : 1).click())
+
+      // The storage key never changes, so the src has to, or the browser keeps
+      // showing the picture that was just replaced.
+      await expect(target).not.toHaveAttribute('src', before!)
+      await expect(other).toHaveAttribute('src', otherBefore!)
+    })
+  }
 
   test('a curated row can be created, filled, reordered and deleted', async ({ page }) => {
     await visit(page, '/admin/lists')
