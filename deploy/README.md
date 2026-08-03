@@ -110,23 +110,34 @@ fails loudly at deploy time, so you will not be hunting it at runtime.
 On the stack, enable **GitOps updates** and set the mechanism to **Webhook** (not Polling — the
 pipeline pushes). That is the whole setup.
 
-**Leave "Re-pull image" alone.** It is Business Edition, and its tooltip says it governs whether a
-webhook redeploy fetches a newer image behind a moving tag — which would make the moving `dev` tag
-this pipeline uses unworkable on CE. **On CE 2.33 it does not govern the webhook path: a Git-stack
-webhook re-pulls regardless.** Verified rather than reasoned about — after a webhook redeploy, the
-two previously-running image ids were left *dangling* on the host, which happens only when a tag is
-moved off them onto something newly fetched.
+**A webhook alone is not enough on CE, and the failure is silent.** Portainer redeploys a Git stack
+when the tracked ref has *moved*; if `main` is where it was, the POST returns `204` in ~20ms and
+nothing happens — no pull, no recreate, and the workflow reports success. The switch that would make
+it act on a changed *image* behind an unchanged ref is **Re-pull image**, and that one is Business
+Edition.
 
-That is worth stating plainly because the obvious workarounds are expensive and unnecessary. Pinning
-the stack to an immutable `sha-` tag by passing `?IMAGE_TAG=…` to the webhook **does not work** —
-variables-by-query belong to the *non-git* stack webhook, which the UI gates behind
-`"repository" !== method`, and a Git stack ignores them silently. Doing it properly would mean an API
-token and a second, wider Traefik route. None of that is needed. Verify the behaviour on your own
-Portainer rather than trusting either the tooltip or this paragraph:
+This was measured, in both directions, because it is easy to conclude the opposite by accident. A
+deploy at 18:52 did replace both containers — but only because two PRs had been merged since the
+stack was created, so `ConfigHash` moved from `b604e95f` to `1a28019c` and the pull came along with
+the git change. Every call afterwards, with `main` unchanged, was a no-op: same image id, same start
+time, five minutes later. Passing `?IMAGE_TAG=…` makes no difference — variables-by-query belong to
+the *non-git* stack webhook, which the UI gates behind `"repository" !== method`.
 
-```sh
-docker images --filter dangling=true    # the outgoing images should appear here after a deploy
+**That makes the plain webhook wrong for this pipeline**, whose whole point is a branch picker:
+deploying a branch never moves `main`, so the server would never change. Even deploying `main` only
+works when `main` happens to have moved, and never re-ships a rebuilt image for the same commit.
+
+The fix is the endpoint behind the UI's own **Pull and redeploy** button, which is *not* gated:
+
 ```
+PUT /api/stacks/<id>/git/redeploy     with  {"pullImage": true, "env": [...], "prune": false}
+X-API-Key: <a Portainer access token — My account → Access tokens, a CE feature>
+```
+
+It pulls unconditionally, so it does not care whether git moved. Two things to get right: the
+request **replaces** the stack's environment, so read the stack first and hand its `Env` back
+untouched — omit it and `SESSION_SECRET` goes with it — and the Traefik route in front of Portainer
+has to allow that one path and method, not just the webhook prefix.
 
 After the first real deploy, check the container rather than the green tick:
 
