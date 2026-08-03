@@ -517,7 +517,7 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
                     {{ index + 1 }}
                   </span>
                   <img
-                    :src="`/api/videos/${video.id}/thumbnail`"
+                    :src="`/api/videos/${video.id}/banner`"
                     alt=""
                     loading="lazy"
                     draggable="false"
@@ -590,15 +590,30 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         </UCard>
 
         <UCard>
-          <template #header><h2 class="font-semibold">Poster</h2></template>
-          <img
-            :src="`/api/collections/${collection.id}/poster`"
-            alt=""
-            class="aspect-2/3 w-full rounded-md bg-(--ui-bg-accented) object-cover"
-          >
-          <p class="mt-2 text-xs text-(--ui-text-muted)">
-            Taken from the collection folder. There is no upload endpoint for a
-            collection poster yet.
+          <template #header><h2 class="font-semibold">Artwork</h2></template>
+
+          <div class="flex gap-3">
+            <img
+              :src="`/api/collections/${collection.id}/poster`"
+              alt="Poster"
+              class="aspect-2/3 w-24 shrink-0 rounded-md bg-(--ui-bg-accented) object-cover"
+            >
+            <img
+              :src="`/api/collections/${collection.id}/banner`"
+              alt="Banner"
+              class="aspect-video min-w-0 flex-1 self-start rounded-md bg-(--ui-bg-accented) object-cover"
+            >
+          </div>
+
+          <!--
+            Says where the picture comes from, because "why is this the poster?"
+            is otherwise unanswerable from this screen: nothing on the collection
+            was ever set, and it is showing an episode's artwork.
+          -->
+          <p class="mt-3 text-xs text-(--ui-text-muted)">
+            Inherited from the first video in this collection, and the stock
+            image while there is none. Change it by editing that video's poster
+            or banner.
           </p>
         </UCard>
       </div>

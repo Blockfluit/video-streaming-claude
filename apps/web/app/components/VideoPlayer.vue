@@ -192,7 +192,7 @@ onBeforeUnmount(() => {
       class="aspect-video w-full"
       controls
       playsinline
-      :poster="`/api/videos/${videoId}/thumbnail`"
+      :poster="`/api/videos/${videoId}/banner`"
       @timeupdate="onTimeUpdate"
       @seeked="onSeeked"
       @loadedmetadata="onLoadedMetadata"

@@ -360,6 +360,66 @@ test.describe('viewer', () => {
     await expect(page.locator('video')).toBeVisible()
   })
 
+  /**
+   * Cards show posters; episode rows show banners.
+   *
+   * Asserted through the *request* rather than the rendered box, because the
+   * wrong shape in the right aspect box is exactly the bug that hides: a 16:9
+   * still cropped into a 2:3 tile still fills it, and looks merely badly framed.
+   * `MediaCard` carried a `shape` prop no caller ever passed for months, which
+   * is what that failure looks like from the outside.
+   */
+  test('cards ask for posters and episode rows ask for banners', async ({ page }) => {
+    const asked: string[] = []
+    page.on('request', (request) => {
+      const match = /\/api\/(videos|collections)\/[^/]+\/(poster|banner)/.exec(request.url())
+      if (match) asked.push(match[2]!)
+    })
+
+    await visit(page, '/browse')
+    await expect(page.locator('main a[href^="/c/"], main a[href^="/v/"]').first()).toBeVisible()
+    await page.waitForTimeout(1000)
+
+    expect(asked.filter(shape => shape === 'poster').length).toBeGreaterThan(0)
+
+    const slug = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        if ((detail.seasons ?? []).length > 0 && (detail.videos ?? []).length > 0) {
+          return collection.slug as string
+        }
+      }
+      return null
+    })
+    test.skip(slug === null, 'no collection here has seasons')
+
+    asked.length = 0
+    await visit(page, `/c/${slug}`)
+    await expect(page.locator('main section ~ div a[href^="/watch/"]').first()).toBeVisible()
+    await page.waitForTimeout(1000)
+
+    // The episode rows are the one place banners are the point.
+    expect(asked.filter(shape => shape === 'banner').length).toBeGreaterThan(0)
+  })
+
+  /**
+   * Hover must not cover the artwork.
+   *
+   * There was a circular play/info glyph in the middle of every tile, over the
+   * one thing a card exists to show. It is a border now — and this checks the
+   * overlay is *gone* rather than merely transparent, because `visible.spec.ts`
+   * fails a control that is `opacity: 0` and still focusable.
+   */
+  test('hovering a card does not put anything over the picture', async ({ page }) => {
+    await visit(page, '/browse')
+    const card = page.locator('main a[href^="/c/"], main a[href^="/v/"]').first()
+    await expect(card).toBeVisible()
+
+    await card.hover()
+    await expect(card.locator('.i-lucide-info, .i-lucide-play')).toHaveCount(0)
+  })
+
   test('a season can be chosen when the collection has seasons', async ({ page }) => {
     // Somewhere in the app first: a relative fetch inside page.evaluate has no
     // base URL to resolve against on about:blank.

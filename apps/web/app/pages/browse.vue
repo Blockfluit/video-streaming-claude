@@ -110,7 +110,7 @@ const cards = computed<Card[]>(() => {
     to: videoPath(video),
     title: video.title,
     subtitle: runtime(video.durationSec),
-    imageUrl: videoThumbnail(video),
+    imageUrl: videoPoster(video),
     badge: video.state === 'PUBLISHED' ? null : video.state,
   }))
 

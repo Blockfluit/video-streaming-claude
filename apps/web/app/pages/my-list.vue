@@ -77,7 +77,7 @@ useHead({ title: 'My List' })
           :image-url="
             item.collection
               ? collectionPoster(item.collection)
-              : videoThumbnail(item.video!)
+              : videoPoster(item.video!)
           "
           :width="item.collection ? item.next?.video.width : item.video!.width"
           :height="item.collection ? item.next?.video.height : item.video!.height"

@@ -1,34 +1,33 @@
 /**
- * The artwork URLs, and when not to ask for one.
+ * The artwork URLs.
  *
- * `GET /collections/:id/poster` and `GET /videos/:id/thumbnail` 404 when there
- * is nothing stored — which is a perfectly normal state: a collection nobody has
- * given a poster, a video ingest has not probed yet. Every list response already
- * carries the key, so the page can know that before it asks.
+ * Two shapes, and which one a surface asks for is a design decision rather than
+ * a detail: a **poster** (2:3) is what a card shows, and a **banner** (16:9) is
+ * for the wide slots — the episode rows inside a show, and every page backdrop.
  *
- * Asking anyway costs a failed round trip per card, makes the fallback appear
- * only after it, and fills the console with 404s that hide real ones. The
- * browser tests treat any 4xx as a failure for exactly that reason, and a
- * library holding one unposter'd collection was failing pages that had nothing
- * wrong with them.
+ * These used to return `null` when the payload said there was no artwork, to
+ * avoid a request that would 404. The routes no longer 404: a video nothing has
+ * probed yet and a collection nobody has given a poster both resolve to
+ * something — the first episode's picture, or the stock image — so there is no
+ * longer a request worth not making, and no null for every caller to handle.
  *
- * The distinction that matters is **`null` versus absent**. `null` is the API
- * saying there is no artwork; `undefined` is a payload that simply does not
- * carry the key, where the old behaviour — ask, and fall back if it 404s — is
- * still the right one. Treating the two the same would silently blank the
- * artwork on every screen whose response shape does not happen to include it.
+ * A collection's URL is unconditional for a second reason. Its `posterKey` being
+ * null means "no admin override", not "no picture", so deciding from it here
+ * would blank the artwork on exactly the collections that inherit one.
  */
 
-export function collectionPoster(
-  collection: { id: string, posterKey?: string | null } | null | undefined,
-): string | null {
-  if (!collection || collection.posterKey === null) return null
-  return `/api/collections/${collection.id}/poster`
+export function collectionPoster(collection: { id: string } | null | undefined): string | null {
+  return collection ? `/api/collections/${collection.id}/poster` : null
 }
 
-export function videoThumbnail(
-  video: { id: string, bannerKey?: string | null } | null | undefined,
-): string | null {
-  if (!video || video.bannerKey === null) return null
-  return `/api/videos/${video.id}/thumbnail`
+export function collectionBanner(collection: { id: string } | null | undefined): string | null {
+  return collection ? `/api/collections/${collection.id}/banner` : null
+}
+
+export function videoPoster(video: { id: string } | null | undefined): string | null {
+  return video ? `/api/videos/${video.id}/poster` : null
+}
+
+export function videoBanner(video: { id: string } | null | undefined): string | null {
+  return video ? `/api/videos/${video.id}/banner` : null
 }

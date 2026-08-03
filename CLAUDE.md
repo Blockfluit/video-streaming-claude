@@ -80,8 +80,32 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   unchanged before and after conversion and survives the source being reclaimed.
 - Stream responses are `Cache-Control: private, no-store`. A shared cache holding a range response as
   though it were the whole file corrupts playback for the next viewer.
-- `thumbnailSource = MANUAL` is never overwritten by a reprobe. Auto-generation runs only when `AUTO`.
-  Losing a hand-picked poster to a routine rescan loses an afternoon of curation.
+- Every video has **two** pictures, both cut from the frame 10% in: a 16:9 `bannerKey` (the old
+  `thumbnailKey`, renamed for what it is) and a 2:3 `posterKey`. The files stay under
+  `derived/thumbnails/` and `derived/posters/` — the *column* name was wrong, the keys were not, and
+  moving several thousand files to match a rename buys nothing.
+- `posterSource`/`bannerSource` are `MANUAL` independently, and `MANUAL` is never overwritten by a
+  reprobe. Auto-generation runs only when `AUTO`. Separate sources are what let an admin hand-pick a
+  poster and still get a fresh banner; losing a hand-picked one to a routine rescan loses an afternoon
+  of curation. Each shape is captured and reported on its own, or a poster that fails takes the banner
+  with it and a probe ends with neither picture.
+- The poster crop is `crop=min(iw\,ih*2/3):min(ih\,iw*3/2)`, **not** `crop=ih*2/3:ih`. The latter reads
+  correctly, works on every landscape file — which is most of a library — and then fails outright on a
+  portrait one by asking for a crop wider than the source. Both dimensions must be capped by what the
+  frame can supply. The `\,` are escaped for ffmpeg's filter parser, never for a shell.
+- **A collection's artwork is derived, not stored.** Its own `posterKey`/`bannerKey` are the *admin
+  override*; null means "not overridden", and it then shows its **first video's** picture by
+  `MEMBERSHIP_ORDER`, falling back to a stock image only when it holds nothing. Deriving on read is what
+  makes it follow the episodes instead of snapshotting something that rots. The inherited candidate goes
+  through `whereVisible(role)` like every other nested read — a published collection may hold draft
+  episodes, and a draft's poster is not published art.
+- **The artwork routes never 404 for a missing picture.** Absent artwork is an ordinary state, and every
+  card used to pay a round trip to be told so; the browser suite fails any 4xx, so one collection nobody
+  had postered turned whole pages red. A row the caller may not see is still a 404 — the fallback must
+  not turn an invisible video into a 200 that confirms it exists.
+- The stock image is an **SVG built in code**, not a file. `nest build` copies TypeScript and nothing
+  else, so a `.jpg` needs an `assets` entry in `nest-cli.json` *and* a Dockerfile `COPY`, and missing
+  either fails as a 500 in production and nowhere else.
 - `qualityLabel()` compares by **edge, not axis**: long edge against the tier's width threshold, short edge
   against its height threshold. Height alone hides the badge on most films (a 1080p film in 2.39:1 is
   `1920×800`); either raw dimension against either threshold over-promotes portrait video (a 1080×1920 phone
@@ -416,9 +440,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   write it, and following it after authenticating is an open redirect. A leading `/` is not enough:
   `//evil.example` is protocol-relative and off-site, and some browsers normalise `/\evil.example` the same
   way.
-- Artwork is `GET /videos/:id/thumbnail` and `GET /collections/:id/poster`, which **revalidate** (`ETag` +
+- Artwork is `GET /{videos,collections}/:id/{poster,banner}`, which **revalidate** (`ETag` +
   `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
   any `max-age` above zero serves the poster an admin has just replaced.
+- **Posters go on cards, banners go in wide slots.** `MediaCard` shows 2:3 everywhere — home shelves,
+  browse, My List, a collection's grid — and the exceptions are `EpisodeRow` (inside a show you are
+  choosing a moment, not a title) and every `HeroBackdrop`. `MediaCard`'s `shape` prop existed for months
+  with **no caller ever passing it**, so every card rendered 16:9 and half the design was dead code; a
+  wrong shape fills its box and merely looks badly framed, which is why `viewer.spec.ts` asserts the
+  *request* rather than the rendered element.
+- Card hover is a **border**, never an overlay. A centred play/info glyph covered the one thing a card
+  exists to show, on the card being pointed at. Removing it has to delete the element, not hide it —
+  `visible.spec.ts` fails a control that is `opacity: 0` and still focusable.
 - A nav link to a route with no page is a broken app, not a placeholder — links land with their pages. The
   reverse is just as bad: `/admin/collections/[slug]` and `/admin/comments` are unreachable without their
   sidebar entries, and a page nobody can navigate to gets no use and no bug reports.

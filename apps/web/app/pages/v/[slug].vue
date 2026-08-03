@@ -140,7 +140,7 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
       title floating mid-screen with nothing under it. Where there *is* something
       below, it scrolls up from the bottom edge the ordinary way.
     -->
-    <HeroBackdrop :image="videoThumbnail(video)" size="full">
+    <HeroBackdrop :image="videoBanner(video)" size="full">
       <div class="rise max-w-2xl space-y-4">
         <!--
           Every collection holding this video, not a guessed single parent. In
@@ -237,10 +237,9 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
           :key="entry.id"
           class="w-56 sm:w-64"
           :to="playPath(entry)"
-          action="play"
           :title="entry.title"
           :subtitle="runtime(entry.durationSec)"
-          :image-url="videoThumbnail(entry)"
+          :image-url="videoPoster(entry)"
           :width="entry.width"
           :height="entry.height"
           :badge="entry.state === 'PUBLISHED' ? null : entry.state"

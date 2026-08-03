@@ -17,15 +17,15 @@ const props = defineProps<{
   width?: number | null
   height?: number | null
   badge?: string | null
-  /** `poster` is 2:3 for collections; the default 16:9 suits a video still. */
-  shape?: 'still' | 'poster'
   /**
-   * What the card does when clicked, which is not the same everywhere: a
-   * Continue Watching tile resumes playback, while a browse or My List tile
-   * opens a page describing the thing. Promising a play glyph and delivering a
-   * page of text is a small lie that makes the app feel slow.
+   * `poster` is the 2:3 artwork every card shows. `still` is 16:9, for the few
+   * places a wide frame is the point.
+   *
+   * This prop existed for a long time and **no caller ever passed it**, so every
+   * card in the app rendered 16:9 and the 2:3 half of the design was dead code.
+   * Posters are the default now, which is what makes a shelf read as a shelf.
    */
-  action?: 'play' | 'open'
+  shape?: 'still' | 'poster'
 }>()
 
 const broken = ref(false)
@@ -34,9 +34,17 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
 
 <template>
   <NuxtLink :to="to" class="group block shrink-0">
+    <!--
+      Hover is a border, not something laid over the picture.
+
+      There used to be a circular glyph in the middle of the tile — a play or an
+      info icon — which covered the one thing a card exists to show, on the card
+      you were looking hardest at. An accent ring says the same thing from the
+      edge. `focus-visible` matches it so a keyboard lands somewhere obvious.
+    -->
     <div
-      class="card-lift relative overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border)"
-      :class="shape === 'poster' ? 'aspect-2/3' : 'aspect-video'"
+      class="card-lift relative overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) transition-shadow group-hover:ring-2 group-hover:ring-(--ui-primary) group-focus-visible:ring-2 group-focus-visible:ring-(--ui-primary)"
+      :class="shape === 'still' ? 'aspect-video' : 'aspect-2/3'"
     >
       <img
         v-if="showImage"
@@ -64,20 +72,6 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
           {{ badge }}
         </UBadge>
         <QualityBadge :width="width" :height="height" />
-      </div>
-
-      <!-- Appears on hover; the whole card is the link, so this is decoration. -->
-      <div
-        class="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-      >
-        <span class="grid size-11 place-items-center rounded-full bg-white/95 shadow-lg">
-          <UIcon
-            v-if="action === 'play'"
-            name="i-lucide-play"
-            class="size-5 text-black translate-x-px"
-          />
-          <UIcon v-else name="i-lucide-info" class="size-5 text-black" />
-        </span>
       </div>
 
       <!-- The resume bar. Absent at zero rather than drawn empty. -->

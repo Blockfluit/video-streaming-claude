@@ -24,6 +24,7 @@ interface VideoDetail {
   audioTracks: number | null
   needsConversion: boolean
   probeError: string | null
+  posterSource: string
   bannerSource: string
   playbackKey: string | null
   storageKey: string
@@ -130,37 +131,80 @@ async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Do
   }
 }
 
-async function captureThumbnail() {
+/**
+ * The two shapes, each edited on its own.
+ *
+ * Separately on purpose: the sources are tracked per shape, so an admin can
+ * hand-pick a poster for a film and still let the banner regenerate on the next
+ * probe. One combined control would have to overwrite both.
+ */
+type ArtworkShape = 'poster' | 'banner'
+
+const ARTWORK = [
+  {
+    shape: 'poster' as const,
+    label: 'Poster',
+    hint: '2:3 — every card in the app',
+    frame: 'aspect-2/3 w-32',
+  },
+  {
+    shape: 'banner' as const,
+    label: 'Banner',
+    hint: '16:9 — episode rows and page backdrops',
+    frame: 'aspect-video w-full',
+  },
+]
+
+/**
+ * A cache-buster per shape.
+ *
+ * The storage key does not change when a picture is replaced, so the ETag alone
+ * cannot help an `<img>` the browser never re-requests. Per shape rather than
+ * shared, or replacing the banner would silently reload the poster too and hide
+ * whether the thing you just did worked.
+ */
+const bust = reactive<Record<ArtworkShape, number>>({ poster: 0, banner: 0 })
+
+function artworkUrl(shape: ArtworkShape): string {
+  return `/api/videos/${id}/${shape}?v=${bust[shape]}`
+}
+
+function artworkSource(shape: ArtworkShape): string {
+  return shape === 'poster' ? (video.value?.posterSource ?? '') : (video.value?.bannerSource ?? '')
+}
+
+async function captureArtwork(shape: ArtworkShape) {
   try {
-    await api(`/videos/${id}/thumbnail/capture`, {
+    await api(`/videos/${id}/${shape}/capture`, {
       method: 'POST',
       body: { atSeconds: Math.round(previewTime.value * 10) / 10 },
     })
-    // The key does not change, so the browser has to be told the picture did.
-    posterBust.value = Date.now()
+    bust[shape] = Date.now()
     await refresh()
-    toast.add({ title: 'Poster captured', color: 'success' })
+    toast.add({ title: `${shape === 'poster' ? 'Poster' : 'Banner'} captured`, color: 'success' })
   } catch (error) {
     toast.add({ title: apiMessage(error, 'Could not capture that frame'), color: 'error' })
   }
 }
 
-const posterBust = ref(0)
-const posterUrl = computed(() => `/api/videos/${id}/thumbnail?v=${posterBust.value}`)
-
-async function uploadPoster(event: Event) {
+async function uploadArtwork(event: Event, shape: ArtworkShape) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
 
   const body = new FormData()
   body.append('file', file)
   try {
-    await api(`/videos/${id}/thumbnail`, { method: 'POST', body })
-    posterBust.value = Date.now()
+    await api(`/videos/${id}/${shape}`, { method: 'POST', body })
+    bust[shape] = Date.now()
     await refresh()
   } catch (error) {
     toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
   }
+}
+
+async function resetArtwork(shape: ArtworkShape) {
+  await act(`/${shape}`, 'DELETE', 'Back to automatic')
+  bust[shape] = Date.now()
 }
 
 async function uploadSubtitle(event: Event) {
@@ -361,24 +405,43 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
       </div>
 
       <div class="space-y-6">
-        <UCard>
+        <!--
+          One panel per shape. Both are captured from the same frame — the
+          poster is a 2:3 crop of it — so "capture at 12:04" on each gives two
+          different pictures of the same moment rather than the same one twice.
+        -->
+        <UCard v-for="art in ARTWORK" :key="art.shape">
           <template #header>
-            <h2 class="font-semibold">Poster</h2>
-            <p class="text-xs text-(--ui-text-muted)">{{ video.bannerSource }}</p>
+            <h2 class="font-semibold">{{ art.label }}</h2>
+            <p class="text-xs text-(--ui-text-muted)">
+              {{ art.hint }} · {{ artworkSource(art.shape) }}
+            </p>
           </template>
 
           <img
-            :src="posterUrl"
+            :src="artworkUrl(art.shape)"
             alt=""
-            class="mb-3 aspect-video w-full rounded bg-(--ui-bg-accented) object-cover"
+            class="mb-3 rounded bg-(--ui-bg-accented) object-cover"
+            :class="art.frame"
           >
 
           <div class="space-y-2">
-            <UButton block color="neutral" variant="subtle" icon="i-lucide-crosshair" @click="captureThumbnail">
+            <UButton
+              block
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-crosshair"
+              @click="captureArtwork(art.shape)"
+            >
               Capture at {{ timecode(previewTime) }}
             </UButton>
             <label class="block cursor-pointer">
-              <input type="file" accept="image/*" class="hidden" @change="uploadPoster">
+              <input
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="event => uploadArtwork(event, art.shape)"
+              >
               <span
                 class="flex w-full items-center justify-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
               >
@@ -390,7 +453,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
               variant="ghost"
               color="neutral"
               icon="i-lucide-rotate-ccw"
-              @click="act('/thumbnail', 'DELETE', 'Back to automatic')"
+              @click="resetArtwork(art.shape)"
             >
               Reset to automatic
             </UButton>

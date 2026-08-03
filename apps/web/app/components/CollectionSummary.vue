@@ -120,20 +120,17 @@ const playSubtitle = computed(() => {
 })
 
 /**
- * The backdrop.
+ * The artwork: a 2:3 poster over a 16:9 backdrop.
  *
- * A collection has only a 2:3 poster, and stretching one across a wide hero
- * crops it to nothing. The episode about to be played is a 16:9 still, which is
- * the right shape for the space — the poster then sits over it at its own
- * aspect, the way a title page reads. Falls back to the stretched poster for a
- * collection with nothing in it yet.
+ * Both are asked of the **collection**, which is a change. This used to reach
+ * for the first video's still and fall back to stretching the 2:3 poster across
+ * the hero, because a collection only had a poster and nothing generated one.
+ * A collection now resolves both shapes server-side — its own if an admin set
+ * one, otherwise its first video's — so the client no longer has to guess, and
+ * the answer is the same one every other surface gets.
  */
 const posterUrl = computed(() => collectionPoster(props.collection))
-
-const backdrop = computed(() => {
-  const first = props.videos.find(video => video.id === next.value?.videoId) ?? props.videos[0]
-  return videoThumbnail(first) ?? posterUrl.value
-})
+const backdrop = computed(() => collectionBanner(props.collection))
 
 /**
  * Which season the list is showing. The URL is the source of truth — the page
@@ -205,15 +202,17 @@ const heading = computed(() => {
     <HeroBackdrop :image="backdrop" size="tall">
       <div class="rise flex flex-col gap-6 sm:flex-row sm:items-end">
         <!--
-          Drawn only when there is a poster to draw.
+          Always drawn now, because there is always something to draw.
 
-          The placeholder behind it is for an image that *fails*: the browser's
-          own broken-image glyph is the most conspicuous thing on a page, so a
-          404 from the poster route has to be caught. A collection that simply
-          has no poster is a different thing, and reserving the space for one
-          gave both Avatar and Chernobyl a large empty grey rectangle as the
-          first element of their title page. Nothing is better than a box saying
-          nothing.
+          This was conditional, and rightly so while a collection's poster was
+          upload-only: nothing generated one, so Chernobyl and Avatar both got a
+          large empty grey rectangle as the first element of their title page,
+          and nothing was better than a box saying nothing. A collection inherits
+          its first episode's poster now, and an empty one gets the stock image —
+          both of which are pictures, so the space earns itself.
+
+          The `@error` fallback stays for a picture that fails to *load*, which
+          the route no longer causes but a network still can.
         -->
         <div
           v-if="posterUrl"
@@ -289,14 +288,19 @@ const heading = computed(() => {
           />
         </div>
 
-        <!-- A show: rows you can read. -->
+        <!--
+          A show: rows you can read, and the one place that shows **banners**
+          rather than posters. An episode is a moment from the thing you are
+          already watching, so a wide frame of it is more use than a 2:3 poster —
+          which is the shape for choosing *between* titles, not within one.
+        -->
         <ul v-if="asEpisodes" class="divide-y divide-(--ui-border)">
           <li v-for="(entry, index) in listed" :key="entry.id">
             <EpisodeRow
               :to="playPath(entry)"
               :title="entry.title"
               :number="index + 1"
-              :image-url="videoThumbnail(entry)"
+              :image-url="videoBanner(entry)"
               :duration-sec="entry.durationSec"
               :description="entry.description"
               :progress="progressPercent(progressByVideo.get(entry.id)?.lastPositionSec ?? null, entry.durationSec)"
@@ -306,17 +310,20 @@ const heading = computed(() => {
           </li>
         </ul>
 
-        <!-- A shelf of films: the grid it always had. -->
-        <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4">
+        <!--
+          A shelf of films, so posters — the same tiles browse and the home
+          shelves use. Narrower columns than the 16:9 grid this replaced, because
+          a 2:3 tile is taller and four across is a wall of them otherwise.
+        -->
+        <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4">
           <MediaCard
             v-for="entry in listed"
             :key="entry.id"
             class="w-full"
             :to="playPath(entry)"
-            action="play"
             :title="entry.title"
             :subtitle="runtime(entry.durationSec)"
-            :image-url="videoThumbnail(entry)"
+            :image-url="videoPoster(entry)"
             :width="entry.width"
             :height="entry.height"
             :progress="progressPercent(progressByVideo.get(entry.id)?.lastPositionSec ?? null, entry.durationSec)"

@@ -84,7 +84,7 @@ const hero = computed(() => {
       // Straight into playback. Someone resuming has already decided what
       // they want; a page describing it is a page they have read.
       to: playPath(resuming.video),
-      image: videoThumbnail(resuming.video),
+      image: videoBanner(resuming.video),
       resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
     }
   }
@@ -98,7 +98,7 @@ const hero = computed(() => {
     meta: featured.year ? String(featured.year) : null,
     description: featured.description,
     to: collectionPath(featured),
-    image: collectionPoster(featured),
+    image: collectionBanner(featured),
     resume: 0,
   }
 })
@@ -130,7 +130,7 @@ function card(entry: { video: CardVideo | null, collection: SavedItem['collectio
     to: videoPath(video),
     title: video.title,
     subtitle: collectionTitle(video),
-    imageUrl: videoThumbnail(video),
+    imageUrl: videoPoster(video),
     width: video.width ?? null,
     height: video.height ?? null,
   }
@@ -189,10 +189,9 @@ useHead({ title: 'Home' })
           :key="item.video.id"
           class="w-56 sm:w-64"
           :to="playPath(item.video)"
-          action="play"
           :title="item.video.title"
           :subtitle="collectionTitle(item.video)"
-          :image-url="videoThumbnail(item.video)"
+          :image-url="videoPoster(item.video)"
           :width="item.video.width"
           :height="item.video.height"
           :progress="progressPercent(item.progress.lastPositionSec, item.video.durationSec)"
