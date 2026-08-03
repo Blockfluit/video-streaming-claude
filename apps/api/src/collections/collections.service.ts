@@ -543,7 +543,6 @@ export class CollectionsService {
       missingFields: collectionMissingFields({
         title: collection.title,
         description: collection.description,
-        posterKey: collection.posterKey,
         publishableVideoCount: collection.videos.length,
       }),
     };

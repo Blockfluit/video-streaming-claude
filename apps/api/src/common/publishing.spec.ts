@@ -15,7 +15,6 @@ const publishableVideo = {
 const publishableCollection = {
   title: 'Harry Potter',
   description: 'The films.',
-  posterKey: 'derived/hp/poster.jpg',
   publishableVideoCount: 1,
 };
 
@@ -65,8 +64,23 @@ describe('collectionMissingFields', () => {
     expect(collectionMissingFields(publishableCollection)).toEqual([]);
   });
 
-  it.each(['title', 'description', 'posterKey'] as const)('reports a missing %s', (field) => {
+  it.each(['title', 'description'] as const)('reports a missing %s', (field) => {
     expect(collectionMissingFields({ ...publishableCollection, [field]: null })).toEqual([field]);
+  });
+
+  /**
+   * A poster used to be required here, and the rule could not be satisfied:
+   * nothing generated a collection poster and no endpoint accepted one, so a
+   * collection could only be published if its ingest folder happened to contain
+   * an image. Every collection in the real library sat in DRAFT because of it,
+   * reporting a missing field with no way to fill it.
+   *
+   * It is also no longer meaningful — a collection with no poster of its own
+   * shows its first video's, and the video requirement below already guarantees
+   * there is one. Artwork is not something a collection can lack.
+   */
+  it('does not demand a poster it would inherit anyway', () => {
+    expect(collectionMissingFields(publishableCollection)).not.toContain('posterKey');
   });
 
   // A collection with nothing publishable in it is an empty shelf.
