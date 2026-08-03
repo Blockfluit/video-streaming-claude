@@ -55,13 +55,16 @@ expect to trigger a rescan by hand.
 
 ### 2. GHCR access
 
-The repository is public, so the stack needs no Git credential. The **packages** are a separate
-setting: a package first published by Actions is private even when its repository is not, so the
-server cannot pull until you do one of these once, after the first deploy has pushed an image.
+Nothing to do, but worth knowing why. The repository is public, so the stack needs no Git credential,
+and the two packages the deploy pushes are public with it — confirmed by pulling both images onto the
+server with no credential configured anywhere.
 
-- **Make the packages public** — *Packages → `api` / `web` → Package settings → Change visibility*.
-  Nothing is disclosed that the public source did not already disclose, and the server then needs no
-  credential at all.
+Package visibility is a *separate* setting from the repository's, though, and it can be changed
+independently. If a pull ever starts failing with `denied`, that is what happened, and there are two
+ways back:
+
+- **Make the packages public again** — *Packages → `api` / `web` → Package settings → Change
+  visibility*. Nothing is disclosed that the public source did not already disclose.
 - **Or add a registry credential** — *Portainer → Registries → Add registry → Custom*, URL `ghcr.io`,
   your GitHub username, and a personal access token scoped to **`read:packages`** only.
 
@@ -69,12 +72,13 @@ server cannot pull until you do one of these once, after the first deploy has pu
 
 **Portainer → Stacks → Add stack → Repository**:
 
-| Field | Value |
-|---|---|
-| Repository URL | `https://github.com/Blockfluit/video-streaming-claude` |
-| Reference | `refs/heads/main` |
-| Compose path | `deploy/compose.yml` |
-| Authentication | off — the repository is public |
+| Field | Value | |
+|---|---|---|
+| **Name** | `video-dev` | Also the compose project name, which prefixes the volumes (`video-dev_pgdata`). Chosen once and permanently: renaming the stack later leaves the database behind under the old prefix. |
+| Repository URL | `https://github.com/Blockfluit/video-streaming-claude` | |
+| Reference | `refs/heads/main` | |
+| **Compose path** | **`deploy/compose.yml`** | **Not the default.** Portainer pre-fills `docker-compose.yml`, and that file is the local-development Postgres — a stack left on the default deploys a lone database and no application. |
+| Authentication | off | The repository is public. |
 
 Paste the contents of [`stack.env.example`](stack.env.example) into the stack's **Environment
 variables** editor, replace the placeholder hostnames with the real ones, and fill in the two
@@ -95,11 +99,28 @@ A missing required value fails the deploy with a sentence naming it (`required v
 SESSION_SECRET is missing a value: set SESSION_SECRET in the stack environment`) rather than starting
 an API that cannot hold a session.
 
+**If the first deploy fails naming `env_file`:** the block uses the long form (`path:` /
+`required: false`), which needs Compose v2.24+, and Portainer embeds its own compose rather than
+using the host's CLI. Delete the whole `env_file:` block from the `api` service — it carries only the
+optional tuning knobs, and everything the app cannot start without arrives by interpolation. This
+fails loudly at deploy time, so you will not be hunting it at runtime.
+
 ### 4. The webhook
 
-On the stack, enable the webhook and **turn on re-pulling the image**. Without that, a redeploy
-re-runs `compose up` against a `dev` tag it already has locally and nothing changes — the deploy
-appears to succeed and ships nothing.
+On the stack, enable **GitOps updates**, set the mechanism to **Webhook** (not Polling — the pipeline
+pushes), and **turn on the re-pull / force-redeployment option**.
+
+That last toggle is not optional and its absence is silent. The deploy moves a `dev` tag; the git ref
+Portainer clones has usually not changed at all, so without a forced re-pull Portainer re-runs
+`compose up` against a `dev` tag it already holds, changes nothing, and reports success. **The deploy
+appears to work and ships nothing.** After the first real deploy, check the container rather than the
+green tick:
+
+```sh
+docker inspect video-dev-api --format '{{.Image}} {{.State.StartedAt}}'
+```
+
+A new image ID and a fresh start time mean the toggle is doing its job.
 
 Copy the webhook URL into the repository's GitHub secrets as **`PORTAINER_WEBHOOK_DEV`**
 (*Settings → Secrets and variables → Actions*). The URL is the credential — anyone holding it can
@@ -166,6 +187,14 @@ Every run also pushes an immutable `sha-<commit>` tag, and writes what it built 
 The branch dropdown only lists branches that already contain `.github/workflows/deploy-dev.yml`. A
 branch cut before this landed needs a rebase onto `main` before it can be deployed.
 
+**The branch picks the code; `main` picks the compose file.** The workflow builds images from
+whatever branch you select, but the stack is a Git-backed one pinned to `refs/heads/main`, so that is
+where Portainer re-reads `deploy/compose.yml` from. A branch that changes a Traefik label, adds an
+environment variable or edits the compose file at all does **not** take effect until it is merged —
+its *code* deploys, its *topology* does not. Code-only branches, which is nearly all of them, are
+unaffected. Pointing a second stack at a branch reference is the way to test a compose change without
+merging it.
+
 ### Rolling back
 
 Set `IMAGE_TAG` to the `sha-<commit>` you want in the stack's environment variables and redeploy.
@@ -188,8 +217,9 @@ MEDIA_PATH=/srv/docker/streaming-platform-prd/media
 DERIVED_PATH=/srv/docker/streaming-platform-prd/derived
 ```
 
-with its own secrets. `STACK_NAME` keeps the container names and Traefik routers distinct, and the
-two stacks share nothing — separate database container, separate volumes, separate storage.
+with its own secrets, and named `video-prd` in Portainer so the volumes get their own prefix too.
+`STACK_NAME` keeps the container names and Traefik routers distinct, and the two stacks share
+nothing — separate database container, separate volumes, separate storage.
 
 Then copy `deploy-dev.yml` to `deploy-prd.yml`, change the default `image_tag` to `prd` and the
 secret to `PORTAINER_WEBHOOK_PRD`.
