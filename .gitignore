@@ -9,6 +9,11 @@ node_modules/
 !.env.example
 .bootstrap-token
 
+# The filled-in Portainer stack variables (SESSION_SECRET, the database
+# password). Needs its own line: `.env` above is a literal filename and
+# `.env.*` wants a leading dot, so neither of them matches `stack.env`.
+deploy/stack.env
+
 # Media library and generated assets (can be very large).
 # The directories themselves are tracked so a fresh clone has the roots the
 # API expects; their contents never are.

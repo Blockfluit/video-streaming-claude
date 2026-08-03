@@ -1,0 +1,91 @@
+# The test suite, as a reusable workflow.
+#
+# Called by ci.yml (on pull requests) and by deploy-dev.yml (before it ships).
+# One definition rather than two copies: two copies drift, and the one that
+# drifts is always the copy guarding the deploy.
+#
+# Five jobs rather than one, running concurrently. They are genuinely
+# independent — only `db` needs Postgres, only `db` needs ffmpeg — so serialising
+# them made the wall clock the sum of the tiers instead of the slowest one, and
+# a failure in the unit tier hid the state of the other four. Each job repeats
+# its own setup (see .github/actions/setup); that costs a little more compute
+# and returns most of the elapsed time.
+
+name: Tests
+
+on:
+  workflow_call:
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: npm run typecheck
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      # No database and no ffmpeg: this tier is pure functions and mocked
+      # services. The suites that mention ffmpeg parse its output rather than
+      # running it.
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      # HTTP against a stubbed Postgres, so no service container. Worth its own
+      # job: a change can pass the unit and database tiers and break this one.
+      - run: npm run test:e2e
+
+  db:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # This tier creates and migrates `video_test` itself, so the maintenance
+      # URL needs an account that may CREATE DATABASE — hence the superuser
+      # rather than the `video` role the local compose file sets up.
+      TEST_MAINTENANCE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/video_test?schema=public
+      # There is no apps/api/.env in CI, and both of these throw at
+      # construction when unset. The value is irrelevant; its presence is not.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/video_test?schema=public
+      SESSION_SECRET: test-secret-not-used-anywhere-real
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      # Only this tier spawns the real binaries — the probe, thumbnail,
+      # subtitle and transcode suites all shell out. ubuntu-latest ships
+      # neither, and installing them in the other jobs would be a minute each
+      # for nothing.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm run test:db
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: npm run test -w @video/web

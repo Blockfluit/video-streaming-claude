@@ -1,0 +1,26 @@
+# The setup every test job repeats. Extracted so the five jobs differ only by
+# the command they run, and so a change to the build order is made once.
+name: Set up the workspace
+description: Node, dependencies, and the two generated artefacts nothing compiles without.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+
+    - run: npm ci
+      shell: bash
+
+    # Both of these are gitignored, so neither can arrive with the checkout, and
+    # everything downstream needs them: apps/api resolves @video/shared to its
+    # emitted .d.ts, and imports the generated Prisma client from src/. The
+    # test scripts have a `pretest` hook that builds shared, but nothing
+    # generates, and `typecheck` has neither.
+    - run: npm run build -w @video/shared
+      shell: bash
+
+    - run: npm run db:generate -w @video/api
+      shell: bash
