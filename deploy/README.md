@@ -207,15 +207,10 @@ That button pulls unconditionally and is *not* feature-gated — unlike the *Re-
 GitOps updates, which is the Business Edition one. It is the whole procedure when you are deploying
 the moving `dev` tag, because the tag has not changed and only the image behind it has.
 
-On the host instead, if you prefer:
-
-```sh
-docker compose -f /data/compose/<stack id>/deploy/compose.yml --env-file ... pull
-docker compose ... up -d
-```
-
-Prefer the button — Portainer knows where the stack's compose file and environment actually are, and
-that keeps its view of the stack and reality in agreement.
+Use the button rather than the host. A Git-backed stack's compose file and its generated `stack.env`
+live *inside* Portainer's own volume — `/var/lib/docker/volumes/portainer_data/_data/compose/<stack
+id>/` — so driving it from the host means root, the right `--env-file`, and Portainer's view of the
+stack drifting from what is actually running. The button avoids all three.
 
 **The branch picks the code; `main` picks the compose file.** The workflow builds images from whatever
 branch you select, but the stack is a Git-backed one pinned to `refs/heads/main`, so that is where
