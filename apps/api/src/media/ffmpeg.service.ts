@@ -244,7 +244,7 @@ export class FfmpegService {
      *
      * Without this the caller believes it succeeded and the *rename* into place
      * fails instead, reporting
-     * `ENOENT ... rename derived/tmp/<id>-thumbnail.jpg -> derived/thumbnails/<id>.jpg`:
+     * `ENOENT ... rename derived/tmp/<id>-thumbnail.jpg -> derived/banners/<id>.jpg`:
      * a message that names neither the timestamp nor the video, and reads like
      * a broken disk rather than a seek nobody could satisfy. Reported from a
      * real library, where a poster was captured while a 1 GB file was still

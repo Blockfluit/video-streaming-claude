@@ -157,7 +157,7 @@ export class ImagesService {
    * Sends the file, with an ETag rather than a lifetime.
    *
    * The storage key is stable across replacements — a new poster overwrites
-   * `thumbnails/<id>.jpg` rather than taking a new name — so any `max-age`
+   * `banners/<id>.jpg` rather than taking a new name — so any `max-age`
    * above zero serves the old picture until it expires, and an admin who has
    * just fixed a poster sees the one they replaced. Revalidating every time
    * costs one conditional request and is always right; the 304 is what makes

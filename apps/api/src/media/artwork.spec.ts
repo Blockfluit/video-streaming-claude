@@ -5,14 +5,14 @@ describe('artworkKey', () => {
     expect(artworkKey('poster', 'abc')).toBe('posters/abc.jpg');
   });
 
-  /**
-   * The banner deliberately keeps the old directory. `bannerKey` was renamed
-   * from `thumbnailKey` because the name was wrong about what the image is —
-   * the files it addresses were already correct, and moving them to match a
-   * column rename is risk with no payoff.
-   */
-  it('leaves banners where the existing files already are', () => {
-    expect(artworkKey('banner', 'abc')).toBe('thumbnails/abc.jpg');
+  it('puts banners in theirs', () => {
+    expect(artworkKey('banner', 'abc')).toBe('banners/abc.jpg');
+  });
+
+  /** Named after what is in them, so neither directory can outlive its meaning. */
+  it('names each directory after its shape', () => {
+    expect(artworkDirectory('poster')).toBe('posters');
+    expect(artworkDirectory('banner')).toBe('banners');
   });
 
   it('agrees with the directory it says to create', () => {

@@ -9,15 +9,20 @@
 -- partial unique index elsewhere in this directory: re-append it if this
 -- migration is ever regenerated.
 --
--- The on-disk directory stays `derived/thumbnails/`. The column was renamed
--- because the name was wrong about what the image *is*; the files are addressed
--- by the stored key and moving several thousand of them to match a rename is
--- risk buying nothing. Only the new poster gets a new directory.
+-- The keys are rewritten to `derived/banners/` to match. The old files under
+-- `derived/thumbnails/` are left where they are: a poster has to be generated
+-- for every one of these rows regardless, so the reprobe that does that writes
+-- both shapes fresh, and the artwork routes serve the stock image for the moment
+-- in between rather than failing.
 
 ALTER TYPE "ThumbnailSource" RENAME TO "ArtworkSource";
 
 ALTER TABLE "Video" RENAME COLUMN "thumbnailKey" TO "bannerKey";
 ALTER TABLE "Video" RENAME COLUMN "thumbnailSource" TO "bannerSource";
+
+UPDATE "Video"
+   SET "bannerKey" = 'banners/' || substring("bannerKey" from 12)
+ WHERE "bannerKey" LIKE 'thumbnails/%';
 
 -- No backfill. A poster is a *different crop* of the frame, not a copy of the
 -- banner, so there is nothing correct to put here without re-reading the file;

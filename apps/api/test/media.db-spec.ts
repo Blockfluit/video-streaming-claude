@@ -271,7 +271,7 @@ describe('Media probing (real ffmpeg)', () => {
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
 
-      expect(video.bannerKey).toBe(`thumbnails/${id}.jpg`);
+      expect(video.bannerKey).toBe(`banners/${id}.jpg`);
       expect(video.bannerSource).toBe('AUTO');
       await expect(storage.exists('derived', video.bannerKey!)).resolves.toBe(true);
 
@@ -295,7 +295,7 @@ describe('Media probing (real ffmpeg)', () => {
       media.enqueue(id);
       await media.drain();
 
-      const banner = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const banner = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
       const poster = await readFile(storage.resolvePath('derived', `posters/${id}.jpg`));
 
       expect(poster).not.toEqual(banner);
@@ -336,14 +336,14 @@ describe('Media probing (real ffmpeg)', () => {
       media.enqueue(id);
       await media.drain();
 
-      await expect(storage.exists('media', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('media', `banners/${id}.jpg`)).resolves.toBe(false);
     });
 
     /**
      * Captures land atomically, or not at all.
      *
      * ffmpeg truncates its output the moment it opens it, so writing straight
-     * to `thumbnails/<id>.jpg` left the live poster missing for as long as the
+     * to `banners/<id>.jpg` left the live poster missing for as long as the
      * capture took — and every card in the app asks for that URL, so a routine
      * re-probe made artwork across the library flicker to a **404**, not merely
      * a stale picture. Three viewer tests caught it when a boot-time reconcile
@@ -357,7 +357,7 @@ describe('Media probing (real ffmpeg)', () => {
       const id = await seedVideo('Films/bars.mp4', 'Bars');
 
       await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 1 }).expect(200);
-      const before = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const before = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
 
       /*
        * Fails the way ffmpeg actually fails: it opens its output, truncates it,
@@ -379,7 +379,7 @@ describe('Media probing (real ffmpeg)', () => {
         capture.mockRestore();
       }
 
-      const after = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const after = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
       expect(after.equals(before)).toBe(true);
     });
 
@@ -411,7 +411,7 @@ describe('Media probing (real ffmpeg)', () => {
      * It prints "Output file is empty, nothing was encoded" and writes no file
      * at all, so a wrapper that trusts the exit code reports success and leaves
      * the *rename* to fail — surfacing as
-     * `ENOENT ... rename derived/tmp/<id>-banner.jpg -> derived/thumbnails/<id>.jpg`,
+     * `ENOENT ... rename derived/tmp/<id>-banner.jpg -> derived/banners/<id>.jpg`,
      * which names neither the timestamp nor the file and reads like a storage
      * fault. Reported from a real library, where a poster was captured while a
      * 1 GB file was still being copied in.
@@ -439,7 +439,7 @@ describe('Media probing (real ffmpeg)', () => {
 
       await admin.post(`/videos/${id}/banner/capture`).send({ atSeconds: 600 }).expect(400);
 
-      await expect(storage.exists('derived', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `banners/${id}.jpg`)).resolves.toBe(false);
       await expect(storage.exists('derived', `tmp/${id}-banner.jpg`)).resolves.toBe(false);
     });
 
@@ -489,13 +489,13 @@ describe('Media probing (real ffmpeg)', () => {
         .post(`/videos/${id}/banner/capture`)
         .send({ atSeconds: 1 })
         .expect(200);
-      const chosen = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const chosen = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
 
       await admin.post(`/videos/${id}/reprobe`).expect(200);
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
       expect(video.bannerSource).toBe('MANUAL');
-      const after = await readFile(storage.resolvePath('derived', `thumbnails/${id}.jpg`));
+      const after = await readFile(storage.resolvePath('derived', `banners/${id}.jpg`));
       expect(after.equals(chosen)).toBe(true);
     });
 
@@ -527,7 +527,7 @@ describe('Media probing (real ffmpeg)', () => {
         .expect(200);
 
       expect(response.body).toMatchObject({
-        bannerKey: `thumbnails/${id}.png`,
+        bannerKey: `banners/${id}.png`,
         bannerSource: 'MANUAL',
       });
     });
@@ -552,7 +552,7 @@ describe('Media probing (real ffmpeg)', () => {
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id } });
       expect(video).toMatchObject({ bannerKey: null, bannerSource: 'AUTO' });
-      await expect(storage.exists('derived', `thumbnails/${id}.jpg`)).resolves.toBe(false);
+      await expect(storage.exists('derived', `banners/${id}.jpg`)).resolves.toBe(false);
     });
   });
 

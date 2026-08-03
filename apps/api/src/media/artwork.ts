@@ -16,20 +16,20 @@ export type ArtworkShape = 'poster' | 'banner';
 export const ARTWORK_SHAPES: readonly ArtworkShape[] = ['poster', 'banner'] as const;
 
 /**
- * Where the file lives under `DERIVED_ROOT`.
+ * Where the file lives under `DERIVED_ROOT` — `posters/` and `banners/`.
  *
- * The banner keeps `thumbnails/`. The column was renamed because the *name* was
- * wrong about what the image is, but the files are addressed by the key stored
- * on the row, and moving every existing one to match a rename is risk that buys
- * nothing. New captures land beside the old ones.
+ * The banner briefly kept the old `thumbnails/` directory, so that renaming the
+ * column would not strand the files it addressed. Nothing is deployed yet, and a
+ * poster has to be generated for every existing row regardless, so the reprobe
+ * that does that also rewrites these keys. Two directories named after what is
+ * in them beats one directory named after what it used to hold.
  */
-export function artworkKey(shape: ArtworkShape, videoId: string): string {
-  return shape === 'poster' ? `posters/${videoId}.jpg` : `thumbnails/${videoId}.jpg`;
+export function artworkDirectory(shape: ArtworkShape): string {
+  return `${shape}s`;
 }
 
-/** The directory half of {@link artworkKey}, for `ensureDirectory`. */
-export function artworkDirectory(shape: ArtworkShape): string {
-  return shape === 'poster' ? 'posters' : 'thumbnails';
+export function artworkKey(shape: ArtworkShape, videoId: string): string {
+  return `${artworkDirectory(shape)}/${videoId}.jpg`;
 }
 
 /**

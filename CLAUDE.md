@@ -82,8 +82,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   though it were the whole file corrupts playback for the next viewer.
 - Every video has **two** pictures, both cut from the frame 10% in: a 16:9 `bannerKey` (the old
   `thumbnailKey`, renamed for what it is) and a 2:3 `posterKey`. The files stay under
-  `derived/thumbnails/` and `derived/posters/` — the *column* name was wrong, the keys were not, and
-  moving several thousand files to match a rename buys nothing.
+  `derived/posters/` and `derived/banners/`, each named after what is in it.
 - `posterSource`/`bannerSource` are `MANUAL` independently, and `MANUAL` is never overwritten by a
   reprobe. Auto-generation runs only when `AUTO`. Separate sources are what let an admin hand-pick a
   poster and still get a fresh banner; losing a hand-picked one to a routine rescan loses an afternoon

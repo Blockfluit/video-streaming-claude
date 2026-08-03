@@ -79,7 +79,7 @@ describe('Artwork (real database)', () => {
       .send({ token: minted.body.token, username: 'viewer', password: PASSWORD })
       .expect(201);
 
-    await storage.save('derived', 'thumbnails/film.png', PIXEL);
+    await storage.save('derived', 'banners/film.png', PIXEL);
     await storage.save('derived', 'posters/film.png', PIXEL);
     await storage.save('derived', 'posters/films.png', PIXEL);
 
@@ -107,7 +107,7 @@ describe('Artwork (real database)', () => {
         sizeBytes: BigInt(1024),
         fileMtime: new Date(),
         state: 'PUBLISHED',
-        bannerKey: 'thumbnails/film.png',
+        bannerKey: 'banners/film.png',
         posterKey: 'posters/film.png',
       },
       select: { id: true },
@@ -142,7 +142,7 @@ describe('Artwork (real database)', () => {
 
     /**
      * The key is stable across replacements — a new poster overwrites
-     * `thumbnails/<id>.jpg` — so any lifetime above zero serves the old picture
+     * `banners/<id>.jpg` — so any lifetime above zero serves the old picture
      * until it expires. Revalidation is what makes a replacement show up.
      */
     it('revalidates rather than carrying a lifetime', async () => {
@@ -164,7 +164,7 @@ describe('Artwork (real database)', () => {
     it('changes its tag when the picture is replaced', async () => {
       const before = await viewer.get(`/videos/${videoId}/banner`).expect(200);
 
-      await storage.save('derived', 'thumbnails/film.png', Buffer.concat([PIXEL, PIXEL]));
+      await storage.save('derived', 'banners/film.png', Buffer.concat([PIXEL, PIXEL]));
 
       const after = await viewer.get(`/videos/${videoId}/banner`).expect(200);
       expect(after.headers.etag).not.toBe(before.headers.etag);
@@ -194,7 +194,7 @@ describe('Artwork (real database)', () => {
 
     /** The row says there is a picture and the file is gone. Still a picture. */
     it('serves the stock image when the row points at a file that is gone', async () => {
-      await storage.delete('derived', 'thumbnails/film.png');
+      await storage.delete('derived', 'banners/film.png');
 
       const response = await viewer.get(`/videos/${videoId}/banner`).expect(200);
       expect(response.headers['content-type']).toContain('image/svg+xml');

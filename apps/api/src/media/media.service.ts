@@ -264,7 +264,7 @@ export class MediaService implements OnModuleDestroy {
    * Captures a frame into place **atomically**.
    *
    * ffmpeg truncates its output the moment it opens it, so writing straight to
-   * `thumbnails/<id>.jpg` leaves the poster missing or half-written for as long
+   * `banners/<id>.jpg` leaves the poster missing or half-written for as long
    * as the capture takes. Every card in the app asks for that URL, so a routine
    * re-probe made artwork across the library flicker to a broken image — and it
    * is a 404, not a stale picture, which is worse. Three viewer tests caught it
