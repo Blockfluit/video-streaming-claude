@@ -17,6 +17,7 @@ export * from './pagination.js';
 export * from './quality.js';
 export * from './primitives.js';
 export * from './title.js';
+export * from './youtube.js';
 export * from './schemas/accounts.js';
 export * from './schemas/auth.js';
 export * from './schemas/comments.js';

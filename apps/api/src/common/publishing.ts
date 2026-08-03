@@ -10,17 +10,28 @@ import type { PublishState, Role } from '../prisma/generated/enums';
  * at the publish endpoint means the admin UI has to guess what is still needed.
  */
 
-/** What a publishable video must have. Credits, subtitles and markers never appear here. */
+/**
+ * What a publishable video must have. Credits, subtitles and markers never
+ * appear here — and neither, deliberately, does a **description**.
+ *
+ * Requiring one made the whole library unpublishable and said so in a way nobody
+ * could act on. Ingest cannot write a synopsis, so every one of a hundred
+ * episodes needed a person to type something before *any* of them could go out;
+ * and because a collection needs at least one publishable video, the collection
+ * was blocked too, reporting a missing `videos` while plainly holding five. That
+ * was the reported bug: "why can't I publish collections".
+ *
+ * What is left is what a probe produces on its own — a title, a real duration,
+ * and a banner. A synopsis is worth writing and is not worth blocking on.
+ */
 export interface VideoPublishFields {
   title: string | null;
-  description: string | null;
   durationSec: number | null;
   bannerKey: string | null;
 }
 
 export interface CollectionPublishFields {
   title: string | null;
-  description: string | null;
   /** Videos in this collection that are published, or ready to be. */
   publishableVideoCount: number;
 }
@@ -40,7 +51,6 @@ export function videoMissingFields(video: VideoPublishFields): string[] {
   const missing: string[] = [];
 
   if (isBlank(video.title)) missing.push('title');
-  if (isBlank(video.description)) missing.push('description');
   // Zero means the probe found no usable stream, not a very short film.
   if (video.durationSec === null || video.durationSec <= 0) missing.push('durationSec');
   if (isBlank(video.bannerKey)) missing.push('bannerKey');
@@ -48,11 +58,31 @@ export function videoMissingFields(video: VideoPublishFields): string[] {
   return missing;
 }
 
+/**
+ * How many of a collection's videos would go out with it.
+ *
+ * One function because there were two, and they disagreed. `publish()` counted
+ * the videos that were *ready*; the detail read — the one that draws the admin's
+ * checklist — passed the total instead. So the screen said a collection needed
+ * only a description, and pressing the button returned "description **and**
+ * videos". A checklist that contradicts the action it describes is worse than no
+ * checklist, and the only reliable fix is for both to call the same thing.
+ *
+ * Already-published videos count: re-publishing a collection whose episodes went
+ * out individually must not report an empty shelf.
+ */
+export function publishableVideoCount(
+  videos: (VideoPublishFields & { state: string })[],
+): number {
+  return videos.filter(
+    (video) => video.state === 'PUBLISHED' || videoMissingFields(video).length === 0,
+  ).length;
+}
+
 export function collectionMissingFields(collection: CollectionPublishFields): string[] {
   const missing: string[] = [];
 
   if (isBlank(collection.title)) missing.push('title');
-  if (isBlank(collection.description)) missing.push('description');
   // An empty shelf is not a collection.
   if (collection.publishableVideoCount < 1) missing.push('videos');
 

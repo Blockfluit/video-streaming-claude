@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { youtubeEmbedUrl } from '@video/shared'
+
 /**
  * Artwork across the top of a page, with the content laid over it.
  *
@@ -25,10 +27,84 @@ const props = defineProps<{
    * viewport makes that a composition rather than a gap.
    */
   size?: 'wide' | 'tall' | 'full'
+  /**
+   * A YouTube id. The banner shows first and the trailer fades in over it after
+   * a moment, the way a title page on a streaming service does.
+   */
+  trailerId?: string | null
 }>()
 
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
+
+/* ---------------------------------------------------------------- trailer -- */
+
+/**
+ * The trailer starts itself, but only on terms the browser and the viewer both
+ * allow.
+ *
+ * - **Muted.** Not a preference: a browser refuses to start an unmuted video
+ *   nobody asked for, and it fails *silently* — the iframe loads and sits there.
+ *   So the sound toggle is ours, and it starts from muted.
+ * - **Not under `prefers-reduced-motion`.** A hero that begins moving on its own
+ *   is precisely what that setting is about. The trailer stays available behind
+ *   its button.
+ * - **Nothing is requested from YouTube until it starts**, so a page someone
+ *   passes through makes no third-party request at all.
+ */
+const DELAY_MS = 2000
+
+const playing = ref(false)
+const muted = ref(true)
+/** Held back so the iframe — and the request it makes — does not exist yet. */
+const mounted = ref(false)
+
+const embedUrl = computed(() =>
+  props.trailerId && mounted.value
+    ? youtubeEmbedUrl(props.trailerId, { muted: muted.value })
+    : null,
+)
+
+let timer: ReturnType<typeof setTimeout> | undefined
+
+function stopTrailer(): void {
+  clearTimeout(timer)
+  playing.value = false
+  mounted.value = false
+  muted.value = true
+}
+
+function startTrailer(): void {
+  if (!props.trailerId) return
+  mounted.value = true
+  playing.value = true
+}
+
+/**
+ * Toggling sound reloads the iframe with a different `mute`, because the player
+ * is only reachable through the YouTube JS API otherwise — a whole script to
+ * load, for one control. The reload costs a restart of the trailer, which is
+ * what someone turning the sound on generally wants anyway.
+ */
+function toggleSound(): void {
+  muted.value = !muted.value
+}
+
+function scheduleTrailer(): void {
+  clearTimeout(timer)
+  stopTrailer()
+
+  if (!props.trailerId) return
+  if (import.meta.server) return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+  timer = setTimeout(startTrailer, DELAY_MS)
+}
+
+onMounted(scheduleTrailer)
+onBeforeUnmount(() => clearTimeout(timer))
+// A client-side navigation swaps the prop on the same component instance.
+watch(() => props.trailerId, scheduleTrailer)
 
 /**
  * `svh` rather than `vh` for the full-height hero: `vh` ignores a mobile
@@ -73,6 +149,37 @@ watch(
     >
 
     <!--
+      The trailer, over the banner rather than instead of it.
+
+      `pointer-events-none` is load-bearing: an iframe swallows every click that
+      lands on it, so without this the Play button underneath stops responding
+      the moment the trailer fades in — and the page looks fine while doing it.
+
+      `aria-hidden` because it is decoration behind real content. Its controls
+      below are the part anyone needs to reach.
+    -->
+    <div
+      v-if="embedUrl"
+      class="pointer-events-none absolute inset-0 transition-opacity duration-1000"
+      :class="playing ? 'opacity-100' : 'opacity-0'"
+      aria-hidden="true"
+    >
+      <!--
+        Scaled past the frame so the 16:9 video covers a hero of any shape. A
+        letterboxed trailer with bars down the sides of a full-height hero looks
+        like a mistake; cropping is what the banner underneath already does.
+      -->
+      <iframe
+        :src="embedUrl"
+        class="absolute top-1/2 left-1/2 h-[56.25vw] min-h-full w-[177.78vh] min-w-full -translate-x-1/2 -translate-y-1/2"
+        title=""
+        frameborder="0"
+        allow="autoplay; encrypted-media"
+        referrerpolicy="strict-origin-when-cross-origin"
+      />
+    </div>
+
+    <!--
       Two scrims. The bottom one is half the hero rather than a fixed height:
       on a short viewport a fixed value leaves the seam above the fold, which
       is exactly where it is most obvious.
@@ -90,6 +197,43 @@ watch(
       <div class="page-shell w-full">
         <slot />
       </div>
+    </div>
+
+    <!--
+      The trailer's controls, and the only way to start one when
+      `prefers-reduced-motion` has stopped it doing so itself. Real buttons with
+      real labels, sitting above the scrim rather than over the artwork.
+    -->
+    <div v-if="trailerId" class="absolute right-4 bottom-6 z-1 flex items-center gap-2 sm:right-8">
+      <template v-if="playing">
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="subtle"
+          :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+          :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
+          @click="toggleSound"
+        />
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-x"
+          aria-label="Stop the trailer"
+          @click="stopTrailer"
+        />
+      </template>
+      <UButton
+        v-else
+        size="sm"
+        color="neutral"
+        variant="subtle"
+        icon="i-lucide-clapperboard"
+        aria-label="Play the trailer"
+        @click="startTrailer"
+      >
+        Trailer
+      </UButton>
     </div>
   </section>
 </template>

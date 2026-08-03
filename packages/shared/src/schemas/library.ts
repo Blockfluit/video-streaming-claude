@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { parseYoutubeId } from '../youtube.js';
+
 import { pageQuerySchema } from '../pagination.js';
 import { booleanParam, idSchema, nonEmptyText, optionalText, tagsSchema, yearSchema } from '../primitives.js';
 
@@ -25,12 +27,45 @@ export const createCollectionSchema = z.object({
 });
 export type CreateCollectionInput = z.infer<typeof createCollectionSchema>;
 
+/**
+ * A trailer, as whatever the admin pasted.
+ *
+ * Stored as the **id**, so the field parses rather than validates: a watch URL
+ * with a playlist and a timestamp on it is a perfectly good answer and comes out
+ * as eleven characters. Anything `parseYoutubeId` cannot read is refused here
+ * rather than saved — a stored non-id renders as an iframe that shows nothing,
+ * with no clue in the admin form as to why.
+ *
+ * An explicit empty value clears it, which is the same distinction `adminNote`
+ * draws between "leave this alone" and "remove it".
+ */
+export const trailerField = z
+  .string()
+  .trim()
+  .max(300)
+  .transform((value, ctx) => {
+    if (value.length === 0) return null;
+
+    const id = parseYoutubeId(value);
+    if (id === null) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'That is not a YouTube link this can read',
+      });
+      return z.NEVER;
+    }
+
+    return id;
+  })
+  .nullish();
+
 export const updateCollectionSchema = z.object({
   title: nonEmptyText(200).optional(),
   description: optionalText(5000),
   year: yearSchema.optional(),
   tags: tagsSchema.optional(),
   posterKey: optionalText(500),
+  trailerYoutubeId: trailerField,
   regenerateSlug,
 });
 export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;
@@ -96,6 +131,7 @@ export const updateVideoSchema = z.object({
   title: nonEmptyText(300).optional(),
   description: optionalText(10000),
   tags: tagsSchema.optional(),
+  trailerYoutubeId: trailerField,
   regenerateSlug,
 });
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;

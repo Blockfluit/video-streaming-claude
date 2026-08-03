@@ -40,31 +40,7 @@ import { JobsService } from '../transcode/jobs.service';
 import { StreamingService } from './streaming.service';
 import { VideosService } from './videos.service';
 import { ThrottleExpensive } from '../common/throttling';
-
-/**
- * Shared by both upload routes.
- *
- * Declared above the class because a decorator argument is evaluated when the
- * class is defined, not when the route runs — below it, this is still in its
- * temporal dead zone.
- *
- * The client's filename is metadata and never a path component: the extension
- * comes from the mime type, which is the one thing here the server chose.
- */
-const IMAGE_UPLOAD = {
-  limits: { fileSize: MAX_THUMBNAIL_BYTES, files: 1 },
-  fileFilter: (
-    _request: unknown,
-    file: { mimetype: string },
-    callback: (error: Error | null, acceptFile: boolean) => void,
-  ) => {
-    const extension = MIME_TO_EXTENSION[file.mimetype];
-    callback(
-      extension ? null : new BadRequestException('Unsupported image type'),
-      Boolean(extension),
-    );
-  },
-};
+import { IMAGE_UPLOAD, MIME_TO_EXTENSION } from '../common/image-upload';
 
 @Controller('videos')
 export class VideosController {
@@ -350,10 +326,3 @@ export class VideosController {
       : { bannerKey: key, bannerSource: 'MANUAL' };
   }
 }
-
-/** Extension taken from the mime type, never from the client's filename. */
-const MIME_TO_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};

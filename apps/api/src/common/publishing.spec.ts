@@ -1,5 +1,6 @@
 import {
   collectionMissingFields,
+  publishableVideoCount,
   videoMissingFields,
   visibleStates,
   whereVisible,
@@ -7,14 +8,12 @@ import {
 
 const publishableVideo = {
   title: 'Philosophers Stone',
-  description: 'A boy discovers he is a wizard.',
   durationSec: 9152,
   bannerKey: 'derived/hp/1.jpg',
 };
 
 const publishableCollection = {
   title: 'Harry Potter',
-  description: 'The films.',
   publishableVideoCount: 1,
 };
 
@@ -23,28 +22,34 @@ describe('videoMissingFields', () => {
     expect(videoMissingFields(publishableVideo)).toEqual([]);
   });
 
-  it.each(['title', 'description', 'durationSec', 'bannerKey'] as const)(
-    'reports a missing %s',
-    (field) => {
-      expect(videoMissingFields({ ...publishableVideo, [field]: null })).toEqual([field]);
-    },
-  );
+  it.each(['title', 'durationSec', 'bannerKey'] as const)('reports a missing %s', (field) => {
+    expect(videoMissingFields({ ...publishableVideo, [field]: null })).toEqual([field]);
+  });
 
   it('reports every missing field at once, so the checklist is complete', () => {
     expect(
       videoMissingFields({
         title: '',
-        description: null,
         durationSec: null,
         bannerKey: null,
       }),
-    ).toEqual(['title', 'description', 'durationSec', 'bannerKey']);
+    ).toEqual(['title', 'durationSec', 'bannerKey']);
   });
 
   // A title of spaces passes a NOT NULL check and fails a human one.
   it('treats a blank string as missing', () => {
     expect(videoMissingFields({ ...publishableVideo, title: '   ' })).toEqual(['title']);
-    expect(videoMissingFields({ ...publishableVideo, description: '' })).toEqual(['description']);
+  });
+
+  /**
+   * A description used to be required, and it made the library unpublishable.
+   * Ingest cannot write a synopsis, so every episode of every show needed a
+   * person to type one before *any* of them could go out — and a collection
+   * needs a publishable video, so the collection was blocked too, reporting a
+   * missing `videos` while plainly holding five.
+   */
+  it('does not require a description', () => {
+    expect(videoMissingFields({ ...publishableVideo })).toEqual([]);
   });
 
   // Probing writes durationSec, and a zero-length video means the probe found
@@ -59,12 +64,53 @@ describe('videoMissingFields', () => {
   });
 });
 
+/**
+ * There were two of these once, and they disagreed: `publish()` counted the
+ * videos that were ready, while the read that draws the admin's checklist passed
+ * the total. So a collection was reported ready and the button then refused it.
+ */
+describe('publishableVideoCount', () => {
+  const ready = { state: 'DRAFT', ...publishableVideo };
+  const notReady = { state: 'DRAFT', title: null, durationSec: null, bannerKey: null };
+
+  it('counts videos that could go out now', () => {
+    expect(publishableVideoCount([ready, ready])).toBe(2);
+  });
+
+  it('does not count videos that are not ready', () => {
+    expect(publishableVideoCount([ready, notReady])).toBe(1);
+  });
+
+  /**
+   * Otherwise re-publishing a collection whose episodes went out individually
+   * reports an empty shelf — they are published, so they are not "ready", and a
+   * naive check finds neither.
+   */
+  it('counts videos that are already published', () => {
+    expect(publishableVideoCount([{ ...notReady, state: 'PUBLISHED' }])).toBe(1);
+  });
+
+  it('is zero for an empty shelf', () => {
+    expect(publishableVideoCount([])).toBe(0);
+  });
+
+  /** The agreement that was missing: the count feeds the check it is judged by. */
+  it('agrees with the checklist it feeds', () => {
+    expect(
+      collectionMissingFields({
+        title: 'Show',
+        publishableVideoCount: publishableVideoCount([notReady]),
+      }),
+    ).toEqual(['videos']);
+  });
+});
+
 describe('collectionMissingFields', () => {
   it('is empty when the collection is ready', () => {
     expect(collectionMissingFields(publishableCollection)).toEqual([]);
   });
 
-  it.each(['title', 'description'] as const)('reports a missing %s', (field) => {
+  it.each(['title'] as const)('reports a missing %s', (field) => {
     expect(collectionMissingFields({ ...publishableCollection, [field]: null })).toEqual([field]);
   });
 

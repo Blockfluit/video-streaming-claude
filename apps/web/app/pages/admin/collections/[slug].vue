@@ -40,6 +40,12 @@ interface CollectionDetail {
   year: number | null
   tags: string[]
   state: string
+  /** The admin's overrides. Null means the collection inherits from its first video. */
+  posterKey: string | null
+  bannerKey: string | null
+  trailerYoutubeId: string | null
+  /** What a cascade publish would take with it — computed server-side. */
+  publishableVideoCount?: number
   seasons: Season[]
   videos: VideoRow[]
 }
@@ -82,6 +88,7 @@ const form = reactive({
   description: collection.value.description ?? '',
   year: collection.value.year,
   tags: collection.value.tags.join(', '),
+  trailer: collection.value.trailerYoutubeId ?? '',
 })
 const saving = ref(false)
 
@@ -95,6 +102,7 @@ async function save() {
         description: form.description || null,
         year: form.year ?? undefined,
         tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+        trailerYoutubeId: form.trailer,
       },
     })
     await refresh()
@@ -108,14 +116,83 @@ async function save() {
   }
 }
 
-async function setState(action: 'publish' | 'archive') {
+async function setState(action: 'publish' | 'archive', cascade = false) {
   try {
-    await api(`/collections/${collection.value!.id}/${action}`, { method: 'POST' })
+    const query = action === 'publish' && cascade ? '?cascade=true' : ''
+    await api(`/collections/${collection.value!.id}/${action}${query}`, { method: 'POST' })
     await refresh()
     toast.add({ title: action === 'publish' ? 'Published' : 'Archived', color: 'success' })
   }
   catch (error) {
     toast.add({ title: apiMessage(error, `Could not ${action} it`), color: 'error' })
+  }
+}
+
+/**
+ * Publishing asks first, and names the number.
+ *
+ * A collection full of drafts is the normal case after an ingest, and publishing
+ * each episode by hand is the thing this exists to avoid. The count comes from
+ * the server — the same `publishableVideoCount` the readiness check uses — so
+ * the dialog cannot promise something different from what happens.
+ *
+ * Named rather than "are you sure?", the way removing a season names how many
+ * files go.
+ */
+const confirmingPublish = ref(false)
+const cascadePublish = ref(true)
+
+const publishableCount = computed(() => collection.value?.publishableVideoCount ?? 0)
+
+async function confirmPublish() {
+  confirmingPublish.value = false
+  await setState('publish', cascadePublish.value)
+}
+
+/* --- artwork --------------------------------------------------------- */
+
+/**
+ * A collection's poster and banner are an **override**. With none set it shows
+ * its first video's, so "Reset" here means go back to inheriting rather than
+ * leave the shelf blank — which is why the panel says which of the two it is
+ * currently showing.
+ */
+const artworkBust = reactive<{ poster: number, banner: number }>({ poster: 0, banner: 0 })
+
+function collectionArtworkUrl(shape: 'poster' | 'banner'): string {
+  return `/api/collections/${collection.value!.id}/${shape}?v=${artworkBust[shape]}`
+}
+
+function isOwnArtwork(shape: 'poster' | 'banner'): boolean {
+  return Boolean(shape === 'poster' ? collection.value?.posterKey : collection.value?.bannerKey)
+}
+
+async function uploadArtwork(event: Event, shape: 'poster' | 'banner') {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  const body = new FormData()
+  body.append('file', file)
+  try {
+    await api(`/collections/${collection.value!.id}/${shape}`, { method: 'POST', body })
+    artworkBust[shape] = Date.now()
+    await refresh()
+    toast.add({ title: 'Artwork updated', color: 'success' })
+  }
+  catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
+  }
+}
+
+async function resetArtwork(shape: 'poster' | 'banner') {
+  try {
+    await api(`/collections/${collection.value!.id}/${shape}`, { method: 'DELETE' })
+    artworkBust[shape] = Date.now()
+    await refresh()
+    toast.add({ title: 'Back to inheriting', color: 'success' })
+  }
+  catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not reset that'), color: 'error' })
   }
 }
 
@@ -349,7 +426,7 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         <UButton
           v-if="collection.state !== 'PUBLISHED'"
           icon="i-lucide-check"
-          @click="setState('publish')"
+          @click="confirmingPublish = true"
         >
           Publish
         </UButton>
@@ -371,6 +448,43 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
       real consequence — the films go — rather than asking "are you sure?",
       which tells nobody anything.
     -->
+    <!--
+      Names the number rather than asking "are you sure?", the same way removing
+      a season says how many files go. Publishing a shelf full of drafts is the
+      normal case after an ingest, and doing each episode by hand is what this
+      exists to avoid.
+    -->
+    <UModal v-model:open="confirmingPublish" :title="`Publish ${collection.title}?`">
+      <template #body>
+        <div class="space-y-4 text-sm">
+          <p v-if="publishableCount > 0">
+            <strong>{{ publishableCount }}</strong>
+            {{ publishableCount === 1 ? 'video is' : 'videos are' }} ready to go out with it.
+          </p>
+          <p v-else class="text-(--ui-text-muted)">
+            Nothing inside it is ready to publish yet.
+          </p>
+
+          <UCheckbox
+            v-if="publishableCount > 0"
+            v-model="cascadePublish"
+            :label="`Publish ${publishableCount === 1 ? 'it' : 'them'} too`"
+          />
+          <p v-if="publishableCount > 0" class="text-xs text-(--ui-text-muted)">
+            Unticked, only the collection is published and the videos stay drafts.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="confirmingPublish = false">
+            Cancel
+          </UButton>
+          <UButton icon="i-lucide-check" @click="confirmPublish">Publish</UButton>
+        </div>
+      </template>
+    </UModal>
+
     <UModal v-model:open="confirmingOpen" title="This season still has episodes">
       <template #body>
         <div v-if="confirming" class="space-y-3 text-sm">
@@ -426,6 +540,9 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
                 <UInput v-model="form.tags" class="w-full" />
               </UFormField>
             </div>
+            <UFormField label="Trailer" hint="Paste a YouTube link, or leave empty for none">
+              <UInput v-model="form.trailer" class="w-full" placeholder="https://youtu.be/…" />
+            </UFormField>
             <UButton :loading="saving" @click="save">Save changes</UButton>
           </div>
         </UCard>
@@ -592,29 +709,55 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         <UCard>
           <template #header><h2 class="font-semibold">Artwork</h2></template>
 
-          <div class="flex gap-3">
-            <img
-              :src="`/api/collections/${collection.id}/poster`"
-              alt="Poster"
-              class="aspect-2/3 w-24 shrink-0 rounded-md bg-(--ui-bg-accented) object-cover"
-            >
-            <img
-              :src="`/api/collections/${collection.id}/banner`"
-              alt="Banner"
-              class="aspect-video min-w-0 flex-1 self-start rounded-md bg-(--ui-bg-accented) object-cover"
-            >
-          </div>
-
           <!--
-            Says where the picture comes from, because "why is this the poster?"
-            is otherwise unanswerable from this screen: nothing on the collection
-            was ever set, and it is showing an episode's artwork.
+            Each shape says whether it is this collection's own or inherited,
+            because "why is this the poster?" is otherwise unanswerable from
+            here: nothing was ever set, and it is showing an episode's picture.
+            Without that, Reset is a button whose effect is invisible.
           -->
-          <p class="mt-3 text-xs text-(--ui-text-muted)">
-            Inherited from the first video in this collection, and the stock
-            image while there is none. Change it by editing that video's poster
-            or banner.
-          </p>
+          <div class="space-y-4">
+            <div v-for="shape in (['poster', 'banner'] as const)" :key="shape">
+              <div class="flex items-start gap-3">
+                <img
+                  :src="collectionArtworkUrl(shape)"
+                  :alt="shape === 'poster' ? 'Poster' : 'Banner'"
+                  class="shrink-0 rounded-md bg-(--ui-bg-accented) object-cover"
+                  :class="shape === 'poster' ? 'aspect-2/3 w-20' : 'aspect-video w-32'"
+                >
+                <div class="min-w-0 flex-1 space-y-2">
+                  <p class="text-sm font-medium capitalize">{{ shape }}</p>
+                  <p class="text-xs text-(--ui-text-muted)">
+                    {{ isOwnArtwork(shape) ? 'Set on this collection' : 'Inherited from its first video' }}
+                  </p>
+                  <div class="flex flex-wrap gap-2">
+                    <label class="cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        class="hidden"
+                        @change="event => uploadArtwork(event, shape)"
+                      >
+                      <span
+                        class="flex items-center gap-1.5 rounded-md bg-(--ui-bg-accented) px-2 py-1 text-xs hover:bg-(--ui-border-accented)"
+                      >
+                        <UIcon name="i-lucide-image" class="size-3.5" /> Upload
+                      </span>
+                    </label>
+                    <UButton
+                      v-if="isOwnArtwork(shape)"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-rotate-ccw"
+                      @click="resetArtwork(shape)"
+                    >
+                      Use the episode's
+                    </UButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </UCard>
       </div>
     </div>

@@ -11,6 +11,7 @@ import {
 import {
   collectionMissingFields,
   narrowToVisibleStates,
+  publishableVideoCount,
   videoMissingFields,
   whereVisible,
 } from '../common/publishing';
@@ -40,6 +41,8 @@ const COLLECTION_SUMMARY = {
   year: true,
   tags: true,
   posterKey: true,
+  bannerKey: true,
+  trailerYoutubeId: true,
   state: true,
   origin: true,
   folderKey: true,
@@ -279,6 +282,7 @@ export class CollectionsService {
         year: dto.year,
         tags: dto.tags,
         posterKey: dto.posterKey,
+        trailerYoutubeId: dto.trailerYoutubeId,
         slug,
       },
       select: COLLECTION_SUMMARY,
@@ -346,11 +350,10 @@ export class CollectionsService {
       .filter((video) => videoMissingFields(video).length === 0)
       .map((video) => video.id);
 
-    const publishableVideoCount = members.filter(
-      (video) => video.state === 'PUBLISHED' || readyVideoIds.includes(video.id),
-    ).length;
-
-    const missingFields = collectionMissingFields({ ...collection, publishableVideoCount });
+    const missingFields = collectionMissingFields({
+      ...collection,
+      publishableVideoCount: publishableVideoCount(members),
+    });
     if (missingFields.length > 0) {
       throw new BadRequestException({
         message: 'This collection is not ready to publish',
@@ -527,12 +530,22 @@ export class CollectionsService {
     );
   }
 
-  /** Admins get the publish checklist; a USER has no use for it and should not see draft internals. */
+  /**
+   * Admins get the publish checklist; a USER has no use for it and should not
+   * see draft internals.
+   *
+   * The count comes from `publishableVideoCount`, the same helper `publish()`
+   * uses. This used to pass `videos.length` — the total — so the checklist
+   * reported a collection ready that the publish button then refused.
+   */
   private withChecklist<T extends { state: string; title: string | null }>(
     collection: T & {
-      description: string | null;
-      posterKey: string | null;
-      videos: { state: string }[];
+      videos: {
+        state: string;
+        title: string | null;
+        durationSec: number | null;
+        bannerKey: string | null;
+      }[];
     },
     role: Role,
   ) {
@@ -542,9 +555,14 @@ export class CollectionsService {
       ...collection,
       missingFields: collectionMissingFields({
         title: collection.title,
-        description: collection.description,
-        publishableVideoCount: collection.videos.length,
+        publishableVideoCount: publishableVideoCount(collection.videos),
       }),
+      /*
+       * What a cascade publish would take with it, so the confirmation can name
+       * the number instead of asking "are you sure?". Same count, so the dialog
+       * cannot promise something different from what happens.
+       */
+      publishableVideoCount: publishableVideoCount(collection.videos),
     };
   }
 }

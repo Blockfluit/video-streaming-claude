@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,7 +11,10 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   addCollectionVideoSchema,
   createCollectionSchema,
@@ -36,6 +40,9 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { ImagesService } from '../common/images.service';
+import { IMAGE_UPLOAD, MIME_TO_EXTENSION } from '../common/image-upload';
+import { ThrottleExpensive } from '../common/throttling';
+import { CollectionArtworkService } from '../media/media.service';
 import { CollectionsService } from './collections.service';
 import { ResolveService, type ResolveResult } from './resolve.service';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -51,6 +58,7 @@ export class CollectionsController {
     private readonly collections: CollectionsService,
     private readonly resolver: ResolveService,
     private readonly images: ImagesService,
+    private readonly artwork: CollectionArtworkService,
   ) {}
 
   /**
@@ -87,6 +95,70 @@ export class CollectionsController {
     @Res() response: Response,
   ): Promise<void> {
     return this.images.collectionArtwork(id, 'banner', user.role, response);
+  }
+
+  /**
+   * Overriding the inherited artwork.
+   *
+   * Upload only — a collection has no file of its own, so there is nothing to
+   * capture a frame from. Until this existed the override columns were
+   * unreachable: they were in the schema, resolved on every read, and no
+   * endpoint could write them.
+   */
+  @ThrottleExpensive()
+  @Post(':id/poster')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD))
+  uploadPoster(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    return this.storeArtwork(id, file, 'poster');
+  }
+
+  @ThrottleExpensive()
+  @Post(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD))
+  uploadBanner(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    return this.storeArtwork(id, file, 'banner');
+  }
+
+  /**
+   * Goes back to **inheriting**, which is not the same as removing the picture.
+   *
+   * A collection with no override shows its first video's artwork, so this
+   * restores what was there before someone uploaded over it rather than leaving
+   * a blank shelf.
+   */
+  @Delete(':id/poster')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearPoster(@Param('id') id: string): Promise<void> {
+    return this.artwork.clear(id, 'poster');
+  }
+
+  @Delete(':id/banner')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearBanner(@Param('id') id: string): Promise<void> {
+    return this.artwork.clear(id, 'banner');
+  }
+
+  private async storeArtwork(
+    id: string,
+    file: { buffer: Buffer; mimetype: string } | undefined,
+    shape: 'poster' | 'banner',
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+
+    const key = await this.artwork.set(id, file.buffer, MIME_TO_EXTENSION[file.mimetype], shape);
+    return shape === 'poster' ? { posterKey: key } : { bannerKey: key };
   }
 
   @Get()

@@ -26,6 +26,7 @@ interface VideoDetail {
   probeError: string | null
   posterSource: string
   bannerSource: string
+  trailerYoutubeId: string | null
   playbackKey: string | null
   storageKey: string
   introStartSec: number | null
@@ -54,12 +55,13 @@ const { data: subtitles, refresh: refreshSubs } = await useApiData<{ items: Subt
   `/videos/${id}/subtitles`,
 )
 
-const form = reactive({ title: '', description: '', tags: '' })
+const form = reactive({ title: '', description: '', tags: '', trailer: '' })
 watchEffect(() => {
   if (!video.value) return
   form.title = video.value.title
   form.description = video.value.description ?? ''
   form.tags = video.value.tags.join(', ')
+  form.trailer = video.value.trailerYoutubeId ?? ''
 })
 
 const saving = ref(false)
@@ -73,6 +75,10 @@ async function save() {
         title: form.title,
         description: form.description,
         tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+        // Sent as typed. The API parses a pasted URL down to an id and refuses
+        // what it cannot read, so a mistyped link is a message on this form
+        // rather than a player that silently shows nothing.
+        trailerYoutubeId: form.trailer,
       },
     })
     await refresh()
@@ -304,6 +310,9 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
             </UFormField>
             <UFormField label="Tags" hint="Comma separated">
               <UInput v-model="form.tags" class="w-full" />
+            </UFormField>
+            <UFormField label="Trailer" hint="Paste a YouTube link, or leave empty for none">
+              <UInput v-model="form.trailer" class="w-full" placeholder="https://youtu.be/…" />
             </UFormField>
             <UButton :loading="saving" @click="save">Save details</UButton>
           </div>

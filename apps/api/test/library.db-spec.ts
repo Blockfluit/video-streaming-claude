@@ -217,6 +217,64 @@ describe('Library (real database)', () => {
 
       expect(updated.body.slug).toBe('the-wizarding-world');
     });
+
+    /**
+     * Read back, not just accepted.
+     *
+     * `update` builds its `data` field by field rather than spreading the DTO —
+     * deliberately, so a column added later cannot be written by anyone who
+     * guesses its name — and the cost is that a *new* field is silently dropped
+     * until it is added there too. That is exactly what happened: the PATCH
+     * answered 200, the response looked right, and the column stayed empty.
+     * Asserting the round trip is the only thing that catches it.
+     */
+    it('stores a trailer, as the id rather than the pasted URL', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://www.youtube.com/watch?v=dQw4w9Wg-_Q&list=PLx&t=9' })
+        .expect(200);
+
+      const read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.trailerYoutubeId).toBe('dQw4w9Wg-_Q');
+    });
+
+    it('clears the trailer when given an empty value', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://youtu.be/dQw4w9Wg-_Q' })
+        .expect(200);
+      await admin.patch(`/collections/${collection.id}`).send({ trailerYoutubeId: '' }).expect(200);
+
+      const read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.trailerYoutubeId).toBeNull();
+    });
+
+    /** Omitting it must not wipe it — "leave alone" and "clear" are different. */
+    it('leaves the trailer alone when the field is not sent', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://youtu.be/dQw4w9Wg-_Q' })
+        .expect(200);
+      await admin.patch(`/collections/${collection.id}`).send({ title: 'Renamed' }).expect(200);
+
+      const read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.trailerYoutubeId).toBe('dQw4w9Wg-_Q');
+    });
+
+    it('refuses a link it cannot read rather than storing it', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ trailerYoutubeId: 'https://vimeo.com/12345' })
+        .expect(400);
+    });
   });
 
   describe('slug scoping', () => {
@@ -679,8 +737,25 @@ describe('Library (real database)', () => {
       const response = await admin.post(`/videos/${video.id}/publish`).expect(400);
 
       expect(response.body.missingFields).toEqual(
-        expect.arrayContaining(['description', 'durationSec', 'bannerKey']),
+        expect.arrayContaining(['durationSec', 'bannerKey']),
       );
+    });
+
+    /**
+     * A description used to be required and made the library unpublishable:
+     * ingest cannot write one, so every episode needed a person to type
+     * something before any of them could go out — and a collection needs a
+     * publishable video, so the collection was blocked too.
+     */
+    it('publishes a video that has no description', async () => {
+      const collection = await createCollection('Harry Potter');
+      const video = await seedVideo(collection.id, 'Philosophers Stone', {
+        ...publishable,
+        description: null,
+      });
+
+      const response = await admin.post(`/videos/${video.id}/publish`).expect(200);
+      expect(response.body.state).toBe('PUBLISHED');
     });
 
     it('publishes one that is', async () => {
