@@ -598,8 +598,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   chowned by Docker at all, so `MEDIA_PATH` and `DERIVED_PATH` must be `chown 1000:1000` on the host.
 - Alpine is wrong for the API image: `@node-rs/argon2` ships prebuilt **glibc** binaries. The runtime
   image also needs `ffmpeg`, which is most of its size.
-- Deploying is a **manual** `workflow_dispatch`; GitHub's "Use workflow from" dropdown is the branch
-  picker. Nothing ships on a push.
+- **The pipeline stops at GHCR — nothing deploys.** `build-dev.yml` is a manual
+  `workflow_dispatch` (GitHub's "Use workflow from" dropdown is the branch picker) and pushes two tags
+  per image: the moving `<image_tag>` and an immutable `<image_tag>-<short sha>`, both derived from
+  the input so `prd` needs no second workflow. Putting a build on the server is Portainer → Update the
+  stack with **Re-pull image** ticked, which is *not* feature-gated.
+- **Do not add an automated deploy back without re-measuring.** A Portainer CE webhook redeploys a
+  Git-backed stack only when the tracked *git ref* has moved, and says nothing when it has not: `204`
+  in ~20ms, no pull, no recreate. This is easy to get backwards, because a call landing right after a
+  merge *does* replace the containers — the git change carried the pull with it. Confirmed by
+  Portainer's `ConfigHash` moving `b604e95f` → `1a28019c` across the one call that worked, and five
+  minutes of no change on every call after. `?pullimage=true` and `?IMAGE_TAG=…` are **non-git** stack
+  webhook features (`"repository" !== method` in the UI) and a Git stack ignores them; *Re-pull image*
+  under GitOps updates is Business Edition (`featureId: STACK_PULL_IMAGE`). Deploying a *branch* never
+  moves `main`, so a webhook would report success for work it never did — which is why the step was
+  deleted rather than worked around. The two real options, if it ever becomes worth it, are recorded
+  in `deploy/README.md` step 4.
 
 ## Conventions
 

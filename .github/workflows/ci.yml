@@ -1,5 +1,5 @@
-# Feedback only. This workflow ships nothing — deploying is a button, in
-# deploy-dev.yml.
+# Feedback only. This workflow publishes nothing — building images is a button,
+# in build-dev.yml, and deploying is a separate one in Portainer.
 
 name: CI
 

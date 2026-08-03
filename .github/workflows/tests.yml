@@ -1,8 +1,8 @@
 # The test suite, as a reusable workflow.
 #
-# Called by ci.yml (on pull requests) and by deploy-dev.yml (before it ships).
+# Called by ci.yml (on pull requests) and by build-dev.yml (before it publishes).
 # One definition rather than two copies: two copies drift, and the one that
-# drifts is always the copy guarding the deploy.
+# drifts is always the copy guarding what gets published.
 #
 # Five jobs rather than one, running concurrently. They are genuinely
 # independent — only `db` needs Postgres, only `db` needs ffmpeg — so serialising
