@@ -283,7 +283,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   act on, or confirm the existence of, a video the caller cannot see.
 - **My List** (explicit, per-user) and **curated rows** (admin-made, the same for everyone) are deliberately
   different things, and Continue Watching is neither — it falls out of `WatchProgress`. All three land on
-  the home page.
+  the home page, and all three are now **rows** (`CuratedList.source`) rather than two of them being
+  hardcoded above the third: the shelves every viewer sees first were the two an admin could not move.
 - Both list adds are idempotent by **catching the unique violation**, not by checking first: check-then-write
   is not atomic and a double-click lands inside the gap. The partial uniques are what enforce it.
 - `nextEpisode` (pure) picks the first **unfinished** episode — which also covers resuming a half-watched
@@ -295,6 +296,36 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   at all for a non-admin.
 - `DELETE /lists/:id/items/:itemId` is scoped to the list in the URL — an item id alone must not reach into
   another row.
+
+**Home-page rows** (`lists/sources/rank.ts` is pure; `computed.ts` is the IO around it)
+- A row is a **source, a kind, a limit and filters**. `MANUAL` reads its `ListItem`s; the computed sources
+  rank the library; `CONTINUE_WATCHING` and `MY_LIST` delegate to `WatchService.history` and
+  `WatchlistService.list` rather than restating either — both already resolve visibility on the nested video
+  and which episode a saved show would play.
+- A computed row applies `whereVisible(role)` **while scoring, before the limit**. A manual row can filter
+  afterwards because its pool is small and admin-chosen; a computed one cannot, or asking for ten returns
+  three because the other seven were drafts — which reads as an empty library rather than as a filter.
+- A video whose every collection is hidden from the caller is **dropped**, not shown. It is not standalone,
+  it is an episode of a show they cannot see, and offering it as though it were a film is the leak the
+  visibility rule exists to prevent. A video with **no** memberships is the different, ordinary case: that
+  is what a film is here, and `AUTO` shows it.
+- `AUTO` is the pairing `browse.vue` already shows — collections *and* standalone videos in one shelf. There
+  is no film/show flag to consult, so inventing a second rule for it would put two answers in the codebase.
+- An episode's score counts towards **every** collection it is in. `CollectionVideo` is many-to-many on
+  purpose, and there is no honest rule for picking one parent.
+- Scores **total** for views and take the **max** for recency. Summing timestamps would rank a long-running
+  show above a newer one for having more episodes, which is not what "recently added" means; a show *is* as
+  recent as its newest episode, which is why a new season resurfaces it.
+- `TRENDING` ranks on **seconds watched** in the window, not on plays. Counting distinct `playSessionId`s
+  needs a row per session and scores a bounce level with a film watched through.
+- Ties break on **id**. They are the norm rather than the exception — every entry in a fresh trending row
+  scores the same — and a shelf that reshuffles between requests reads as a rendering bug for weeks.
+- `ROW_SOURCE_SPECS` (in `packages/shared`) is the **one** table saying which settings a source reads, and
+  the create schema, the service and the admin form all read it. A form offering a field the endpoint
+  ignores is how those drift; a `windowDays` left on a row that stopped being TRENDING is the other half,
+  which is why changing source clears what the new one cannot read.
+- Items cannot be added to or reordered on a computed row — there is no items table behind one, so both
+  would appear to succeed while doing nothing.
 
 **Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
 - `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins
@@ -362,8 +393,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added
   `CHECK ((collectionId IS NULL) <> (videoId IS NULL))` in their migration. Regenerating the init migration
   drops them — re-append them.
-- Prisma cannot express **partial (filtered) unique indexes** either. `VideoRequest` needs a hand-added
-  `UNIQUE ("normalisedTitle") WHERE status IN ('NEW','SEEN','PROCESSING')`, and the same warning applies.
+- Prisma cannot express **partial (filtered) unique indexes** either, and there are now **two**. `VideoRequest`
+  needs `UNIQUE ("normalisedTitle") WHERE status IN ('NEW','SEEN','PROCESSING')`; `CuratedList` needs
+  `UNIQUE ("source") WHERE source IN ('CONTINUE_WATCHING','MY_LIST')`, which is what stops a second personal
+  row being the same shelf twice. The same warning applies to both — re-append them.
 - Prisma 7 differs from 6 in ways that bite: the connection URL lives in `prisma.config.ts`, **not** in the
   schema's datasource block; the client needs a driver adapter (`@prisma/adapter-pg`); and the generator
   emits **TypeScript**, not compiled JS.
