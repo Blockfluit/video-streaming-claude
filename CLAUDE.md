@@ -92,6 +92,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   correctly, works on every landscape file — which is most of a library — and then fails outright on a
   portrait one by asking for a crop wider than the source. Both dimensions must be capped by what the
   frame can supply. The `\,` are escaped for ffmpeg's filter parser, never for a shell.
+- A **trailer** is stored as the 11-character YouTube **id**, never the pasted URL, parsed by
+  `parseYoutubeId` in `packages/shared` so the form and the endpoint cannot disagree about what is
+  acceptable. Admins paste what is in their address bar — a watch URL with a playlist and a timestamp,
+  a `youtu.be` link, an embed URL — and interpolating whichever arrived into an iframe `src` gives a
+  player that silently shows nothing. Keeping the id also keeps the embed URL a *rendering* decision:
+  privacy host, autoplay, mute. The id pattern is **anchored**; a playlist id is 34 characters of the
+  same alphabet, so an unanchored match finds something id-shaped inside one and plays a video that
+  does not exist.
+- The hero's trailer starts **muted**, which is not a preference: a browser refuses to start an unmuted
+  video nobody asked for, and it fails *silently* — the iframe loads and sits there. It is suppressed
+  entirely under `prefers-reduced-motion`, and nothing is requested from YouTube until it starts. The
+  iframe must be `pointer-events-none`: an iframe swallows every click that lands on it, so without
+  that the Play button underneath stops working the moment the trailer fades in, and the page looks
+  perfectly fine while doing it.
 - **A collection's artwork is derived, not stored.** Its own `posterKey`/`bannerKey` are the *admin
   override*; null means "not overridden", and it then shows its **first video's** picture by
   `MEMBERSHIP_ORDER`, falling back to a stock image only when it holds nothing. Deriving on read is what
@@ -558,6 +572,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   blocks every poster served from :4000 in development.
 
 **Access control**
+- **A description is never required to publish.** It was, and it made the library unpublishable: ingest
+  cannot write a synopsis, so every episode needed a person to type one before *any* could go out — and
+  because a collection needs at least one publishable video, the collection was blocked too, reporting
+  a missing `videos` while plainly holding five. What is required is what a probe produces on its own:
+  a title, a real duration, a banner. Reported as "why can't I publish collections".
+- **`publishableVideoCount` has exactly one definition.** There were two and they disagreed: `publish()`
+  counted the videos that were *ready* while the read that draws the admin's checklist passed the
+  total, so the screen reported a collection ready and the button refused it. Both call the one helper
+  in `common/publishing.ts`, which also feeds the count the publish confirmation names — so the dialog
+  cannot promise something different from what happens. Already-published videos count, or
+  re-publishing a collection whose episodes went out individually reports an empty shelf.
+- `POST /collections/:id/publish?cascade=true` takes the collection's **ready** videos with it in one
+  transaction. That is what makes a freshly ingested show publishable without editing every episode.
+- **`update()` builds its `data` field by field**, never by spreading the DTO — so a column added later
+  cannot be written by anyone who guesses its name. The cost is that a *new* field is silently dropped
+  until it is added there too, and the PATCH still answers 200 with a response that looks right. That
+  happened with `trailerYoutubeId`; `library.db-spec.ts` now asserts the round trip rather than the
+  status code.
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
 - A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Use
   `narrowToVisibleStates(role, requested)` and spread it **last** in the `where`, so nothing can overwrite

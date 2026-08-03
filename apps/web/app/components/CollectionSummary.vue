@@ -48,6 +48,7 @@ const props = defineProps<{
     description: string | null
     year?: number | null
     posterKey?: string | null
+    trailerYoutubeId?: string | null
   }
   seasons: SummarySeason[]
   /** Every video in the collection, already ordered. */
@@ -191,6 +192,8 @@ const meta = computed(() => {
 const posterBroken = ref(false)
 watch(() => props.collection.id, () => { posterBroken.value = false })
 
+const { isAdmin } = useSession()
+
 const heading = computed(() => {
   if (!props.season) return props.collection.title
   return props.season.title || (props.season.number === null ? props.season.slug : `Season ${props.season.number}`)
@@ -199,7 +202,7 @@ const heading = computed(() => {
 
 <template>
   <div>
-    <HeroBackdrop :image="backdrop" size="tall">
+    <HeroBackdrop :image="backdrop" size="tall" :trailer-id="collection.trailerYoutubeId">
       <div class="rise flex flex-col gap-6 sm:flex-row sm:items-end">
         <!--
           Always drawn now, because there is always something to draw.
@@ -260,6 +263,20 @@ const heading = computed(() => {
                 {{ playLabel }}
               </UButton>
               <AddToListButton :collection-id="collection.id" label />
+              <!--
+                The same shortcut a video's page has. Without it, fixing a
+                collection's artwork means walking back through the admin library
+                to find the row you are already looking at.
+              -->
+              <UButton
+                v-if="isAdmin"
+                :to="`/admin/collections/${collection.slug}`"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-pencil"
+              >
+                Edit
+              </UButton>
             </div>
             <p v-if="playTarget && playSubtitle" class="text-sm text-(--ui-text-muted)">
               {{ playSubtitle }}

@@ -282,6 +282,7 @@ export class CollectionsService {
         year: dto.year,
         tags: dto.tags,
         posterKey: dto.posterKey,
+        trailerYoutubeId: dto.trailerYoutubeId,
         slug,
       },
       select: COLLECTION_SUMMARY,

@@ -33,6 +33,7 @@ interface VideoDetail {
   width: number | null
   height: number | null
   bannerKey?: string | null
+  trailerYoutubeId?: string | null
   collections: Membership[]
 }
 
@@ -140,7 +141,7 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
       title floating mid-screen with nothing under it. Where there *is* something
       below, it scrolls up from the bottom edge the ordinary way.
     -->
-    <HeroBackdrop :image="videoBanner(video)" size="full">
+    <HeroBackdrop :image="videoBanner(video)" size="full" :trailer-id="video.trailerYoutubeId">
       <div class="rise max-w-2xl space-y-4">
         <!--
           Every collection holding this video, not a guessed single parent. In

@@ -187,6 +187,10 @@ export class VideosService {
         ...titleUpdate(dto.title),
         description: dto.description,
         tags: dto.tags,
+        // `undefined` leaves it alone and `null` clears it, which is exactly
+        // what Prisma does with each — so the schema's "omitted vs explicitly
+        // empty" distinction survives all the way to the column.
+        trailerYoutubeId: dto.trailerYoutubeId,
         slug,
       },
       select: VIDEO_SELECT,

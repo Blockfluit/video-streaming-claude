@@ -25,6 +25,7 @@ interface ResolvedCollection {
   description: string | null
   year?: number | null
   posterKey?: string | null
+  trailerYoutubeId?: string | null
   state: string
 }
 
@@ -95,6 +96,7 @@ const collection = computed(() =>
 const { data: detail } = await useApiData<{
   year: number | null
   posterKey: string | null
+  trailerYoutubeId: string | null
   seasons: { id: string, slug: string, number: number | null, title: string | null }[]
   videos: {
     id: string
@@ -134,6 +136,9 @@ const collectionView = computed(() => ({
   description: collection.value.description ?? null,
   year: detail.value?.year ?? null,
   posterKey: detail.value?.posterKey ?? null,
+  // From the detail read, like the artwork: `resolve` answers "what is this
+  // URL" and does not carry the collection's whole record.
+  trailerYoutubeId: detail.value?.trailerYoutubeId ?? null,
 }))
 
 useHead(() => ({ title: collection.value?.title ?? 'Library' }))
