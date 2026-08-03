@@ -167,6 +167,8 @@ model Collection {
   /// is on it until somebody chooses one.
   posterKey   String?
   bannerKey   String?
+  /// A collection's own trailer, independent of its episodes'. See Video.
+  trailerYoutubeId String?
   /// `<drive>/<item>` for a collection ingest proposed from disk, null for one an
   /// admin made by hand. Nullable because a collection is a library idea, not a
   /// folder — Postgres treats NULLs as distinct, so any number may have none.
@@ -281,6 +283,11 @@ model Video {
   posterSource ArtworkSource @default(AUTO)
   bannerKey    String?
   bannerSource ArtworkSource @default(AUTO)
+
+  /// The 11-character YouTube id, never a URL. Parsed by `parseYoutubeId` at the
+  /// edge so the embed URL — privacy host, autoplay, mute — stays ours to choose
+  /// rather than frozen into whatever someone pasted.
+  trailerYoutubeId String?
 
   introStartSec Float? // all four markers are independently optional
   introEndSec   Float?

@@ -417,6 +417,66 @@ export class MediaService implements OnModuleDestroy {
   }
 }
 
+/**
+ * A collection's artwork override.
+ *
+ * Separate from the video methods above because a collection has **no file of
+ * its own** — there is nothing to seek into, so there is no capture, only an
+ * upload and a reset. And "reset" here means *go back to inheriting*, not
+ * "remove the picture": clearing the key returns the collection to its first
+ * video's artwork, which is what it showed before anyone overrode it.
+ */
+@Injectable()
+export class CollectionArtworkService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
+
+  async set(
+    collectionId: string,
+    image: Buffer,
+    extension: string,
+    shape: ArtworkShape,
+  ): Promise<string> {
+    const collection = await this.prisma.collection.findUnique({
+      where: { id: collectionId },
+      select: { id: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    // Under the collection's own id, so it cannot collide with a video's.
+    const key = `${artworkDirectory(shape)}/collection-${collection.id}.${extension}`;
+    await this.storage.save('derived', key, image);
+
+    await this.prisma.collection.update({
+      where: { id: collection.id },
+      data: shape === 'poster' ? { posterKey: key } : { bannerKey: key },
+    });
+
+    return key;
+  }
+
+  /** Drops the override. The collection goes back to its first video's picture. */
+  async clear(collectionId: string, shape: ArtworkShape): Promise<void> {
+    const collection = await this.prisma.collection.findUnique({
+      where: { id: collectionId },
+      select: { id: true, posterKey: true, bannerKey: true },
+    });
+    if (!collection) throw new NotFoundException('No such collection');
+
+    const existing = shape === 'poster' ? collection.posterKey : collection.bannerKey;
+    if (existing) {
+      await this.storage.delete('derived', existing);
+    }
+
+    await this.prisma.collection.update({
+      where: { id: collection.id },
+      data: shape === 'poster' ? { posterKey: null } : { bannerKey: null },
+    });
+  }
+}
+
 /** The update for "an admin chose this one", for whichever shape they chose. */
 function manual(shape: ArtworkShape, key: string) {
   return shape === 'poster'

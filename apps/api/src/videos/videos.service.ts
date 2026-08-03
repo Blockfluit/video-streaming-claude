@@ -75,6 +75,7 @@ const VIDEO_SELECT = {
   missingSince: true,
   bannerKey: true,
   bannerSource: true,
+  trailerYoutubeId: true,
   introStartSec: true,
   introEndSec: true,
   outroStartSec: true,
