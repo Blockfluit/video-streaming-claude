@@ -1,0 +1,131 @@
+# Build a branch of your choosing into dev images, and push them to GHCR.
+#
+# Manual only — there is no push trigger. GitHub's own "Use workflow from"
+# dropdown is the branch picker: the run checks out whatever ref you select,
+# which is why there is no input for it here.
+#
+# It stops at the registry. Nothing here touches the server: deploying is a
+# deliberate action taken in Portainer, described in deploy/README.md, which
+# also records why there is no webhook. The short version is that a Portainer
+# CE webhook redeploys a Git-backed stack only when the tracked *git ref* has
+# moved — and deploying a branch never moves `main`, so an automated call would
+# have reported success while changing nothing.
+
+name: Build dev images
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run the test suite first'
+        type: boolean
+        default: true
+      image_tag:
+        description: 'Environment tag to move (dev)'
+        type: string
+        default: dev
+
+concurrency:
+  # Two runs racing would push the same moving tag, and which build ends up
+  # under it would be down to timing. Queue instead of cancelling: a
+  # half-finished push is worse than a slow one.
+  group: build-dev
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: ${{ inputs.run_tests }}
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    needs: test
+    # `always()` so an intentionally skipped test job does not block the build,
+    # while a failing or cancelled one still does. Without it, skipping the
+    # tests would skip this job too.
+    if: ${{ always() && needs.test.result != 'failure' && needs.test.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve image names and tags
+        id: names
+        # GHCR rejects an uppercase path, and github.repository preserves the
+        # case of the owner as typed on GitHub.
+        #
+        # The version tag is short on purpose. It gets typed into Portainer's
+        # IMAGE_TAG by hand to pin or roll back, and a 40-character hex string
+        # is a thing you mistype. Derived from the input rather than hardcoded,
+        # so a `prd` run produces `prd` / `prd-1a28019` with no second workflow.
+        run: |
+          {
+            echo "registry=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "version=${{ inputs.image_tag }}-${GITHUB_SHA:0:7}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two tags every time: the moving environment one a stack follows by
+      # default, and an immutable one so a rollback has something to point at.
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: true
+          tags: |
+            ${{ steps.names.outputs.registry }}/api:${{ inputs.image_tag }}
+            ${{ steps.names.outputs.registry }}/api:${{ steps.names.outputs.version }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: true
+          # Baked into the Nitro bundle — see the route rule in nuxt.config.ts.
+          # It is why the compose file's API service must be named `api`.
+          build-args: |
+            NUXT_API_TARGET=http://api:4000
+          tags: |
+            ${{ steps.names.outputs.registry }}/web:${{ inputs.image_tag }}
+            ${{ steps.names.outputs.registry }}/web:${{ steps.names.outputs.version }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Summary
+        # This is how you know what to deploy. With a manual branch picker and
+        # a manual deploy, "what did I just build, and what do I type into
+        # Portainer?" is the question this answers.
+        #
+        # Deliberately no link to the site and no hostname. This repository is
+        # public, and on a public repository the run log *and* the job summary
+        # are readable by anyone without signing in — so anything printed here
+        # is published. Branch, commit and tags are already public in this repo;
+        # where the thing runs is not.
+        run: |
+          {
+            echo "### Pushed to GHCR"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
+            echo "| Commit | \`${GITHUB_SHA:0:12}\` |"
+            echo "| Moving tag | \`${{ inputs.image_tag }}\` |"
+            echo "| Pin this build | \`${{ steps.names.outputs.version }}\` |"
+            echo "| Tests | ${{ needs.test.result == 'skipped' && 'skipped' || needs.test.result }} |"
+            echo
+            echo "Not deployed. Update the stack in Portainer with **Re-pull image** ticked."
+          } >> "$GITHUB_STEP_SUMMARY"

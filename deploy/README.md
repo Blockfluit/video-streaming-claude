@@ -1,12 +1,17 @@
 # Deploying
 
-GitHub Actions builds two images and pushes them to GHCR; a Portainer stack webhook tells the server
-to pull them. Nothing deploys on its own — **Deploy to dev** is a button in the Actions tab, and its
-branch dropdown chooses what gets built.
+GitHub Actions builds two images and pushes them to GHCR. It stops there — **Build dev images** is a
+button in the Actions tab, its branch dropdown chooses what gets built, and putting a build on the
+server is a separate, deliberate action in Portainer.
 
 ```
-you pick a branch  ──▶  tests  ──▶  build api + web  ──▶  GHCR  ──▶  webhook  ──▶  Portainer pulls
+you pick a branch  ──▶  tests  ──▶  build api + web  ──▶  GHCR      ← the pipeline ends here
+                                                            │
+                                                    you, in Portainer  ──▶  running
 ```
+
+Nothing deploys on its own, and nothing claims to. [Step 4](#4-why-there-is-no-webhook) records why
+the automated last hop was removed rather than worked around.
 
 Traefik terminates TLS in front of both containers, and the browser only ever talks to `WEB_DOMAIN`.
 Traefik splits that hostname across the two containers:
@@ -105,93 +110,37 @@ using the host's CLI. Delete the whole `env_file:` block from the `api` service 
 optional tuning knobs, and everything the app cannot start without arrives by interpolation. This
 fails loudly at deploy time, so you will not be hunting it at runtime.
 
-### 4. The webhook
+### 4. Why there is no webhook
 
-On the stack, enable **GitOps updates** and set the mechanism to **Webhook** (not Polling — the
-pipeline pushes). That is the whole setup.
+There is no automated deploy, and the reason is worth keeping rather than rediscovering.
 
-**A webhook alone is not enough on CE, and the failure is silent.** Portainer redeploys a Git stack
-when the tracked ref has *moved*; if `main` is where it was, the POST returns `204` in ~20ms and
-nothing happens — no pull, no recreate, and the workflow reports success. The switch that would make
-it act on a changed *image* behind an unchanged ref is **Re-pull image**, and that one is Business
-Edition.
+**A Portainer CE webhook redeploys a Git-backed stack only when the tracked git ref has moved.**
+Against an unchanged ref it returns `204` in about twenty milliseconds and does nothing at all — no
+pull, no recreate — while the caller sees success. Measured in both directions: the one call that did
+replace both containers landed just after two pull requests were merged, so the stack's `ConfigHash`
+moved from `b604e95f` to `1a28019c` and the image pull came along with the *git* change. Every call
+afterwards, with the ref unchanged, left the same image id and the same start time five minutes later.
 
-This was measured, in both directions, because it is easy to conclude the opposite by accident. A
-deploy at 18:52 did replace both containers — but only because two PRs had been merged since the
-stack was created, so `ConfigHash` moved from `b604e95f` to `1a28019c` and the pull came along with
-the git change. Every call afterwards, with `main` unchanged, was a no-op: same image id, same start
-time, five minutes later. Passing `?IMAGE_TAG=…` makes no difference — variables-by-query belong to
-the *non-git* stack webhook, which the UI gates behind `"repository" !== method`.
+Neither query parameter helps. `?pullimage=true` and `?IMAGE_TAG=…` are both features of the
+**non-git** stack webhook, which the UI gates behind `"repository" !== method`; a Git stack ignores
+them silently. The switch that *would* make a Git stack act on a changed image behind an unchanged ref
+is **Re-pull image** under GitOps updates, and that one is Business Edition — its control carries
+`featureId: STACK_PULL_IMAGE`.
 
-**That makes the plain webhook wrong for this pipeline**, whose whole point is a branch picker:
-deploying a branch never moves `main`, so the server would never change. Even deploying `main` only
-works when `main` happens to have moved, and never re-ships a rebuilt image for the same commit.
+That is fatal for a branch-picker pipeline specifically: deploying a branch never moves `main`, so the
+server would never change while every run went green. **A deploy that reports success for work it did
+not do is worse than one that fails.** So the workflow stops at the registry, and the last step is
+yours.
 
-The fix is the endpoint behind the UI's own **Pull and redeploy** button, which is *not* gated:
+Two ways to automate it later, if it ever becomes worth the trade:
 
-```
-PUT /api/stacks/<id>/git/redeploy     with  {"pullImage": true, "env": [...], "prune": false}
-X-API-Key: <a Portainer access token — My account → Access tokens, a CE feature>
-```
-
-It pulls unconditionally, so it does not care whether git moved. Two things to get right: the
-request **replaces** the stack's environment, so read the stack first and hand its `Env` back
-untouched — omit it and `SESSION_SECRET` goes with it — and the Traefik route in front of Portainer
-has to allow that one path and method, not just the webhook prefix.
-
-After the first real deploy, check the container rather than the green tick:
-
-```sh
-docker inspect video-dev-api --format '{{.Image}} {{.State.StartedAt}}'
-```
-
-A changed image id and a fresh start time mean the redeploy actually replaced something.
-
-**The webhook does not exist until GitOps updates is enabled.** It is generated by that switch, so
-there is nothing to copy beforehand and no way to pre-register one. A stack with
-`"AutoUpdate": null` has no webhook at all, and every POST to a guessed or stale ID gets the same
-answer Portainer gives an unknown one:
-
-```json
-{"message":"Unable to find the stack by webhook ID","details":"Object not found inside the database"}
-```
-
-That message means *no such webhook*, not *wrong address* — if you are reading it, the URL, TLS,
-path and method were all fine and the request arrived. A routing problem looks different: Traefik's
-own 404 is `text/plain`, not JSON.
-
-**Portainer prints the URL with whatever address it was reached on**, which is usually the internal
-one. Replace the scheme and host with the public name and keep the path exactly — including no
-trailing slash, which Portainer's router rejects. Only the trailing UUID is yours:
-
-```
-https://<portainer hostname>/api/stacks/webhooks/<uuid>
-```
-
-Copy that into the repository's GitHub secrets as **`PORTAINER_WEBHOOK_DEV`**
-(*Settings → Secrets and variables → Actions → **Secrets** tab*).
-
-**It must be a secret, not a variable.** They sit next to each other on that page and the wrong one
-is quiet about it: `secrets.PORTAINER_WEBHOOK_DEV` reads a variable as the empty string, so curl
-exits 3 (*URL malformed*) without contacting anything, and the step's `env:` block shows a populated
-secret as `***` but a variable **verbatim** — in a log that, on a public repository, anyone can read
-without signing in. The URL is the credential: holding it is enough to redeploy the stack.
-
-If the webhook is behind a path-scoped Traefik router, note that **testing it in a browser cannot
-work** — a browser sends GET, the router matches `Method(POST)`, and you get a 404 that says nothing
-about whether the webhook is good. Use `curl -X POST`.
-
-**No hostname is committed, and none is printed.** `stack.env.example` ships placeholders under
-`example.com`; the real ones live only in the Portainer stack. Nothing in the pipeline needs them, so
-nothing carries them.
-
-That second half matters as much as the first: **this repository is public, and on a public
-repository the workflow log and the job summary are readable by anyone without signing in.** Storing
-a hostname in a repository variable does not make printing it private — it is the printing that
-publishes it. So the deploy summary reports branch, commit, tags and test result, all of which are
-public in this repo anyway, and no URL. Likewise the webhook step never lets curl's stderr reach the
-log, because a DNS failure would quote the Portainer host, and GitHub's secret redaction matches the
-whole URL rather than a fragment of it.
+- `PUT /api/stacks/<id>/git/redeploy` with `{"pullImage": true, "env": [...]}` and a Portainer access
+  token. This is the endpoint behind the UI's own **Pull and redeploy** button and is *not* gated.
+  Costs a token and a Traefik route into the Portainer API, and the request **replaces** the stack's
+  environment — read the stack first and hand `Env` back, or `SESSION_SECRET` goes with it.
+- Watchtower (the `nickfedor` fork; upstream `containrrr` is archived), scoped by label to these two
+  containers. Needs nothing exposed to the internet, but hands the Docker socket — root-equivalent —
+  to a third-party agent whose own README says it is not recommended outside a homelab.
 
 ### 5. Traefik
 
@@ -227,34 +176,68 @@ admin account exists mints a new one, so this is not a way to get locked out.
 
 ---
 
-## Deploying
+## Building
 
-**Actions → Deploy to dev → Run workflow.** Pick the branch from the dropdown — that is the branch
+**Actions → Build dev images → Run workflow.** Pick the branch from the dropdown — that is the branch
 picker; there is no separate input for it.
 
 | Input | Default | |
 |---|---|---|
 | `run_tests` | true | Untick to skip the suite for a hotfix. |
-| `image_tag` | `dev` | The moving tag the stack follows. Change it to build an image without deploying it. |
+| `image_tag` | `dev` | The environment tag to move. |
 
-Every run also pushes an immutable `sha-<commit>` tag, and writes what it built to the run summary.
+Each run pushes two tags per image, and writes both to the run summary:
 
-The branch dropdown only lists branches that already contain `.github/workflows/deploy-dev.yml`. A
-branch cut before this landed needs a rebase onto `main` before it can be deployed.
+| Tag | Example | |
+|---|---|---|
+| `<image_tag>` | `dev` | Moving. What the stack follows unless you pin it. |
+| `<image_tag>-<short sha>` | `dev-1a28019` | Immutable. Short enough to type into Portainer. |
 
-**The branch picks the code; `main` picks the compose file.** The workflow builds images from
-whatever branch you select, but the stack is a Git-backed one pinned to `refs/heads/main`, so that is
-where Portainer re-reads `deploy/compose.yml` from. A branch that changes a Traefik label, adds an
+The branch dropdown only lists branches that already contain `.github/workflows/build-dev.yml`. A
+branch cut before this landed needs a rebase onto `main` before it can be built.
+
+## Deploying
+
+The workflow stops at the registry — see [step 4](#4-why-there-is-no-webhook) for why. To put a build
+on the server:
+
+**Portainer → Stacks → `streaming-platform-dev` → Update the stack**, tick **Re-pull image**, Update.
+
+That button pulls unconditionally and is *not* feature-gated — unlike the *Re-pull image* switch under
+GitOps updates, which is the Business Edition one. It is the whole procedure when you are deploying
+the moving `dev` tag, because the tag has not changed and only the image behind it has.
+
+On the host instead, if you prefer:
+
+```sh
+docker compose -f /data/compose/<stack id>/deploy/compose.yml --env-file ... pull
+docker compose ... up -d
+```
+
+Prefer the button — Portainer knows where the stack's compose file and environment actually are, and
+that keeps its view of the stack and reality in agreement.
+
+**The branch picks the code; `main` picks the compose file.** The workflow builds images from whatever
+branch you select, but the stack is a Git-backed one pinned to `refs/heads/main`, so that is where
+Portainer re-reads `deploy/compose.yml` from. A branch that changes a Traefik label, adds an
 environment variable or edits the compose file at all does **not** take effect until it is merged —
 its *code* deploys, its *topology* does not. Code-only branches, which is nearly all of them, are
 unaffected. Pointing a second stack at a branch reference is the way to test a compose change without
 merging it.
 
+**Check it landed.** A redeploy that pulled nothing looks identical to one that did:
+
+```sh
+docker inspect streaming-platform-dev-api --format '{{.Image}} {{.State.StartedAt}}'
+```
+
+A changed image id and a fresh start time mean it actually replaced something.
+
 ### Rolling back
 
-Set `IMAGE_TAG` to the `sha-<commit>` you want in the stack's environment variables and redeploy.
-`docker image ls` on the server, or the GHCR package page, will list what is available. Unlike the
-moving tag, that one is a pin: nothing moves it, so the stack stays there until you set it back.
+Set `IMAGE_TAG` to the `dev-<short sha>` you want in the stack's environment variables and update the
+stack. The GHCR package page lists what is available, as does `docker image ls` on the server. Unlike
+the moving tag, that one is a pin: nothing moves it, so the stack stays there until you set it back.
 
 Note what a rollback does *not* undo: `prisma migrate deploy` has already run, and there is no
 down-migration. Rolling back past a schema change needs a restore, which is why the next section
@@ -277,8 +260,9 @@ with its own secrets, and named `video-prd` in Portainer so the volumes get thei
 `STACK_NAME` keeps the container names and Traefik routers distinct, and the two stacks share
 nothing — separate database container, separate volumes, separate storage.
 
-Then copy `deploy-dev.yml` to `deploy-prd.yml`, change the default `image_tag` to `prd` and the
-secret to `PORTAINER_WEBHOOK_PRD`.
+The build workflow needs no copy: run **Build dev images** with `image_tag` set to `prd`, and it
+pushes `prd` and `prd-<short sha>` — the tags are derived from the input, not hardcoded. Rename it if
+"dev" in the title becomes confusing.
 
 ## Known gaps
 
