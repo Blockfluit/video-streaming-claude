@@ -29,8 +29,7 @@ enum RowSource {
   MY_LIST           // per-user
 }
 
-/// AUTO rolls episodes up to their show, but a collection holding one video renders as
-/// that video — so a film card plays rather than landing on a collection page.
+/// AUTO is what browse.vue already shows: collections and standalone videos in one shelf.
 enum RowKind { AUTO  COLLECTIONS  VIDEOS }
 ```
 
@@ -64,10 +63,13 @@ Every dynamic source reduces to the same three steps: **score videos → roll up
 shape is what makes this testable rather than four bespoke queries.
 
 - `rank.ts` (**pure, spec first**) — `rollUpAndRank(rows, kind, limit)` over
-  `{ videoId, collectionId, score }[]`. `VIDEOS` keeps videos as they are; `COLLECTIONS`/`AUTO`
-  combine each collection's videos (sum for views, max for recency). Sorts by score desc then
-  **id asc** — score ties are the norm and a shelf that reshuffles between requests reads as a
-  rendering bug. This is where the "a show's episodes count towards the show" rule lives.
+  `{ videoId, collectionIds, score }[]`. A video belongs to any number of collections, so its
+  score counts towards **every** one it is in; `combine` is sum for views and max for recency.
+  `VIDEOS` rolls nothing up. `COLLECTIONS` drops standalone videos. `AUTO` ranks collections and
+  standalone videos together — the pairing `browse.vue` already shows, and the one that means
+  "shows roll up, films stay films" now that a film *is* a video in no collection.
+  Sorts by score desc then **id asc**: score ties are the norm and a shelf that reshuffles
+  between requests reads as a rendering bug.
 - `recent.ts` — `_max: { createdAt }` per video. A show that just got a new season *is* recently
   added; ordering collections by their own `createdAt` would bury it.
 - `viewed.ts` — `MOST_VIEWED` is `watchProgress.groupBy(['videoId'], _sum: { viewCount })`.
@@ -134,10 +136,16 @@ page down) and an explicit `aria-label` naming the job, not the mechanism.
   `CuratedList`, but then two independent orderings have to interleave into one home page and
   neither owns the answer. A `source` discriminator keeps one ordering, one `isVisible`, one
   admin screen.
-- **`AUTO` exists because every video lives in a collection.** There is no film/show flag in
-  this schema — a film is a collection holding one video. `AUTO` rolls episodes up to their show
-  and unwraps a one-video collection back to its video, so a film card plays instead of landing
-  on a collection page. `COLLECTIONS` and `VIDEOS` are the explicit overrides.
+- **`AUTO` follows `browse.vue`, it does not invent a rule.** A film here is a video belonging
+  to no collection, and browse already merges collections and standalone videos into one grid.
+  `AUTO` ranks the same two things together, which is what "shows roll up, films stay films"
+  means in this model. An earlier draft of this design had `AUTO` unwrapping a one-video
+  collection back to its video; that was written against a schema where every video had a
+  parent, and the case no longer exists.
+- **A video's score counts towards every collection it is in.** `CollectionVideo` is
+  many-to-many on purpose — the same episode can be episode 3 of a show and item 1 of a best-of
+  row — so an episode that is in two collections lifts both. Picking one parent would need a
+  rule for which, and there isn't an honest one.
 - **Personal rows are deletable and re-addable, capped at one each.** They behave like every
   other row rather than being a second class of row with the delete button missing; a second
   Continue Watching shelf is only ever a mistake, which is what the partial unique says.
