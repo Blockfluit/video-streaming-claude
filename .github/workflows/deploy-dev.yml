@@ -17,7 +17,11 @@ on:
         type: boolean
         default: true
       image_tag:
-        description: 'Moving tag the stack follows (leave as dev to deploy)'
+        # Not what the stack ends up running — that is always this run's
+        # immutable sha- tag, set on the stack by the webhook step below. This
+        # names the *moving* tag pushed alongside it, which exists so `:dev`
+        # means "the last thing deployed" for anyone pulling by hand.
+        description: 'Moving tag to push alongside the immutable one'
         type: string
         default: dev
 
@@ -101,19 +105,41 @@ jobs:
         # failed deploy would publish where Portainer lives. That is why curl's
         # stderr never reaches the log and the diagnosis is an exit code and an
         # HTTP status instead, which say what went wrong without saying where.
+        #
+        # The query parameter is what makes the redeploy actually deploy.
+        # Portainer applies variables passed to a webhook to the stack, merging
+        # rather than replacing — so this rewrites IMAGE_TAG and leaves
+        # SESSION_SECRET and the rest alone. Pointing the stack at *this run's*
+        # immutable tag means the image is one the host has never seen, so
+        # docker must pull it.
+        #
+        # Redeploying against the moving `dev` tag instead would need
+        # Portainer's "Re-pull image" switch, which is Business Edition only.
+        # Without it a plain redeploy re-runs `compose up` against a tag it
+        # already holds, changes nothing, and reports success — the failure
+        # mode is a green deploy that shipped nothing. An immutable tag needs
+        # no such switch, and pins the stack to a known commit as a bonus.
         env:
           WEBHOOK: ${{ secrets.PORTAINER_WEBHOOK_DEV }}
+          DEPLOY_TAG: sha-${{ github.sha }}
         run: |
+          # The webhook URL carries no query string today; appending blindly
+          # would corrupt it if that ever changes.
+          case "$WEBHOOK" in *\?*) sep='&' ;; *) sep='?' ;; esac
+          # Portainer answers only once the redeploy is done, and that includes
+          # pulling both images — minutes on a cold cache, not seconds.
           code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-                   --max-time 60 -X POST "$WEBHOOK" 2>/dev/null) || status=$?
+                   --max-time 600 -X POST "${WEBHOOK}${sep}IMAGE_TAG=${DEPLOY_TAG}" 2>/dev/null) || status=$?
           status=${status:-0}
           if [ "$status" -ne 0 ]; then
             echo "::error::Portainer webhook unreachable (curl exit $status). URL withheld — it is a secret, and its host would otherwise be published in this log."
             exit 1
           fi
           case "$code" in
-            2*) echo "Portainer accepted the redeploy (HTTP $code)." ;;
-            *)  echo "::error::Portainer rejected the redeploy (HTTP $code). Check the stack's webhook is still enabled."
+            2*) echo "Portainer redeployed the stack at ${DEPLOY_TAG} (HTTP $code)." ;;
+            404) echo "::error::Portainer has no webhook with that id (HTTP 404). The webhook is created by the stack's GitOps updates switch — a stack with it off has none, and an id from an earlier stack is dead."
+                 exit 1 ;;
+            *)  echo "::error::Portainer rejected the redeploy (HTTP $code)."
                 exit 1 ;;
           esac
 
@@ -135,6 +161,7 @@ jobs:
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
             echo "| Commit | \`${GITHUB_SHA:0:12}\` |"
-            echo "| Tags | \`${{ inputs.image_tag }}\`, \`sha-${GITHUB_SHA}\` |"
+            echo "| Stack is running | \`sha-${GITHUB_SHA}\` |"
+            echo "| Also pushed | \`${{ inputs.image_tag }}\` |"
             echo "| Tests | ${{ needs.test.result == 'skipped' && 'skipped' || needs.test.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
