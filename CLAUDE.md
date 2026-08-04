@@ -348,6 +348,66 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   while the popover is open leaves it stuck open with its own search box focused, so the next thing typed
   lands in the search field. A plain input with results under it has no popover to get stuck.
 
+**Imported metadata** (`metadata/tmdb.mapper.ts`, `crew-role.ts`, `diff.ts` are pure; the client is the seam)
+- **The source is TMDB, not IMDb.** IMDb has no public API and its terms forbid scraping. TMDB returns the
+  IMDb id for titles and people, so the deep-links still work and are sourced legitimately.
+- **Search, preview, apply, with a person in between.** That gate is the whole provenance story: there is
+  deliberately *no* per-field source column anywhere, because somebody looked at a diff and ticked boxes.
+  An importer that wrote on its own would need one on every column it touches.
+- The descriptive columns live on **both** `Collection` and `Video`. A film here is a video belonging to no
+  collection, so putting them only on the collection leaves half the library unable to carry any of them.
+  `Video.year` exists for the same reason and is editable by hand, not only by an import.
+- **A proposal with nothing to say about a field never empties it** (`diff.ts`). TMDB not knowing a tagline
+  is not a reason to delete the one somebody wrote, and without the rule, ticking everything on a
+  well-curated title empties half of it. The rule is enforced twice — in the diff and again at the write —
+  because the second is what a stale preview would otherwise get past.
+- The **title** is the one field never ticked by default. It is usually the first thing an admin fixes, and
+  a slug does not follow a rename, so an accepted rename leaves the shared link and the name disagreeing.
+- Any title an import writes goes through `titleUpdate()`, or `normalisedTitle` rots and the "already in the
+  library?" matching behind `/requests` silently stops seeing the row.
+- TMDB writes **`""`, not null**, for everything it does not know. `new Date('')` is an Invalid Date that
+  survives all the way into a column, and an empty tagline is a blank line under the title. Television also
+  renames the same ideas — `name`, `original_name`, `first_air_date` — so reading only the film spelling
+  gives a show with no title and no year and **no error**.
+- `vote_average` is `0` for anything nobody has rated. Stored, that is a confident "0.0 ★" on every obscure
+  title, so a rating with no votes behind it is dropped.
+- `crew-role.ts` matches **whole job strings, never substrings** — the same trap as release-tag stripping.
+  TMDB's crew is full of jobs *containing* a key one ("Assistant Director", "Second Unit Director", "Music
+  Editor", "Casting Director"), and a loose match puts the first assistant director's name at the top of
+  the panel. Everything unmapped becomes `OTHER` **and keeps its `jobTitle`**.
+- **Every cast and crew member is stored; the panel trims.** A person row that was never created can never
+  be searched for, and `GET /people/:slug` already returns a filmography. `MAX_CREDITS` is 500 and the whole
+  list arrives in one response, so collapsing is purely a rendering decision.
+- Because all but six jobs collapse to `OTHER`, a credit's identity is `(personId, role, jobTitle)`. On
+  `(personId, role)` alone somebody credited as Costume Designer on a show and Stunt Coordinator on an
+  episode **collides with themselves** and the show's credit vanishes from that episode — `mergeCredits`
+  keys on the job title for exactly this. Acting credits have none and key as they always did.
+- A re-import is **additive**: it never rewrites `Credit.position`, which is dragged into place by hand, and
+  never deletes a credit an admin added.
+- `PeopleService.resolveMany` exists because the per-row path cannot do this — `create` loads *every*
+  person's slug and probes for a duplicate name separately, so a 250-credit film is 500 queries and 250
+  full-table scans. It also adds each new slug to its own snapshot, or two people named the same in one
+  cast both take the same slug.
+- **A person's IMDb id is not returned with credits.** It is `/person/{id}/external_ids`, one request each,
+  so resolving eagerly costs 250 requests per film for links most people never click. They fill in behind
+  the read on the same in-memory queue `MediaService` uses for probes, and `imdbCheckedAt` records the ask
+  so somebody who genuinely has no id is not asked about on every page view.
+- `TmdbError` is an **`HttpException` (502), not a plain `Error`**. As a plain Error it became a 500
+  "Internal server error" and the one message an admin could act on never left the process. 502 because the
+  failure is upstream. (Shipped that way; caught the first time the page was opened in a browser.)
+- The **token never reaches a message or a log line**. A fetch failure can carry the request and the request
+  carries the token, so failures are described rather than interpolated — same reason `FfmpegError` drops
+  the command line.
+- Artwork goes in as `MANUAL`, reusing `ArtworkSource`, so the next reprobe cannot replace a real poster
+  with a frame grabbed 10% into the file. The preview *says* it would replace hand-chosen artwork rather
+  than skipping quietly.
+- Everything that talks to TMDB happens **before** any write. Holding a transaction open across a network
+  call ties a database connection to somebody else's latency.
+- Episodes are matched on `orderIndex` within a season. An episode with none is one ingest could not number,
+  and guessing would put the wrong synopsis on the wrong episode — it is left alone.
+- Genres are their own column, never `tags`. `tags` is curator-authored, and sharing one column means a
+  re-import cannot tell which entries it owns and may replace.
+
 **Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
 - `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins
   get the title, year, comment, status and admin note — hiding those would leave a page listing nothing —

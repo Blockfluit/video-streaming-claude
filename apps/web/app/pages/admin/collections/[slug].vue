@@ -34,6 +34,8 @@ interface VideoRow {
 
 interface CollectionDetail {
   id: string
+  /** Imported. Only read to say "re-import" rather than "find". */
+  tmdbId?: number | null
   slug: string
   title: string
   description: string | null
@@ -420,6 +422,14 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         {{ collection.state }}
       </UBadge>
       <div class="ml-auto flex gap-2">
+        <MetadataMatchModal
+          kind="collection"
+          :id="collection.id"
+          :title="collection.title"
+          :year="collection.year"
+          :matched-to="collection.tmdbId"
+          @applied="refresh"
+        />
         <UButton :to="`/c/${collection.slug}`" color="neutral" variant="subtle" icon="i-lucide-eye">
           View
         </UButton>

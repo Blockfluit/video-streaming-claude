@@ -65,3 +65,35 @@ export function videoPath(video: LinkableVideo): string {
 export function playPath(video: LinkableVideo): string {
   return `/watch/${video.slug}`
 }
+
+/**
+ * Out to IMDb.
+ *
+ * Two shapes, because IMDb numbers titles and people in different namespaces:
+ * `tt0133093` is a title and `nm0000158` is a person, and the paths that serve
+ * them are not interchangeable. The prefix is checked rather than trusted, so a
+ * person id that reached a title field renders no link at all instead of a link
+ * to nothing — the ids arrive from a third party, and a 404 on somebody else's
+ * site is not something this app can explain.
+ *
+ * Returns null when there is nothing to link to, which is the ordinary state of
+ * every title nobody has matched yet.
+ */
+export function imdbTitleUrl(imdbId: string | null | undefined): string | null {
+  return imdbUrl(imdbId, 'tt', 'title')
+}
+
+export function imdbPersonUrl(imdbId: string | null | undefined): string | null {
+  return imdbUrl(imdbId, 'nm', 'name')
+}
+
+function imdbUrl(imdbId: string | null | undefined, prefix: string, path: string): string | null {
+  if (typeof imdbId !== 'string') return null
+
+  const id = imdbId.trim()
+  // Anchored, and the digits are checked: an id-shaped fragment of something
+  // else is exactly what an unanchored match would accept.
+  if (!new RegExp(`^${prefix}\\d{4,}$`).test(id)) return null
+
+  return `https://www.imdb.com/${path}/${id}/`
+}

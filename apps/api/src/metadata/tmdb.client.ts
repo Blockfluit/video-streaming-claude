@@ -1,4 +1,10 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { TmdbType } from '@video/shared';
 
@@ -38,12 +44,23 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
  * body or a log aggregator. `FfmpegError` exists for the same reason: keep the
  * diagnosis, drop everything the reader cannot act on and should not see.
  */
-export class TmdbError extends Error {
+export class TmdbError extends HttpException {
+  /**
+   * An `HttpException`, not a plain `Error`.
+   *
+   * As a plain Error this became a 500 "Internal server error" and the message
+   * below — the one thing the admin could act on, such as "TMDB rejected the API
+   * token" — never left the process. Shipped that way and caught the first time
+   * the screen was opened in a browser with a bad token in the env.
+   *
+   * 502 rather than 500 because the failure is upstream: this server is fine and
+   * the one it asked is not, which is also what stops it reading as our bug.
+   */
   constructor(
     message: string,
-    readonly status?: number,
+    readonly upstreamStatus?: number,
   ) {
-    super(message);
+    super(message, HttpStatus.BAD_GATEWAY);
     this.name = 'TmdbError';
   }
 }

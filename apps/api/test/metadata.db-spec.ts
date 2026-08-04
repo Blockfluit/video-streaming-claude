@@ -10,7 +10,7 @@ import { AppModule } from '../src/app.module';
 import { SessionStoreService } from '../src/auth/session-store.service';
 import { bigIntReplacer } from '../src/common/json';
 import { MOVIE, SEASON, SERIES } from '../src/metadata/tmdb.fixtures';
-import { TmdbClient } from '../src/metadata/tmdb.client';
+import { TmdbClient, TmdbError } from '../src/metadata/tmdb.client';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -153,6 +153,28 @@ describe('Metadata import (real database)', () => {
     it('refuses a viewer', async () => {
       await viewer.get('/admin/metadata/search?title=Arrival').expect(403);
       await viewer.post(`/admin/metadata/videos/${videoId}/apply`).send({}).expect(403);
+    });
+
+    /**
+     * Shipped as a 500. `TmdbError` was a plain Error, so Nest rendered
+     * "Internal server error" and the one message the admin could act on never
+     * left the process — found the first time the screen was opened in a browser
+     * with a bad token in the env, which is what a browser check is for.
+     */
+    it('passes a provider failure on as a 502 that says what went wrong', async () => {
+      tmdbStub.searchTitles.mockRejectedValue(new TmdbError('TMDB rejected the API token.', 401));
+
+      const response = await admin.get('/admin/metadata/search?title=Arrival').expect(502);
+
+      expect(response.body.message).toBe('TMDB rejected the API token.');
+    });
+
+    it('never lets the token itself reach a response', async () => {
+      tmdbStub.searchTitles.mockRejectedValue(new TmdbError('TMDB could not be reached.'));
+
+      const response = await admin.get('/admin/metadata/search?title=Arrival').expect(502);
+
+      expect(JSON.stringify(response.body)).not.toContain('Bearer');
     });
 
     it('says so plainly when no token is configured, rather than failing oddly', async () => {

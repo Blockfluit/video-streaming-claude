@@ -49,6 +49,14 @@ const props = defineProps<{
     year?: number | null
     posterKey?: string | null
     trailerYoutubeId?: string | null
+    // Imported, and all optional: a collection nobody has matched carries none.
+    tagline?: string | null
+    genres?: string[]
+    certification?: string | null
+    imdbId?: string | null
+    tmdbRating?: number | null
+    seriesStatus?: string | null
+    seasonCount?: number | null
   }
   seasons: SummarySeason[]
   /** Every video in the collection, already ordered. */
@@ -188,6 +196,17 @@ const meta = computed(() => {
   return parts.join(' · ')
 })
 
+/**
+ * Whether the library is missing seasons the show actually has.
+ *
+ * Only when the two genuinely disagree — "2 of 2 seasons here" is noise, and a
+ * count TMDB does not know is not a gap.
+ */
+const missingSeasons = computed(() => {
+  const total = props.collection.seasonCount
+  return typeof total === 'number' && total > props.seasons.length && props.seasons.length > 0
+})
+
 /** Reset on navigation, or one missing poster hides every later one. */
 const posterBroken = ref(false)
 watch(() => props.collection.id, () => { posterBroken.value = false })
@@ -243,13 +262,50 @@ const heading = computed(() => {
             {{ collection.title }}
           </NuxtLink>
 
-          <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">{{ heading }}</h1>
+          <div class="flex items-center gap-3">
+            <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">{{ heading }}</h1>
+            <ImdbLink :imdb-id="collection.imdbId" :label="collection.title" />
+          </div>
 
-          <p v-if="meta" class="text-sm text-(--ui-text-muted)">{{ meta }}</p>
+          <p v-if="collection.tagline" class="text-balance italic text-(--ui-text-muted)">
+            {{ collection.tagline }}
+          </p>
+
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-(--ui-text-muted)">
+            <span v-if="meta">{{ meta }}</span>
+            <UBadge v-if="collection.certification" color="neutral" variant="outline">
+              {{ collection.certification }}
+            </UBadge>
+            <span v-if="collection.tmdbRating" class="inline-flex items-center gap-1">
+              <UIcon name="i-lucide-star" class="size-3.5" />
+              {{ collection.tmdbRating.toFixed(1) }}
+            </span>
+            <!--
+              What a private library actually wants to know: whether it holds the
+              whole show. Shown only when the two disagree, because "2 of 2
+              seasons" is noise on a complete one.
+            -->
+            <span v-if="missingSeasons">
+              {{ seasons.length }} of {{ collection.seasonCount }} seasons here
+            </span>
+            <span v-if="collection.seriesStatus">{{ collection.seriesStatus }}</span>
+          </div>
 
           <p v-if="collection.description" class="line-clamp-3 text-(--ui-text-toned)">
             {{ collection.description }}
           </p>
+
+          <div v-if="collection.genres?.length" class="flex flex-wrap gap-2">
+            <UBadge
+              v-for="genre in collection.genres"
+              :key="genre"
+              color="neutral"
+              variant="outline"
+              :to="`/browse?q=${encodeURIComponent(genre)}`"
+            >
+              {{ genre }}
+            </UBadge>
+          </div>
 
           <div class="space-y-2 pt-2">
             <div class="flex flex-wrap items-center gap-3">

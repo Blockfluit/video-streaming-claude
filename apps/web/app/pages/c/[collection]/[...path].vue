@@ -97,6 +97,13 @@ const { data: detail } = await useApiData<{
   year: number | null
   posterKey: string | null
   trailerYoutubeId: string | null
+  tagline: string | null
+  genres: string[]
+  certification: string | null
+  imdbId: string | null
+  tmdbRating: number | null
+  seriesStatus: string | null
+  seasonCount: number | null
   seasons: { id: string, slug: string, number: number | null, title: string | null }[]
   videos: {
     id: string
@@ -139,6 +146,14 @@ const collectionView = computed(() => ({
   // From the detail read, like the artwork: `resolve` answers "what is this
   // URL" and does not carry the collection's whole record.
   trailerYoutubeId: detail.value?.trailerYoutubeId ?? null,
+  // Imported metadata, from the same read and for the same reason.
+  tagline: detail.value?.tagline ?? null,
+  genres: detail.value?.genres ?? [],
+  certification: detail.value?.certification ?? null,
+  imdbId: detail.value?.imdbId ?? null,
+  tmdbRating: detail.value?.tmdbRating ?? null,
+  seriesStatus: detail.value?.seriesStatus ?? null,
+  seasonCount: detail.value?.seasonCount ?? null,
 }))
 
 useHead(() => ({ title: collection.value?.title ?? 'Library' }))

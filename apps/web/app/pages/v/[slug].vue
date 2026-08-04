@@ -35,6 +35,13 @@ interface VideoDetail {
   bannerKey?: string | null
   trailerYoutubeId?: string | null
   collections: Membership[]
+  // Imported, and all optional: a title nobody has matched carries none of it.
+  year?: number | null
+  tagline?: string | null
+  genres?: string[]
+  certification?: string | null
+  imdbId?: string | null
+  tmdbRating?: number | null
 }
 
 const route = useRoute()
@@ -165,11 +172,32 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
           </template>
         </p>
 
-        <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">{{ video.title }}</h1>
+        <div class="flex items-center gap-3">
+          <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">{{ video.title }}</h1>
+          <ImdbLink :imdb-id="video.imdbId" :label="video.title" />
+        </div>
+
+        <!-- One line, and only when there is one. Never a blank gap under the title. -->
+        <p v-if="video.tagline" class="max-w-xl text-balance italic text-(--ui-text-muted)">
+          {{ video.tagline }}
+        </p>
 
         <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-(--ui-text-muted)">
+          <span v-if="video.year">{{ video.year }}</span>
           <span v-if="metaLine">{{ metaLine }}</span>
           <QualityBadge :width="video.width" :height="video.height" />
+          <!--
+            An age rating reads as a rating, so it is bordered rather than filled:
+            a solid badge here competes with the quality badge beside it, and the
+            two say very different kinds of thing.
+          -->
+          <UBadge v-if="video.certification" color="neutral" variant="outline">
+            {{ video.certification }}
+          </UBadge>
+          <span v-if="video.tmdbRating" class="inline-flex items-center gap-1">
+            <UIcon name="i-lucide-star" class="size-3.5" />
+            {{ video.tmdbRating.toFixed(1) }}
+          </span>
           <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
             {{ video.state }}
           </UBadge>
@@ -209,6 +237,23 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
     </HeroBackdrop>
 
     <div class="page-shell relative z-1 -mt-4 space-y-8 pb-24">
+      <!--
+        Genres are imported and tags are curated, which is why they are separate
+        columns and separate rows. A genre links to a browse filter the same way
+        a tag does, so the distinction costs a reader nothing.
+      -->
+      <div v-if="video.genres?.length" class="flex flex-wrap gap-2">
+        <UBadge
+          v-for="genre in video.genres"
+          :key="genre"
+          color="neutral"
+          variant="outline"
+          :to="`/browse?q=${encodeURIComponent(genre)}`"
+        >
+          {{ genre }}
+        </UBadge>
+      </div>
+
       <div v-if="video.tags?.length" class="flex flex-wrap gap-2">
         <UBadge
           v-for="tag in video.tags"

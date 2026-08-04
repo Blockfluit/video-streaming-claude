@@ -10,6 +10,9 @@ definePageMeta({ layout: 'admin', middleware: 'admin' })
 
 interface VideoDetail {
   id: string
+  /** Imported. `tmdbId` is only read to say "re-import" rather than "find". */
+  year?: number | null
+  tmdbId?: number | null
   slug: string
   title: string
   description: string | null
@@ -262,6 +265,14 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
       </div>
 
       <div class="flex gap-2">
+        <MetadataMatchModal
+          kind="video"
+          :id="video.id"
+          :title="video.title"
+          :year="video.year"
+          :matched-to="video.tmdbId"
+          @applied="refresh"
+        />
         <UButton
           v-if="video.state !== 'PUBLISHED'"
           :disabled="(video.missingFields?.length ?? 0) > 0"
