@@ -225,11 +225,13 @@ body {
  * confident, fictional 2.97:1 for a pairing that is actually fine.
  */
 .offer-wipe {
+  /* Named once: the reduced-motion block below has to restate the duration. */
+  --offer-seconds: 5s;
   background-image: linear-gradient(to left, #a4a4b2 50%, transparent 50%);
   background-size: 200% 100%;
   background-position: 0 0;
   background-repeat: no-repeat;
-  animation: offer-wipe 7s linear forwards;
+  animation: offer-wipe var(--offer-seconds) linear forwards;
 }
 /* Reaching for a control should not be what makes it disappear. */
 .offer:hover .offer-wipe,
@@ -265,6 +267,6 @@ body {
    * motion this setting exists to suppress.
    */
   .offer-wipe {
-    animation-duration: 7s !important;
+    animation-duration: var(--offer-seconds) !important;
   }
 }
