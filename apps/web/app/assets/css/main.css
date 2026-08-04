@@ -199,6 +199,52 @@ body {
   animation: rise 460ms cubic-bezier(0.2, 0, 0.2, 1) both;
 }
 
+/**
+ * The start-over offer's timer, drawn rather than counted.
+ *
+ * Grey sweeps across the button from the right until it is fully covered, and
+ * then the button goes — the player listens for this animation ending rather
+ * than running a timeout of its own, so there is exactly one clock and pausing
+ * the sweep pauses the disappearance with it.
+ *
+ * A **background image**, not an overlay element. A positioned `::before`
+ * paints above in-flow content, so it would cover the label rather than pass
+ * behind it, and the label is a bare text node that cannot be given a
+ * `position` to lift it back out. A background image paints above the
+ * background colour and below every bit of content, which is the layer this
+ * wants, whatever `UButton` happens to render inside itself.
+ *
+ * `#a4a4b2` measures **7.2:1** against the button's own dark foreground, so the
+ * label stays clear of AA for the whole sweep. That pairing is the constraint:
+ * this colour sits on a light control, not on the page, so none of the tiers in
+ * `:root` describe it and `visible.spec.ts` cannot check it — it reads an
+ * element's computed background and never sees a background image.
+ *
+ * Measure it by painting on a canvas, never by parsing. Chromium reports that
+ * foreground as `oklch(...)`, and reading its three numbers as r/g/b returns a
+ * confident, fictional 2.97:1 for a pairing that is actually fine.
+ */
+.offer-wipe {
+  /* Named once: the reduced-motion block below has to restate the duration. */
+  --offer-seconds: 5s;
+  background-image: linear-gradient(to left, #a4a4b2 50%, transparent 50%);
+  background-size: 200% 100%;
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  animation: offer-wipe var(--offer-seconds) linear forwards;
+}
+/* Reaching for a control should not be what makes it disappear. */
+.offer:hover .offer-wipe,
+.offer:focus-within .offer-wipe {
+  animation-play-state: paused;
+}
+
+@keyframes offer-wipe {
+  to {
+    background-position: 100% 0;
+  }
+}
+
 /* Honour the setting. Vestibular disorders are not a preference. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -211,5 +257,16 @@ body {
   }
   .card-lift:hover {
     transform: none;
+  }
+  /*
+   * Exempt, because this animation is not decoration — it **is** the timer on
+   * the start-over offer, and the player hides that offer when it ends. Reset
+   * to 0.01ms like everything else, it would finish on the first frame and take
+   * the control away before anyone could press it, leaving no way to restart a
+   * video at all. A flat bar filling in a straight line is not the kind of
+   * motion this setting exists to suppress.
+   */
+  .offer-wipe {
+    animation-duration: var(--offer-seconds) !important;
   }
 }

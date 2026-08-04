@@ -508,6 +508,36 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
   silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
   the first character typed into a search box.
+- **A media event can fire before hydration too, and nothing replays it.** On a hard load the `<video>` and
+  its `<source>` are in the server-rendered HTML, so the browser starts fetching before Vue attaches
+  `@loadedmetadata` — the event lands on nothing. `VideoPlayer` therefore *asks* in `onMounted`
+  (`readyState >= 1`) as well as listening, and `onLoadedMetadata` is idempotent because both can happen on
+  one load. Without the ask, a refresh of `/watch/:slug` opens at 0:00 while clicking through to the same
+  page resumes correctly — and every test that reached the player by clicking a link walked past it.
+- **The player resumes; it does not offer to.** `resumePoint` (`app/utils/resume.ts`) is the one rule for
+  where playback opens, shared with `/v/:slug` so the second named on "Resume from 12:34" is the second it
+  lands on. The seek must set `lastTick`, or `onTimeUpdate`'s first delta credits the whole resume offset as
+  time watched. What is offered instead is **"Start from the beginning"**. Nothing announces the position in
+  words — the player's own timeline sits directly under the button already saying it.
+- **The offer's timer is the `offer-wipe` animation in `main.css`, not a `setTimeout`.** Grey sweeps across
+  the button and `@animationend` is what removes it, so there is one clock rather than two to drift apart,
+  and hover/`focus-within` pausing the sweep pauses the disappearance exactly with it. It is drawn as an
+  animated **background image**: a positioned `::before` paints above in-flow content, so it would cover the
+  label instead of passing behind it, and the label is a bare text node that cannot be given a `position` to
+  lift it back out.
+- **That animation is exempt from the `prefers-reduced-motion` reset**, and the exemption is load-bearing.
+  The blanket `animation-duration: 0.01ms` would end the sweep on its first frame and take the control with
+  it, leaving those viewers no way to restart a video at all. Removing the exemption as tidy-up reintroduces
+  exactly that.
+- The sweep's grey is measured against the **button's** foreground (7.2:1), not against the page, so none of
+  the `:root` tiers describe it. `visible.spec.ts` cannot check it either — it reads an element's computed
+  background and never sees a background image — so that pairing is verified by hand. Paint it on a canvas
+  to measure it: that foreground computes to `oklch(...)`, and parsing those three numbers as r/g/b reports
+  a confident 2.97:1 for a pairing that is really 7.2:1. The palette trap in `visible.spec.ts` is the same
+  one, and it catches people writing *new* checks, not just the old one.
+- Playback opening past 0:00 is now normal, so a test about anything *positioned* — intro markers, outro
+  markers — must anchor to where the player actually opened rather than assuming zero, and must assert
+  against the marker rather than against `> 0`, which a resumed video satisfies before the button is pressed.
 - **Never give a `USelect` an option whose value is `''`.** Reka UI reserves the empty string for "cleared"
   and throws during render — which takes the whole page down, not just the select. Use a sentinel.
 - `GET /videos/:id/subtitles` returns a `Page` like every other list endpoint. It returned a bare array
