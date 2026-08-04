@@ -326,6 +326,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   which is why changing source clears what the new one cannot read.
 - Items cannot be added to or reordered on a computed row — there is no items table behind one, so both
   would appear to succeed while doing nothing.
+- A hand-picked row is filled from `RowEntryPicker`, which **searches the server** over collections *and*
+  standalone videos — the same pairing `browse.vue` searches, and the same one `AUTO` means. It replaced a
+  `USelect` over `/collections?limit=100`, which could not reach entry 101 at all and offered no films
+  whatever, though `ListItem` has always had a column for one. It is deliberately **not** a `USelectMenu`
+  with its search term bound to a refetch: `CreditsEditor` records what that does — replacing the options
+  while the popover is open leaves it stuck open with its own search box focused, so the next thing typed
+  lands in the search field. A plain input with results under it has no popover to get stuck.
 
 **Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
 - `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins

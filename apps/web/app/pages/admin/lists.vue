@@ -27,6 +27,12 @@ interface RowItem {
   collection: { id: string, title: string } | null
 }
 
+/** What a hand-picked row already holds, so the picker stops offering it. */
+const presentIds = (row: HomeRow, kind: 'collection' | 'video'): string[] =>
+  row.items
+    .map(item => (kind === 'collection' ? item.collection?.id : item.video?.id))
+    .filter((id): id is string => Boolean(id))
+
 interface HomeRow {
   id: string
   slug: string
@@ -48,11 +54,6 @@ const { data, refresh } = await useApiData<Page<HomeRow>>(
   'admin-lists',
   '/lists?includeHidden=true&limit=100',
 )
-const { data: collections } = await useApiData<Page<{ id: string, title: string }>>(
-  'admin-lists-collections',
-  '/collections?limit=100',
-)
-
 const newTitle = ref('')
 const newSource = ref<RowSource>('MANUAL')
 
@@ -104,10 +105,15 @@ async function patch(row: HomeRow, body: Record<string, unknown>) {
   }
 }
 
-async function addItem(row: HomeRow, collectionId: string) {
-  if (!collectionId) return
-  await api(`/lists/${row.id}/items`, { method: 'POST', body: { collectionId } })
-  await refresh()
+/** The body is already `{ collectionId }` or `{ videoId }` — exactly one, as the API requires. */
+async function addItem(row: HomeRow, ref: { collectionId: string } | { videoId: string }) {
+  try {
+    await api(`/lists/${row.id}/items`, { method: 'POST', body: ref })
+    await refresh()
+  }
+  catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not add that.'), color: 'error' })
+  }
 }
 
 async function removeItem(row: HomeRow, item: RowItem) {
@@ -334,12 +340,11 @@ useHead({ title: 'Home page rows' })
         </ul>
         <p v-else class="mb-3 text-sm text-(--ui-text-muted)">Empty.</p>
 
-        <USelect
-          :items="(collections?.items ?? []).map(c => ({ label: c.title, value: c.id }))"
-          placeholder="Add a collection…"
-          :aria-label="`Add a collection to ${row.title}`"
-          class="w-64"
-          @update:model-value="(value: string) => addItem(row, value)"
+        <RowEntryPicker
+          :row-title="row.title"
+          :present-collection-ids="presentIds(row, 'collection')"
+          :present-video-ids="presentIds(row, 'video')"
+          @add="(ref) => addItem(row, ref)"
         />
       </template>
 
