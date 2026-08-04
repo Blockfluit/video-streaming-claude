@@ -32,18 +32,23 @@ import { ListsService } from './lists.service';
 export class ListsController {
   constructor(private readonly lists: ListsService) {}
 
-  /** The home page's rows, in order, each with the entries the caller may see. */
+  /**
+   * The home page's rows, in order, each with the entries the caller may see.
+   *
+   * The caller's id goes down with their role because the two personal sources
+   * resolve per viewer — every other source ignores it.
+   */
   @Get()
   list(
     @CurrentUser() user: AuthUser,
     @Query(validate(listCuratedListsSchema)) query: ListCuratedListsQuery,
   ) {
-    return this.lists.list(user.role, query);
+    return this.lists.list(user.id, user.role, query);
   }
 
   @Get(':slug')
   findBySlug(@Param('slug') slug: string, @CurrentUser() user: AuthUser) {
-    return this.lists.findBySlug(slug, user.role);
+    return this.lists.findBySlug(slug, user.id, user.role);
   }
 
   @Post()

@@ -495,6 +495,41 @@ model WatchlistItem {
 // Curated rows
 // ---------------------------------------------------------------------------
 
+/// Where a row's contents come from.
+///
+/// MANUAL is the original curated row: an admin picks entries one at a time and
+/// they are stored as ListItems. Everything else is computed per request from a
+/// rule, so the shelf keeps up with the library without anyone maintaining it.
+///
+/// CONTINUE_WATCHING and MY_LIST are per-*user* — the row is the same idea for
+/// everyone but resolves to different entries per caller. They were hardcoded
+/// blocks on the home page before this; making them rows is what lets an admin
+/// reorder or hide them alongside everything else.
+enum RowSource {
+  MANUAL
+  RECENTLY_ADDED
+  TRENDING // watched most inside a rolling window
+  MOST_VIEWED // all-time view count
+  CONTINUE_WATCHING
+  MY_LIST
+}
+
+/// What a row's cards are.
+///
+/// AUTO is what browse.vue already shows: collections *and* standalone videos,
+/// ranked together in one shelf. A film in this model is a video belonging to no
+/// collection, so that pairing is exactly "shows roll up, films stay films" —
+/// an episode's score counts towards every collection it is in, and a video with
+/// no collection stands as itself rather than vanishing.
+///
+/// COLLECTIONS drops standalone videos; VIDEOS ranks videos individually and
+/// rolls nothing up, which is the "recently added episodes" shelf.
+enum RowKind {
+  AUTO
+  COLLECTIONS
+  VIDEOS
+}
+
 model CuratedList {
   id          String     @id @default(cuid())
   slug        String     @unique
@@ -503,8 +538,33 @@ model CuratedList {
   position    Int        @default(0) // row order on the home page
   isVisible   Boolean    @default(true)
   items       ListItem[]
+
+  source RowSource @default(MANUAL)
+  kind   RowKind   @default(AUTO)
+  /// How many cards a computed row resolves to. Ignored by MANUAL, whose
+  /// contents are chosen rather than ranked and are bounded by
+  /// MAX_ITEMS_PER_LIST instead.
+  maxItems   Int       @default(20)
+  /// The rolling window TRENDING ranks over, in days. Null on every other
+  /// source — nothing else has a window, and storing a number nobody reads is
+  /// how a field ends up meaning two things.
+  windowDays Int?
+  /// Narrows the pool a computed row ranks over. Empty means no filter.
+  tags       String[]  @default([])
+
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+
+  /// Prisma cannot express the partial unique that stops a second personal row:
+  ///
+  ///     CREATE UNIQUE INDEX "CuratedList_personal_source_key"
+  ///       ON "CuratedList"("source")
+  ///       WHERE "source" IN ('CONTINUE_WATCHING', 'MY_LIST');
+  ///
+  /// Re-append it if this migration is ever regenerated, like the polymorphic
+  /// CHECKs and VideoRequest's open-request index. Two Continue Watching
+  /// shelves is not a configuration anyone wants, it is a double-click.
+  @@index([position])
 }
 
 model ListItem {
@@ -559,6 +619,9 @@ model WatchEvent {
 
   @@index([videoId, createdAt])
   @@index([playSessionId])
+  /// Trending scans a date range across every video at once. The composite
+  /// above leads on videoId, so it cannot serve that scan — this one can.
+  @@index([createdAt])
 }
 
 /// Structural problems found during ingest — recorded rather than silently dropped.

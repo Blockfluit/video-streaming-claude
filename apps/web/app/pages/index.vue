@@ -2,13 +2,13 @@
 import type { Page } from '@video/shared'
 
 /**
- * The home page: a hero, then Continue Watching, My List, and whatever rows an
- * admin has curated.
+ * The home page: a hero, then whatever rows an admin has configured, in order.
  *
- * The three shelves are deliberately different things. Continue Watching is
- * derived from watch progress and nobody chose it; My List is explicit and
- * personal; curated rows are the same for everyone. All are fetched in
- * parallel — one slow row must not hold up the others.
+ * Continue Watching and My List used to be hardcoded above the curated rows,
+ * which meant the two shelves every viewer sees first were the two an admin
+ * could not move, rename or hide. They are rows now like everything else — the
+ * API resolves each one from its source and this page renders what comes back,
+ * so there is one shelf-shaped thing here rather than three.
  */
 interface CardVideo {
   id: string
@@ -24,58 +24,64 @@ interface CardVideo {
   bannerKey?: string | null
 }
 
-interface HistoryItem {
-  video: CardVideo
-  progress: { lastPositionSec: number }
+interface CardCollection {
+  id: string
+  slug: string
+  title: string
+  year: number | null
+  posterKey?: string | null
 }
 
-interface SavedItem {
+/**
+ * One entry on a shelf. `progress` and `next` arrive only from the rows that
+ * have them — Continue Watching and My List — and every other row simply leaves
+ * them out, which is what lets one card renderer serve all of them.
+ */
+interface RowItem {
   id: string
   video: CardVideo | null
-  collection: { id: string, slug: string, title: string, year: number | null, posterKey?: string | null } | null
-  next: { id: string, video: CardVideo } | null
+  collection: CardCollection | null
+  next?: { id: string, video: CardVideo } | null
+  progress?: { lastPositionSec: number } | null
 }
 
-interface CuratedRow {
+interface HomeRow {
   id: string
   slug: string
   title: string
-  items: {
-    id: string
-    video: CardVideo | null
-    collection: { id: string, slug: string, title: string, year: number | null, posterKey?: string | null } | null
-  }[]
+  source: string
+  items: RowItem[]
 }
 
-interface FeaturedCollection {
-  id: string
-  slug: string
-  title: string
+interface FeaturedCollection extends CardCollection {
   description: string | null
-  year: number | null
-  posterKey: string | null
 }
 
-const [{ data: history }, { data: watchlist }, { data: rows }, { data: collections }] = await Promise.all([
-  useApiData<Page<HistoryItem>>('home-continue', '/me/history?completed=false&limit=20'),
-  useApiData<Page<SavedItem>>('home-watchlist', '/me/watchlist?limit=20'),
-  useApiData<Page<CuratedRow>>('home-rows', '/lists?limit=10'),
+const [{ data: rows }, { data: collections }] = await Promise.all([
+  useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20'),
   useApiData<Page<FeaturedCollection>>('home-featured', '/collections?limit=1'),
 ])
 
-const continueWatching = computed(() => history.value?.items ?? [])
-const saved = computed(() => watchlist.value?.items ?? [])
-// A row whose every entry is a draft comes back empty for a viewer; an empty
-// shelf with a heading is worse than no shelf.
-const curated = computed(() => (rows.value?.items ?? []).filter(row => row.items.length > 0))
+/**
+ * A row that resolves to nothing is not rendered.
+ *
+ * This matters more than it did: a computed row over an empty library, and a
+ * personal row for someone who has watched nothing, are both ordinary states on
+ * a new account. An empty shelf under a heading is worse than no shelf.
+ */
+const shelves = computed(() => (rows.value?.items ?? []).filter(row => row.items.length > 0))
 
 /**
  * The hero prefers something already started — the most likely thing you came
  * back for — and falls back to the first collection in the library.
+ *
+ * It reads the Continue Watching row rather than fetching history again, so
+ * hiding that row also stops the hero leading with a resume. That is the
+ * coherent reading of hiding it, not a side effect.
  */
 const hero = computed(() => {
-  const resuming = continueWatching.value[0]
-  if (resuming) {
+  const resuming = shelves.value.find(row => row.source === 'CONTINUE_WATCHING')?.items[0]
+  if (resuming?.video) {
     return {
       eyebrow: 'Continue watching',
       title: resuming.video.title,
@@ -85,7 +91,7 @@ const hero = computed(() => {
       // they want; a page describing it is a page they have read.
       to: playPath(resuming.video),
       image: videoBanner(resuming.video),
-      resume: progressPercent(resuming.progress.lastPositionSec, resuming.video.durationSec),
+      resume: progressPercent(resuming.progress?.lastPositionSec ?? 0, resuming.video.durationSec),
     }
   }
 
@@ -103,36 +109,39 @@ const hero = computed(() => {
   }
 })
 
-const isEmpty = computed(
-  () => continueWatching.value.length === 0
-    && saved.value.length === 0
-    && curated.value.length === 0
-    && hero.value === null,
-)
+const isEmpty = computed(() => shelves.value.length === 0 && hero.value === null)
 
-/** A saved or curated entry is one of two things, and every card asks the same questions. */
-function card(entry: { video: CardVideo | null, collection: SavedItem['collection'], next?: SavedItem['next'] }) {
+/** Where a shelf's "see all" arrow goes, for the two rows that have a page of their own. */
+const rowLink = (source: string): string | undefined =>
+  source === 'CONTINUE_WATCHING' ? '/history' : source === 'MY_LIST' ? '/my-list' : undefined
+
+/** An entry is a collection or a video, and every card asks the same questions. */
+function card(entry: RowItem) {
   if (entry.collection) {
     return {
-      // A saved show points at the episode it would play next, resolved
-      // server-side against this viewer's progress.
       to: collectionPath(entry.collection),
       title: entry.collection.title,
+      // A saved show names the episode it would play next, resolved
+      // server-side against this viewer's progress.
       subtitle: entry.next?.video.title ?? (entry.collection.year ? String(entry.collection.year) : null),
       imageUrl: collectionPoster(entry.collection),
       width: entry.next?.video.width ?? null,
       height: entry.next?.video.height ?? null,
+      progress: 0,
     }
   }
 
   const video = entry.video as CardVideo
   return {
-    to: videoPath(video),
+    // Something already started goes straight back into playback; anything
+    // else lands on the page that describes it first.
+    to: entry.progress ? playPath(video) : videoPath(video),
     title: video.title,
     subtitle: collectionTitle(video),
     imageUrl: videoPoster(video),
     width: video.width ?? null,
     height: video.height ?? null,
+    progress: progressPercent(entry.progress?.lastPositionSec ?? 0, video.durationSec),
   }
 }
 
@@ -179,42 +188,13 @@ useHead({ title: 'Home' })
       :class="hero ? 'relative z-1 -mt-16' : 'pt-24'"
     >
       <MediaRow
-        title="Continue watching"
-        :empty="continueWatching.length === 0"
-        to="/history"
-        class="rise"
-      >
-        <MediaCard
-          v-for="item in continueWatching"
-          :key="item.video.id"
-          class="w-56 sm:w-64"
-          :to="playPath(item.video)"
-          :title="item.video.title"
-          :subtitle="collectionTitle(item.video)"
-          :image-url="videoPoster(item.video)"
-          :width="item.video.width"
-          :height="item.video.height"
-          :progress="progressPercent(item.progress.lastPositionSec, item.video.durationSec)"
-        />
-      </MediaRow>
-
-      <MediaRow
-        title="My list"
-        :empty="saved.length === 0"
-        to="/my-list"
-        class="rise"
-        style="animation-delay: 80ms"
-      >
-        <MediaCard v-for="item in saved" :key="item.id" class="w-56 sm:w-64" v-bind="card(item)" />
-      </MediaRow>
-
-      <MediaRow
-        v-for="(row, index) in curated"
+        v-for="(row, index) in shelves"
         :key="row.id"
         :title="row.title"
         :empty="row.items.length === 0"
+        :to="rowLink(row.source)"
         class="rise"
-        :style="`animation-delay: ${160 + index * 80}ms`"
+        :style="`animation-delay: ${index * 80}ms`"
       >
         <MediaCard v-for="item in row.items" :key="item.id" class="w-56 sm:w-64" v-bind="card(item)" />
       </MediaRow>
