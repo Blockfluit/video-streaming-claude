@@ -503,11 +503,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - **The player resumes; it does not offer to.** `resumePoint` (`app/utils/resume.ts`) is the one rule for
   where playback opens, shared with `/v/:slug` so the second named on "Resume from 12:34" is the second it
   lands on. The seek must set `lastTick`, or `onTimeUpdate`'s first delta credits the whole resume offset as
-  time watched. What is offered instead is **"Start from the beginning"**, for `OFFER_SECONDS` of *playback*
-  — a wall-clock timer expires over the paused first frame while the viewer is still reading the page, since
-  nothing autoplays. Its `aria-label` deliberately shadows its visible text, to hold the accessible name
-  still while the countdown digit changes; that is the one place the `@nuxt/ui` shadowing rule is inverted
-  on purpose.
+  time watched. What is offered instead is **"Start from the beginning"**. Nothing announces the position in
+  words — the player's own timeline sits directly under the button already saying it.
+- **The offer's timer is the `offer-wipe` animation in `main.css`, not a `setTimeout`.** Grey sweeps across
+  the button and `@animationend` is what removes it, so there is one clock rather than two to drift apart,
+  and hover/`focus-within` pausing the sweep pauses the disappearance exactly with it. It is drawn as an
+  animated **background image**: a positioned `::before` paints above in-flow content, so it would cover the
+  label instead of passing behind it, and the label is a bare text node that cannot be given a `position` to
+  lift it back out.
+- **That animation is exempt from the `prefers-reduced-motion` reset**, and the exemption is load-bearing.
+  The blanket `animation-duration: 0.01ms` would end the sweep on its first frame and take the control with
+  it, leaving those viewers no way to restart a video at all. Removing the exemption as tidy-up reintroduces
+  exactly that.
+- The sweep's grey is measured against the **button's** foreground (7.2:1), not against the page, so none of
+  the `:root` tiers describe it. `visible.spec.ts` cannot check it either — it reads an element's computed
+  background and never sees a background image — so that pairing is verified by hand. Paint it on a canvas
+  to measure it: that foreground computes to `oklch(...)`, and parsing those three numbers as r/g/b reports
+  a confident 2.97:1 for a pairing that is really 7.2:1. The palette trap in `visible.spec.ts` is the same
+  one, and it catches people writing *new* checks, not just the old one.
 - Playback opening past 0:00 is now normal, so a test about anything *positioned* — intro markers, outro
   markers — must anchor to where the player actually opened rather than assuming zero, and must assert
   against the marker rather than against `> 0`, which a resumed video satisfies before the button is pressed.

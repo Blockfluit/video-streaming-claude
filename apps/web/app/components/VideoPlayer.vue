@@ -52,29 +52,18 @@ const { data: stats } = await useApiData<{ mine: { lastPositionSec: number } | n
 const currentTime = ref(0)
 
 /**
- * How long the offer to start over stands, in **seconds of playback**.
+ * Whether the offer to start over is on screen.
  *
- * Not wall-clock seconds. The player does not autoplay, so a timer running from
- * the moment the offer appears expires over a paused first frame while the
- * viewer is still reading the page — and a control that disappears as you reach
- * for it is worse than one that was never there.
+ * How long it stands for is **not** decided here: the `offer-wipe` animation in
+ * `main.css` is the timer, and `@animationend` is what clears this. One clock,
+ * in one place — a `setTimeout` beside it would be a second one to drift from,
+ * and pausing the sweep on hover would not pause it.
  */
-const OFFER_SECONDS = 5
-
-/**
- * Where playback was resumed to, and `null` once the offer to start over is
- * gone. This is the *outcome* of the resume rather than a proposal: by the time
- * it is set the video is already sitting at that second.
- */
-const resumedAt = ref<number | null>(null)
-const secondsLeft = ref(OFFER_SECONDS)
-/** Held open while the pointer or the keyboard focus is on the offer. */
-const offerHeld = ref(false)
+const showStartOver = ref(false)
 
 let pendingDelta = 0
 let lastTick = 0
 let beatTimer: ReturnType<typeof setInterval> | undefined
-let offerTimer: ReturnType<typeof setInterval> | undefined
 /** One resume per load, from whichever of the two entry points arrives first. */
 let resumeApplied = false
 
@@ -172,30 +161,11 @@ function onLoadedMetadata() {
   currentTime.value = point
   emit('timeupdate', point)
 
-  resumedAt.value = point
-  startOfferCountdown()
-}
-
-/**
- * Ticks once a second, but only while the video is actually advancing and the
- * offer is not being pointed at. Paused, buffering or hovered, it holds.
- */
-function startOfferCountdown() {
-  secondsLeft.value = OFFER_SECONDS
-  clearInterval(offerTimer)
-  offerTimer = setInterval(() => {
-    const el = video.value
-    if (!el || el.paused || offerHeld.value) return
-
-    secondsLeft.value -= 1
-    if (secondsLeft.value <= 0) dismissOffer()
-  }, 1000)
+  showStartOver.value = true
 }
 
 function dismissOffer() {
-  clearInterval(offerTimer)
-  offerTimer = undefined
-  resumedAt.value = null
+  showStartOver.value = false
 }
 
 /**
@@ -274,7 +244,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearInterval(beatTimer)
-  clearInterval(offerTimer)
   document.removeEventListener('visibilitychange', onVisibility)
   beat(true)
 })
@@ -307,9 +276,13 @@ onBeforeUnmount(() => {
     </video>
 
     <!--
-      Taken rather than offered — and then said out loud, because jumping
-      silently into the middle of something is disorienting. The chip names the
-      second it landed on; the button is the way back out of it.
+      Taken rather than offered: the way back out of the jump, for as long as
+      the sweep across the button lasts. Nothing here names the second it landed
+      on — the player's own timeline is directly underneath, already saying it.
+
+      `@animationend` bubbles up from the button doing the sweeping, so the
+      offer's lifetime is whatever `main.css` says it is and nothing in this
+      component has to agree with it separately.
     -->
     <Transition
       enter-active-class="transition duration-300"
@@ -318,56 +291,33 @@ onBeforeUnmount(() => {
       leave-to-class="opacity-0"
     >
       <div
-        v-if="resumedAt !== null"
-        class="absolute bottom-20 left-4 flex flex-col items-start gap-2"
-        @mouseenter="offerHeld = true"
-        @mouseleave="offerHeld = false"
-        @focusin="offerHeld = true"
-        @focusout="offerHeld = false"
+        v-if="showStartOver"
+        class="offer absolute bottom-20 left-4 flex items-center gap-2"
+        @animationend="dismissOffer"
       >
-        <p
-          class="rounded-full bg-(--ui-bg-elevated) px-3 py-1 text-sm text-(--ui-text-muted) ring-1 ring-(--ui-border)"
+        <!--
+          Neutral, not accent: playing is the default now, so there is no call
+          to action on this screen for accent colour to mark. No `aria-label` —
+          the visible text is the accessible name, which is how it should be.
+        -->
+        <UButton
+          size="lg"
+          color="neutral"
+          variant="solid"
+          icon="i-lucide-rotate-ccw"
+          class="offer-wipe"
+          @click="startOver"
         >
-          Resumed at {{ timecode(resumedAt) }}
-        </p>
-        <div class="flex items-center gap-2">
-          <!--
-            Neutral, not accent: playing is the default now, so there is no call
-            to action on this screen for accent colour to mark.
-
-            The explicit `aria-label` shadows the visible text, which is usually
-            the bug worth catching. Here it is the point — it keeps the
-            accessible name still while the digit beside it changes every
-            second, and it stays a prefix of what is on screen.
-          -->
-          <UButton
-            size="lg"
-            color="neutral"
-            variant="solid"
-            icon="i-lucide-rotate-ccw"
-            aria-label="Start from the beginning"
-            @click="startOver"
-          >
-            Start from the beginning
-            <!--
-              No colour of its own. The five text tiers are measured against the
-              page, and this sits on a light neutral button — `--ui-text-muted`
-              there is a mid grey on near-white, well under AA. Inheriting is
-              the only value guaranteed to suit whatever surface the button
-              renders as; `tabular-nums` is what stops the label shifting as the
-              digit changes.
-            -->
-            <span aria-hidden="true" class="tabular-nums font-normal">{{ secondsLeft }}</span>
-          </UButton>
-          <UButton
-            size="lg"
-            color="neutral"
-            variant="solid"
-            icon="i-lucide-x"
-            aria-label="Dismiss"
-            @click="dismissOffer"
-          />
-        </div>
+          Start from the beginning
+        </UButton>
+        <UButton
+          size="lg"
+          color="neutral"
+          variant="solid"
+          icon="i-lucide-x"
+          aria-label="Dismiss"
+          @click="dismissOffer"
+        />
       </div>
     </Transition>
 

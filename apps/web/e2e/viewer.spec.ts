@@ -176,10 +176,6 @@ test.describe('viewer', () => {
 
       // The whole change, in one assertion.
       await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
-      // Unanchored on purpose: a regex passed to `getByText` is matched against
-      // the raw text content, newlines and template indentation included, so a
-      // `^` here never matches an element that renders across several lines.
-      await expect(page.getByText(/Resumed at \d/)).toBeVisible()
 
       /*
        * And again on a hard load, which is a different path and was a real bug.
@@ -189,14 +185,24 @@ test.describe('viewer', () => {
        * is in the server-rendered markup and the browser starts fetching before
        * Vue hydrates — so the event fires into nothing and the resume was
        * silently skipped. Reloading here is the only assertion that can tell.
+       *
+       * It goes *before* the offer is pressed, not after: pressing it seeks to
+       * zero, and the closing beat this reload fires would write that zero over
+       * the progress the test seeded, leaving nothing to resume to.
        */
       await page.reload()
       await withMetadata(page)
       await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
 
-      // Asserted while paused deliberately: the countdown runs on playback, so
-      // there is no five-second race here for a slow machine to lose.
+      /*
+       * Hover first, and not for the sake of it: the offer now stands for seven
+       * wall-clock seconds whether or not anything is playing, so a slow machine
+       * could lose the race to the assertions below. Hovering pauses the sweep
+       * that times it — which freezes the offer for the rest of the test and
+       * covers that pause behaviour at the same time.
+       */
       const startOver = page.getByRole('button', { name: 'Start from the beginning' })
+      await startOver.hover()
       await expect(startOver).toBeVisible()
 
       await startOver.click()
