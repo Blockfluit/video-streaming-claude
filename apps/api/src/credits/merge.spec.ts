@@ -15,7 +15,16 @@ const credit = (
     role,
     characterName: null,
     position: 0,
-    person: { id: `p-${name}`, slug: name.toLowerCase(), name, photoKey: null },
+    jobTitle: null,
+    department: null,
+    person: {
+      id: `p-${name}`,
+      slug: name.toLowerCase(),
+      name,
+      photoKey: null,
+      imdbId: null,
+      knownFor: null,
+    },
     ...overrides,
   };
 };
@@ -76,6 +85,33 @@ describe('mergeCredits', () => {
       const merged = mergeCredits([credit('Ada', 'ACTOR')], [credit('Ada', 'DIRECTOR')]);
 
       expect(merged).toHaveLength(2);
+    });
+
+    // An import stores every crew member, and all but six jobs become OTHER. So
+    // one person doing two different jobs is the ordinary case rather than the
+    // exotic one, and on `personId:role` alone they collide with themselves —
+    // the series' credit vanishes from the episode that has the other.
+    it('keeps both OTHER credits when the same person did two different jobs', () => {
+      const merged = mergeCredits(
+        [credit('Ada', 'OTHER', { jobTitle: 'Costume Designer' })],
+        [credit('Ada', 'OTHER', { jobTitle: 'Stunt Coordinator' })],
+      );
+
+      expect(merged).toHaveLength(2);
+      expect(merged.map((entry) => entry.jobTitle)).toEqual([
+        'Costume Designer',
+        'Stunt Coordinator',
+      ]);
+    });
+
+    it('still lets an episode replace the series’ credit for the same job', () => {
+      const merged = mergeCredits(
+        [credit('Ada', 'OTHER', { jobTitle: 'Costume Designer' })],
+        [credit('Ada', 'OTHER', { jobTitle: 'Costume Designer' })],
+      );
+
+      expect(merged).toHaveLength(1);
+      expect(merged[0]!.inherited).toBe(false);
     });
   });
 

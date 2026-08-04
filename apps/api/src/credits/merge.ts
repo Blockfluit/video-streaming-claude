@@ -17,7 +17,21 @@ export interface MergeableCredit {
   characterName: string | null;
   /** Billing order within a role. */
   position: number;
-  person: { id: string; slug: string; name: string; photoKey: string | null };
+  /**
+   * TMDB's raw job, where there is one. Part of a credit's identity rather than
+   * decoration: all but six jobs collapse to `OTHER`, so two genuinely different
+   * crew credits for one person are distinguishable only by this.
+   */
+  jobTitle: string | null;
+  department: string | null;
+  person: {
+    id: string;
+    slug: string;
+    name: string;
+    photoKey: string | null;
+    imdbId: string | null;
+    knownFor: string | null;
+  };
 }
 
 export interface MergedCredit extends MergeableCredit {
@@ -64,4 +78,16 @@ export function mergeCredits(
   );
 }
 
-const key = (credit: MergeableCredit): string => `${credit.personId}:${credit.role}`;
+/**
+ * What makes two credits *the same credit*, so that an episode's replaces the
+ * show's rather than joining it.
+ *
+ * `jobTitle` is in the key, and has to be. An import stores every crew member,
+ * and all but six jobs map to `OTHER` — so on `personId:role` alone, one person
+ * credited on the show as Costume Designer and on an episode as Stunt
+ * Coordinator collides with themselves, and the show's credit disappears from
+ * that episode's panel. Acting credits have no job title, which leaves them
+ * keyed exactly as they were.
+ */
+const key = (credit: MergeableCredit): string =>
+  `${credit.personId}:${credit.role}:${credit.jobTitle ?? ''}`;

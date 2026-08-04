@@ -55,7 +55,22 @@ const VIDEO_SELECT = {
   },
   title: true,
   description: true,
+  year: true,
   tags: true,
+  // Imported metadata. `tmdbId`/`tmdbType` come back so the admin screen can show
+  // a title as already matched rather than offering to match it again.
+  tmdbId: true,
+  tmdbType: true,
+  imdbId: true,
+  genres: true,
+  tagline: true,
+  originalTitle: true,
+  originalLanguage: true,
+  releaseDate: true,
+  certification: true,
+  tmdbRating: true,
+  tmdbVoteCount: true,
+  metadataUpdatedAt: true,
   state: true,
   origin: true,
   storageKey: true,
@@ -186,6 +201,7 @@ export class VideosService {
         // Carries normalisedTitle with it — see common/title.ts.
         ...titleUpdate(dto.title),
         description: dto.description,
+        year: dto.year,
         tags: dto.tags,
         // `undefined` leaves it alone and `null` clears it, which is exactly
         // what Prisma does with each — so the schema's "omitted vs explicitly

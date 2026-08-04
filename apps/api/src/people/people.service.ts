@@ -18,6 +18,11 @@ const PERSON_SELECT = {
   name: true,
   bio: true,
   photoKey: true,
+  // What an imported person carries: an id to link out by, and one word about
+  // what they do. Everything else about them is IMDb's page, not a copy of it.
+  imdbId: true,
+  knownFor: true,
+  tmdbId: true,
   createdAt: true,
   updatedAt: true,
 } as const;

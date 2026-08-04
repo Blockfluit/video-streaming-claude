@@ -23,6 +23,7 @@ export * from './schemas/auth.js';
 export * from './schemas/comments.js';
 export * from './schemas/library.js';
 export * from './schemas/lists.js';
+export * from './schemas/metadata.js';
 export * from './schemas/people.js';
 export * from './schemas/requests.js';
 export * from './schemas/watch.js';

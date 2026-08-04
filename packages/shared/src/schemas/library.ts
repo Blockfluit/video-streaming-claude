@@ -130,6 +130,11 @@ export type ListVideosQuery = z.infer<typeof listVideosSchema>;
 export const updateVideoSchema = z.object({
   title: nonEmptyText(300).optional(),
   description: optionalText(10000),
+  /**
+   * A film here is a video belonging to no collection, so a video needs a year
+   * of its own — `Collection.year` cannot answer for one that has no collection.
+   */
+  year: yearSchema.optional(),
   tags: tagsSchema.optional(),
   trailerYoutubeId: trailerField,
   regenerateSlug,
