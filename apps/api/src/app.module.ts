@@ -11,6 +11,8 @@ import { CommonModule } from './common/common.module';
 import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
+import { MetadataModule } from './metadata/metadata.module';
+import { TmdbModule } from './metadata/tmdb.module';
 import { ListsModule } from './lists/lists.module';
 import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
@@ -35,6 +37,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     PrismaModule,
     CommonModule,
     MediaModule,
+    TmdbModule,
     AuthModule,
     InvitesModule,
     UsersModule,
@@ -51,6 +54,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     WatchlistModule,
     ListsModule,
     RequestsModule,
+    MetadataModule,
   ],
   controllers: [AppController],
   providers: [
