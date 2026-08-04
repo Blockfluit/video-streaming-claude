@@ -81,7 +81,7 @@ const otherVideos = computed(() =>
 
 /**
  * Where this viewer got to, which decides whether the button says Play or
- * Resume. The player asks for the same thing to offer a resume once metadata
+ * Resume. The player asks for the same thing again and seeks there once metadata
  * arrives; asking here as well is what lets the button name a time before anyone
  * has committed to loading a stream.
  */
@@ -91,12 +91,13 @@ const { data: stats } = await useApiData<{ mine: { lastPositionSec: number } | n
   { watch: [() => video.value?.id], immediate: !!video.value },
 )
 
-/** Under 5s in is not worth resuming; that is where the player draws it too. */
-const resumeAt = computed(() => {
-  const position = stats.value?.mine?.lastPositionSec ?? 0
-  const duration = video.value?.durationSec ?? 0
-  return position > 5 && duration > 0 && position < duration * 0.95 ? position : null
-})
+/**
+ * The same predicate the player seeks by, so the second named on this button is
+ * the second playback actually opens at.
+ */
+const resumeAt = computed(() =>
+  resumePoint(stats.value?.mine?.lastPositionSec, video.value?.durationSec),
+)
 
 /**
  * `S1 E3`, from where this video sits in the collection being shown.

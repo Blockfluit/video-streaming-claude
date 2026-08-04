@@ -117,6 +117,93 @@ test.describe('viewer', () => {
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
   })
 
+  /**
+   * The button that says Resume resumes.
+   *
+   * Driven from `/v/:slug` rather than by reloading the player, and that is not
+   * a stylistic choice: the player fires a closing beat on `pagehide`, so a
+   * reload from a player parked at 0:00 writes that 0:00 over the progress this
+   * test just seeded, and the assertion then measures the teardown instead of
+   * the feature. The description page carries no player, so nothing overwrites
+   * anything — and pressing Play there is the journey being claimed anyway.
+   */
+  test('pressing Resume opens where it was left, and the offer returns to the start',
+    async ({ page }) => {
+      const path = await aVideoPage(page)
+      const slug = path.split('/').pop()!
+      const detail = await page.evaluate(
+        async (s) => (await (await fetch(`/api/videos/by-slug/${s}`)).json()) as {
+          id: string
+          durationSec: number | null
+        },
+        slug,
+      )
+
+      // A third of the way in, whatever the runtime. A fixed offset lands past
+      // the 95% mark on a short clip, where starting over is the correct answer
+      // — so the test would be asserting the opposite of what it means to.
+      const duration = detail.durationSec ?? 0
+      const seeded = Math.max(6, duration / 3)
+      // Decided from the data, not from the DOM: a clip too short to hold a
+      // resume point at all has nothing to say about resuming.
+      test.skip(
+        !(duration > 0) || seeded >= duration * 0.95,
+        `the sample clip runs ${duration}s, too short to hold a resume point`,
+      )
+
+      await page.evaluate(
+        async ({ id, positionSec }) => {
+          await fetch(`/api/videos/${id}/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playSessionId: crypto.randomUUID(),
+              positionSec,
+              deltaSec: 1,
+            }),
+          })
+        },
+        { id: detail.id, positionSec: seeded },
+      )
+
+      await visit(page, path)
+      await page.getByRole('link', { name: /^Resume from/ }).click()
+      await page.waitForURL(/\/watch\//)
+      await withMetadata(page)
+
+      const currentTime = () =>
+        page.locator('video').evaluate((el: HTMLVideoElement) => el.currentTime)
+
+      // The whole change, in one assertion.
+      await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
+      // Unanchored on purpose: a regex passed to `getByText` is matched against
+      // the raw text content, newlines and template indentation included, so a
+      // `^` here never matches an element that renders across several lines.
+      await expect(page.getByText(/Resumed at \d/)).toBeVisible()
+
+      /*
+       * And again on a hard load, which is a different path and was a real bug.
+       *
+       * Arriving by clicking a link, the player is created client-side and
+       * cannot miss `loadedmetadata`. Arriving by loading the URL, the `<video>`
+       * is in the server-rendered markup and the browser starts fetching before
+       * Vue hydrates — so the event fires into nothing and the resume was
+       * silently skipped. Reloading here is the only assertion that can tell.
+       */
+      await page.reload()
+      await withMetadata(page)
+      await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
+
+      // Asserted while paused deliberately: the countdown runs on playback, so
+      // there is no five-second race here for a slow machine to lose.
+      const startOver = page.getByRole('button', { name: 'Start from the beginning' })
+      await expect(startOver).toBeVisible()
+
+      await startOver.click()
+      await expect.poll(currentTime).toBeLessThan(1)
+      await expect(startOver).toBeHidden()
+    })
+
   test.describe('on the player page', () => {
     test.beforeEach(async ({ page }) => {
       await startPlaying(page)
@@ -142,10 +229,18 @@ test.describe('viewer', () => {
       // "the first video" instead makes the test depend on the two lookups
       // agreeing, which they stop doing the moment the library changes.
       const target = await currentVideoId(page)
-      const duration = await (await withMetadata(page)).evaluate(
-        (el: HTMLVideoElement) => el.duration,
-      )
-      const introEnd = Math.max(1, Math.min(5, (duration || 10) / 2))
+      const video = await withMetadata(page)
+      const duration = await video.evaluate((el: HTMLVideoElement) => el.duration)
+
+      /*
+       * The intro has to contain wherever playback *opens*, which is no longer
+       * always 0:00 — the player resumes, so an account that has watched this
+       * video before lands past a 0-5s intro and the button correctly never
+       * appears. Anchoring the range to the current position keeps the test
+       * about the intro rather than about whatever the previous spec watched.
+       */
+      const opensAt = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+      const introEnd = Math.min(duration - 1, opensAt + Math.max(1, Math.min(5, (duration || 10) / 2)))
 
       await page.evaluate(async ({ id, end }) => {
         await fetch(`/api/videos/${id}/markers`, {
@@ -161,9 +256,12 @@ test.describe('viewer', () => {
       await expect(skip).toBeVisible()
 
       await skip.click()
+      // Against the intro's end, not against zero: playback can already be past
+      // zero on arrival now, so `> 0` would pass without the button doing
+      // anything at all.
       await expect
         .poll(() => page.locator('video').evaluate((el: HTMLVideoElement) => el.currentTime))
-        .toBeGreaterThan(0)
+        .toBeGreaterThanOrEqual(introEnd - 1)
     })
 
     /**

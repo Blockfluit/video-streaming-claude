@@ -494,6 +494,23 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
   silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
   the first character typed into a search box.
+- **A media event can fire before hydration too, and nothing replays it.** On a hard load the `<video>` and
+  its `<source>` are in the server-rendered HTML, so the browser starts fetching before Vue attaches
+  `@loadedmetadata` — the event lands on nothing. `VideoPlayer` therefore *asks* in `onMounted`
+  (`readyState >= 1`) as well as listening, and `onLoadedMetadata` is idempotent because both can happen on
+  one load. Without the ask, a refresh of `/watch/:slug` opens at 0:00 while clicking through to the same
+  page resumes correctly — and every test that reached the player by clicking a link walked past it.
+- **The player resumes; it does not offer to.** `resumePoint` (`app/utils/resume.ts`) is the one rule for
+  where playback opens, shared with `/v/:slug` so the second named on "Resume from 12:34" is the second it
+  lands on. The seek must set `lastTick`, or `onTimeUpdate`'s first delta credits the whole resume offset as
+  time watched. What is offered instead is **"Start from the beginning"**, for `OFFER_SECONDS` of *playback*
+  — a wall-clock timer expires over the paused first frame while the viewer is still reading the page, since
+  nothing autoplays. Its `aria-label` deliberately shadows its visible text, to hold the accessible name
+  still while the countdown digit changes; that is the one place the `@nuxt/ui` shadowing rule is inverted
+  on purpose.
+- Playback opening past 0:00 is now normal, so a test about anything *positioned* — intro markers, outro
+  markers — must anchor to where the player actually opened rather than assuming zero, and must assert
+  against the marker rather than against `> 0`, which a resumed video satisfies before the button is pressed.
 - **Never give a `USelect` an option whose value is `''`.** Reka UI reserves the empty string for "cleared"
   and throws during render — which takes the whole page down, not just the select. Use a sentinel.
 - `GET /videos/:id/subtitles` returns a `Page` like every other list endpoint. It returned a bare array
