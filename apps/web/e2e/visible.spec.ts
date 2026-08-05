@@ -266,4 +266,24 @@ test.describe('legibility', () => {
       `player:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
     ).toEqual([])
   })
+
+  /**
+   * The account panel, which is on every page and on none of them.
+   *
+   * It is closed until clicked and Reka teleports it to `<body>`, so walking
+   * the whole document — which this audit does precisely because of that — still
+   * never reached it. Its name and role lines are the only text in the app on
+   * the menu's raised surface, and nothing else would have measured them.
+   */
+  test('the account menu too', async ({ page }) => {
+    await visit(page, '/')
+    await page.getByRole('button', { name: 'Your account' }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `account menu:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
 })
