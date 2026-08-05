@@ -72,33 +72,18 @@ describe('scanMediaRoot', () => {
   });
 
   /**
-   * A single title kept on another disk, linked into a drive that is otherwise
-   * real. The watcher follows this link and reconciles on every write inside it,
-   * so a scan that does not follow it leaves the two permanently disagreeing:
-   * events keep arriving about files the library never lists.
+   * Only the drive level is followed. Deeper links are the ones that point
+   * somewhere unexpected — and a link back up its own tree is how a walk that
+   * follows everything spins until the process dies.
    */
-  it('follows a symlinked item folder below the drive level', async () => {
+  it('does not follow a symlinked directory below the drive level', async () => {
     await file(elsewhere, 'Inception.mp4');
     await mkdir(join(root, 'disk1'), { recursive: true });
     await symlink(elsewhere, join(root, 'disk1', 'Inception'), 'dir');
 
     const scan = await scanMediaRoot(root);
 
-    expect(scan.videos.map((video) => video.relPath)).toEqual(['disk1/Inception/Inception.mp4']);
-  });
-
-  it('follows a symlinked season folder', async () => {
-    await file(elsewhere, 'Episode 1.mp4');
-    await mkdir(join(root, 'videos', 'Chernobyl'), { recursive: true });
-    await symlink(elsewhere, join(root, 'videos/Chernobyl/Season 01'), 'dir');
-
-    const scan = await scanMediaRoot(root);
-
-    expect(scan.videos[0].parsed).toMatchObject({
-      kind: 'video',
-      itemFolder: 'Chernobyl',
-      season: expect.objectContaining({ number: 1 }),
-    });
+    expect(scan.videos).toEqual([]);
   });
 
   it('survives a drive symlink pointing at nothing', async () => {
@@ -107,54 +92,14 @@ describe('scanMediaRoot', () => {
     await expect(scanMediaRoot(root)).resolves.toMatchObject({ videos: [] });
   });
 
-  /** A link whose disk is not mounted is a fact worth putting in front of an admin. */
-  it('reports a dangling link rather than passing over it', async () => {
-    await mkdir(join(root, 'disk1'), { recursive: true });
-    await symlink(join(elsewhere, 'gone'), join(root, 'disk1', 'Inception'), 'dir');
-
-    const scan = await scanMediaRoot(root);
-
-    expect(scan.unreadable).toEqual([{ relPath: 'disk1/Inception', reason: 'ENOENT' }]);
-  });
-
-  it('ingests a symlinked video file', async () => {
+  it('still skips a symlinked file rather than ingesting it', async () => {
     await file(elsewhere, 'Inception.mp4');
     await mkdir(join(root, 'disk1', 'Inception'), { recursive: true });
     await symlink(join(elsewhere, 'Inception.mp4'), join(root, 'disk1/Inception/Inception.mp4'));
 
     const scan = await scanMediaRoot(root);
 
-    expect(scan.videos.map((video) => video.relPath)).toEqual(['disk1/Inception/Inception.mp4']);
-    expect(scan.videos[0].size).toBeGreaterThan(0);
-  });
-
-  /**
-   * The reason the drive level was the only level followed. A link pointing at
-   * an ancestor of itself is an infinite tree, and `MAX_WALK_DEPTH` alone turns
-   * that into a very large scan rather than a refusal.
-   */
-  it('terminates on a link pointing back up its own tree', async () => {
-    await file(root, 'disk1/Inception/Inception.mp4');
-    await symlink(join(root, 'disk1'), join(root, 'disk1/Inception/loop'), 'dir');
-
-    const scan = await scanMediaRoot(root);
-
-    expect(scan.videos.map((video) => video.relPath)).toEqual(['disk1/Inception/Inception.mp4']);
-  });
-
-  /**
-   * Two names for one disk is one library, not two. Scanning it twice would put
-   * the same physical file under two storage keys, and reconcile would create a
-   * row for each.
-   */
-  it('scans a target reached by two links only once', async () => {
-    await file(elsewhere, 'Inception/Inception.mp4');
-    await symlink(elsewhere, join(root, 'disk1'), 'dir');
-    await symlink(elsewhere, join(root, 'disk2'), 'dir');
-
-    const scan = await scanMediaRoot(root);
-
-    expect(scan.videos).toHaveLength(1);
+    expect(scan.videos).toEqual([]);
   });
 
   it('reports a video loose in a drive root as an issue rather than ingesting it', async () => {

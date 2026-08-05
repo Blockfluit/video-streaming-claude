@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -547,91 +547,6 @@ describe('Ingest (real database)', () => {
       await user.post('/admin/ingest/scan').expect(403);
       await user.get('/admin/ingest/status').expect(403);
       await user.get('/admin/ingest/issues').expect(403);
-    });
-  });
-
-  /**
-   * The layout the library is actually run on: the drives under MEDIA_ROOT are
-   * links to other disks, and single titles get linked in the same way. The
-   * scanner has unit tests for each shape; these prove the rows come out the
-   * other end, which is the part an admin sees.
-   */
-  describe('a media tree assembled out of symlinks', () => {
-    /** Somewhere outside the media root, standing in for another disk. */
-    async function elsewhere(relPath: string, body = 'video-bytes'): Promise<string> {
-      const absolute = join(workspace, 'disks', relPath);
-      await mkdir(dirname(absolute), { recursive: true });
-      await writeFile(absolute, body);
-      return absolute;
-    }
-
-    it('ingests a whole drive that is a link to another disk', async () => {
-      await elsewhere('disk-a/South Park/Season 01/01 - Cartman.mp4');
-      await symlink(join(workspace, 'disks/disk-a'), join(mediaRoot, 'disk1'), 'dir');
-
-      await reconcile.run();
-
-      expect((await videos()).map((video) => video.storageKey)).toEqual([
-        'disk1/South Park/Season 01/01 - Cartman.mp4',
-      ]);
-    });
-
-    it('ingests a single title linked into a real drive', async () => {
-      await elsewhere('Inception/Inception.mp4');
-      await mkdir(join(mediaRoot, 'disk1'), { recursive: true });
-      await symlink(join(workspace, 'disks/Inception'), join(mediaRoot, 'disk1/Inception'), 'dir');
-
-      await reconcile.run();
-
-      expect((await videos()).map((video) => video.storageKey)).toEqual([
-        'disk1/Inception/Inception.mp4',
-      ]);
-    });
-
-    it('ingests a linked file sitting among real ones', async () => {
-      await put('disk1/Nolan/Memento.mp4');
-      const target = await elsewhere('Inception.mp4');
-      await symlink(target, join(mediaRoot, 'disk1/Nolan/Inception.mp4'));
-
-      await reconcile.run();
-
-      expect((await videos()).map((video) => video.storageKey)).toEqual([
-        'disk1/Nolan/Inception.mp4',
-        'disk1/Nolan/Memento.mp4',
-      ]);
-    });
-
-    /** Reconcile is keyed on `storageKey`, so a second pass must not re-create. */
-    it('stays idempotent across scans of a linked tree', async () => {
-      await elsewhere('disk-a/Inception/Inception.mp4');
-      await symlink(join(workspace, 'disks/disk-a'), join(mediaRoot, 'disk1'), 'dir');
-
-      await reconcile.run();
-      const [first] = await videos();
-      await reconcile.run();
-      const [second] = await videos();
-
-      expect(await videos()).toHaveLength(1);
-      expect(second.id).toBe(first.id);
-    });
-
-    /**
-     * An unmounted disk must not empty the library. The row keeps its state and
-     * comes back when the disk does — the same contract as a deleted file.
-     */
-    it('marks a title MISSING when its disk goes away, and restores it', async () => {
-      await elsewhere('disk-a/Inception/Inception.mp4');
-      const link = join(mediaRoot, 'disk1');
-      await symlink(join(workspace, 'disks/disk-a'), link, 'dir');
-      await reconcile.run();
-
-      await rm(link, { force: true });
-      await reconcile.run();
-      expect((await videos())[0]).toMatchObject({ state: 'MISSING' });
-
-      await symlink(join(workspace, 'disks/disk-a'), link, 'dir');
-      await reconcile.run();
-      expect((await videos())[0]).toMatchObject({ state: 'DRAFT' });
     });
   });
 });

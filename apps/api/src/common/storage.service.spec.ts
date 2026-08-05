@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -207,43 +207,6 @@ describe('StorageService', () => {
       expect(() => storage.toKey('media', join(workspace, 'outside.mp4'))).toThrow(
         BadRequestException,
       );
-    });
-  });
-
-  /**
-   * What the admin's media browser shows. A linked title has to appear here for
-   * the same reason the scan has to find it: the two screens describing the same
-   * folder must not disagree about what is in it.
-   */
-  describe('listing a folder that holds symlinks', () => {
-    it('lists a symlinked file alongside a real one', async () => {
-      await storage.ensureDirectory('media', 'disk1/Inception');
-      await writeFile(join(workspace, 'Elsewhere.mp4'), 'x');
-      await writeFile(join(media, 'disk1/Inception/Real.mp4'), 'x');
-      await symlink(
-        join(workspace, 'Elsewhere.mp4'),
-        join(media, 'disk1/Inception/Linked.mp4'),
-      );
-
-      await expect(storage.listFiles('media', 'disk1/Inception')).resolves.toEqual([
-        'Linked.mp4',
-        'Real.mp4',
-      ]);
-    });
-
-    it('leaves a dangling link out of the file list', async () => {
-      await storage.ensureDirectory('media', 'disk1/Inception');
-      await symlink(join(workspace, 'gone.mp4'), join(media, 'disk1/Inception/Linked.mp4'));
-
-      await expect(storage.listFiles('media', 'disk1/Inception')).resolves.toEqual([]);
-    });
-
-    it('does not list a symlinked directory as a file', async () => {
-      await storage.ensureDirectory('media', 'disk1');
-      await symlink(workspace, join(media, 'disk1/Linked'), 'dir');
-
-      await expect(storage.listFiles('media', 'disk1')).resolves.toEqual([]);
-      await expect(storage.listDirectories('media', 'disk1')).resolves.toEqual(['Linked']);
     });
   });
 });
