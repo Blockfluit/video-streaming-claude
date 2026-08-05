@@ -298,6 +298,19 @@ export class CollectionsService {
         description: dto.description,
         year: dto.year,
         tags: dto.tags,
+        // Imported metadata, editable by hand. Each name has to appear here as
+        // well as in the schema: `data` is built field by field, so a field
+        // added only to the schema is silently dropped and the PATCH still
+        // answers 200 with a response that looks right. That is what happened
+        // with `trailerYoutubeId`, which is why the db-spec asserts the round
+        // trip rather than the status code.
+        tagline: dto.tagline,
+        genres: dto.genres,
+        certification: dto.certification,
+        originalTitle: dto.originalTitle,
+        originalLanguage: dto.originalLanguage,
+        releaseDate: dto.releaseDate,
+        imdbId: dto.imdbId,
         posterKey: dto.posterKey,
         trailerYoutubeId: dto.trailerYoutubeId,
         slug,

@@ -203,9 +203,23 @@ export class VideosService {
         description: dto.description,
         year: dto.year,
         tags: dto.tags,
-        // `undefined` leaves it alone and `null` clears it, which is exactly
+        // Imported metadata, editable by hand. Each name has to appear here as
+        // well as in the schema: `data` is built field by field, so a field
+        // added only to the schema is silently dropped and the PATCH still
+        // answers 200 with a response that looks right. That is what happened
+        // with `trailerYoutubeId`, which is why the db-spec asserts the round
+        // trip rather than the status code.
+        //
+        // `undefined` leaves each alone and `null` clears it, which is exactly
         // what Prisma does with each — so the schema's "omitted vs explicitly
         // empty" distinction survives all the way to the column.
+        tagline: dto.tagline,
+        genres: dto.genres,
+        certification: dto.certification,
+        originalTitle: dto.originalTitle,
+        originalLanguage: dto.originalLanguage,
+        releaseDate: dto.releaseDate,
+        imdbId: dto.imdbId,
         trailerYoutubeId: dto.trailerYoutubeId,
         slug,
       },

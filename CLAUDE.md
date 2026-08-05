@@ -407,6 +407,30 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   and guessing would put the wrong synopsis on the wrong episode — it is left alone.
 - Genres are their own column, never `tags`. `tags` is curator-authored, and sharing one column means a
   re-import cannot tell which entries it owns and may replace.
+- The imported fields are **editable by hand**, which means each one appears in the zod schema *and*
+  in `update()`'s `data` block. A field added to only the first is silently dropped and the PATCH still
+  answers 200 — `library.db-spec.ts` asserts the round trip for every one of them, not the status.
+- `imdbIdField` parses rather than validates, like `trailerField`: an admin pastes
+  `imdb.com/title/tt…/?ref_=nv_sr_1`, and `parseImdbId` (in `packages/shared`, beside `parseYoutubeId`)
+  normalises it. Titles are `tt` and people are `nm`, and the two are **not** interchangeable — a person
+  id in a title field is refused rather than stored to become a dead link that looks deliberate.
+- **Unmatching clears only `tmdbId`/`tmdbType`/`metadataUpdatedAt`.** Every descriptive field stays: an
+  admin approved those one at a time, and "this is not that title" is not "throw away my work". It
+  exists because the 409 already told people to unmatch and there was no way to.
+- The credits panel collapses to the **cast plus one line of crew** (`headlineCrew` in
+  `app/utils/credits.ts`, pure). Capping only the cast left seven role headings each holding one chip,
+  which took more room than the cast did. The line **deduplicates names within a role**: Story and
+  Screenplay both map to WRITER, so a writer credited for both was named twice in one breath.
+- `CreditsEditor`'s person picker **searches the server**. It filtered `/people?limit=100` in the
+  browser on the reasoning that a private library's cast list is small; one import made it 111, and 100
+  is `MAX_PAGE_LIMIT`, so the people the import had just created were exactly the ones that could not be
+  picked. Still a plain input with results underneath, never a `USelectMenu` — see the note above.
+- Its reorder arrows are **hidden while a filter is active**. `move()` works on positions in the whole
+  list, so "down" in a filtered view means a place the reader cannot see.
+- Both admin forms re-seed from the record when **`updatedAt`** changes, not on every refresh and not
+  once at setup. The collection's seed-once meant an import refreshed the page while the form still held
+  the old values, so Save wrote them back over the import; the video's `watchEffect` threw away whatever
+  was being typed. One rule fixes both, and imports made refreshes frequent enough to matter.
 
 **Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
 - `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins

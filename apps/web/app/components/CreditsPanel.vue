@@ -41,7 +41,7 @@ const expanded = ref(false)
  * Roughly a poster's billing block — enough to include anybody a viewer came
  * looking for, and few enough that the crew below is still on the screen.
  */
-const TOP_BILLED = 12
+const TOP_BILLED = 8
 
 /** Sentence case from the enum, so a new role needs no change here. */
 function roleLabel(role: string): string {
@@ -50,22 +50,28 @@ function roleLabel(role: string): string {
 
 const all = computed(() => data.value?.items ?? [])
 
-/**
- * `OTHER` is every job the library has no role of its own for — the two hundred.
- * It is always the last group, because the server orders roles by the enum's own
- * declaration and `OTHER` is declared last.
- */
-const isMinor = (credit: Credit) => credit.role === 'OTHER'
+const cast = computed(() => all.value.filter(credit => credit.role === 'ACTOR'))
 
-const hiddenCount = computed(() => {
-  const cast = all.value.filter(credit => credit.role === 'ACTOR').length
-  return Math.max(cast - TOP_BILLED, 0) + all.value.filter(isMinor).length
-})
+/** The billing block: as many as fit on a poster, in the order the server sent. */
+const topBilled = computed(() => cast.value.slice(0, TOP_BILLED))
 
 /**
- * Grouped by role, preserving the order the API sent.
+ * Collapsed, the panel is the cast and **one line** of crew.
  *
- * The sort is total and deliberate on the server (role, position,
+ * It used to cap only the cast and hide `OTHER`, leaving every key-crew group at
+ * full length — so a film with one director, one composer and one editor spent
+ * three headings on three names, and a series with forty producers spent rather
+ * more. Reported as "the list of people credited is very large", which it was:
+ * seven headings holding a dozen chips took more room than the cast did.
+ */
+const headline = computed(() => headlineCrew(all.value))
+
+const hiddenCount = computed(() => Math.max(all.value.length - topBilled.value.length, 0))
+
+/**
+ * Everybody, grouped by role — the expanded view only.
+ *
+ * The order is total and deliberate on the server (role, position,
  * collection-before-video, name, id); re-sorting here would throw that away and
  * make the panel reshuffle between requests.
  */
@@ -73,19 +79,12 @@ const groups = computed(() => {
   const byRole = new Map<string, Credit[]>()
 
   for (const credit of all.value) {
-    if (!expanded.value && isMinor(credit)) continue
-
     const list = byRole.get(credit.role)
     if (list) list.push(credit)
     else byRole.set(credit.role, [credit])
   }
 
-  return [...byRole].map(([role, credits]) => ({
-    role,
-    // Only the cast is truncated. Six directors is not a wall of names, and
-    // clipping the crew would hide the one person somebody came looking for.
-    credits: !expanded.value && role === 'ACTOR' ? credits.slice(0, TOP_BILLED) : credits,
-  }))
+  return [...byRole].map(([role, credits]) => ({ role, credits }))
 })
 </script>
 
@@ -106,7 +105,41 @@ const groups = computed(() => {
       </UButton>
     </div>
 
-    <div class="space-y-4">
+    <!--
+      Collapsed: the billing block, then one line naming the crew people
+      actually look for. Everyone else is a button away.
+    -->
+    <div v-if="!expanded" class="space-y-3">
+      <ul class="flex flex-wrap gap-2">
+        <li v-for="credit in topBilled" :key="credit.id">
+          <span
+            class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
+          >
+            <span class="font-medium">{{ credit.person.name }}</span>
+            <span v-if="credit.characterName" class="text-(--ui-text-muted)">
+              as {{ credit.characterName }}
+            </span>
+            <ImdbLink :imdb-id="credit.person.imdbId" kind="person" :label="credit.person.name" />
+          </span>
+        </li>
+      </ul>
+
+      <p v-if="headline.length" class="text-sm text-(--ui-text-muted)">
+        <!--
+          The separators are inside the interpolation, not trailing whitespace in
+          the template: Vue trims a text node's edges, so `{{ label }} ` rendered
+          as "Directed byDan Trachtenberg".
+        -->
+        <template v-for="(group, index) in headline" :key="group.label">
+          <span v-if="index > 0" aria-hidden="true">{{ ' · ' }}</span>
+          <span>{{ group.label }}</span>
+          <span class="text-(--ui-text-toned)">{{ ` ${group.names.join(', ')}` }}</span>
+          <span v-if="group.more">{{ ` and ${group.more} more` }}</span>
+        </template>
+      </p>
+    </div>
+
+    <div v-else class="space-y-4">
       <div v-for="group in groups" :key="group.role" class="space-y-2">
         <h3 class="text-xs font-medium tracking-wide text-(--ui-text-dimmed) uppercase">
           {{ roleLabel(group.role) }}

@@ -10,9 +10,21 @@ definePageMeta({ layout: 'admin', middleware: 'admin' })
 
 interface VideoDetail {
   id: string
-  /** Imported. `tmdbId` is only read to say "re-import" rather than "find". */
+  updatedAt?: string
+  /** Imported. Shown and edited in the Metadata card. */
   year?: number | null
   tmdbId?: number | null
+  tmdbType?: string | null
+  imdbId?: string | null
+  genres?: string[]
+  tagline?: string | null
+  originalTitle?: string | null
+  originalLanguage?: string | null
+  releaseDate?: string | null
+  certification?: string | null
+  tmdbRating?: number | null
+  tmdbVoteCount?: number | null
+  metadataUpdatedAt?: string | null
   slug: string
   title: string
   description: string | null
@@ -58,14 +70,27 @@ const { data: subtitles, refresh: refreshSubs } = await useApiData<{ items: Subt
   `/videos/${id}/subtitles`,
 )
 
-const form = reactive({ title: '', description: '', tags: '', trailer: '' })
-watchEffect(() => {
+const form = reactive({ title: '', description: '', year: undefined as number | undefined, tags: '', trailer: '' })
+
+/**
+ * Seeded when the server record actually changes, not on every refresh.
+ *
+ * This was a `watchEffect`, which re-ran on any refresh and silently discarded
+ * whatever was being typed — and refreshes got much more frequent once a
+ * metadata import could fire one. Keying on `updatedAt` re-reads the form after
+ * a save or an import and leaves it alone otherwise.
+ */
+function resetForm() {
   if (!video.value) return
   form.title = video.value.title
   form.description = video.value.description ?? ''
+  form.year = video.value.year ?? undefined
   form.tags = video.value.tags.join(', ')
   form.trailer = video.value.trailerYoutubeId ?? ''
-})
+}
+
+resetForm()
+watch(() => video.value?.updatedAt, resetForm)
 
 const saving = ref(false)
 
@@ -77,6 +102,7 @@ async function save() {
       body: {
         title: form.title,
         description: form.description,
+        year: form.year ?? undefined,
         tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
         // Sent as typed. The API parses a pasted URL down to an id and refuses
         // what it cannot read, so a mistyped link is a message on this form
@@ -319,9 +345,19 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
             <UFormField label="Description">
               <UTextarea v-model="form.description" :rows="4" class="w-full" />
             </UFormField>
-            <UFormField label="Tags" hint="Comma separated">
-              <UInput v-model="form.tags" class="w-full" />
-            </UFormField>
+            <div class="flex flex-wrap gap-4">
+              <!--
+                A film here is a video belonging to no collection, so a video
+                needs a year of its own. The schema has accepted one since the
+                metadata columns landed; there was simply no control for it.
+              -->
+              <UFormField label="Year">
+                <UInput v-model.number="form.year" type="number" class="w-28" />
+              </UFormField>
+              <UFormField label="Tags" hint="Comma separated" class="grow">
+                <UInput v-model="form.tags" class="w-full" />
+              </UFormField>
+            </div>
             <UFormField label="Trailer" hint="Paste a YouTube link, or leave empty for none">
               <UInput v-model="form.trailer" class="w-full" placeholder="https://youtu.be/…" />
             </UFormField>
@@ -380,6 +416,13 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         <UCard>
           <VideoJobs ref="jobs" :video-id="id" />
         </UCard>
+
+        <MetadataCard
+          v-if="video"
+          kind="video"
+          :record="{ ...video, releaseDate: video.releaseDate ?? null }"
+          @saved="refresh"
+        />
 
         <UCard>
           <CreditsEditor :video-id="id" />

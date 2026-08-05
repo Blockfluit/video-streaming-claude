@@ -130,6 +130,31 @@ export class MetadataService {
   }
 
   /**
+   * Forgets which TMDB title this is, and nothing else.
+   *
+   * Only the pair the unique index is on, plus the timestamp that describes it.
+   * Every descriptive field stays: an admin approved those one at a time, and
+   * unmatching means "this is not that title", not "throw away my work". The
+   * IMDb id stays too — it is editable by hand and may be right even when the
+   * TMDB match was not.
+   *
+   * This exists because the conflict message already told admins to unmatch and
+   * there was no way to: releasing a title for another collection was
+   * impossible without editing the database.
+   */
+  async unmatch(target: Target): Promise<void> {
+    await this.load(target);
+
+    const data = { tmdbId: null, tmdbType: null, metadataUpdatedAt: null };
+
+    if (target.kind === 'collection') {
+      await this.prisma.collection.update({ where: { id: target.id }, data });
+    } else {
+      await this.prisma.video.update({ where: { id: target.id }, data });
+    }
+  }
+
+  /**
    * Writes the approved fields, and only those.
    *
    * Built by walking the *allowed* list rather than the proposal, so a field

@@ -13,6 +13,7 @@
  */
 
 export * from './identity.js';
+export * from './imdb.js';
 export * from './pagination.js';
 export * from './quality.js';
 export * from './primitives.js';

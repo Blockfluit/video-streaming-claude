@@ -460,6 +460,55 @@ describe('Metadata import (real database)', () => {
     });
   });
 
+  describe('unmatching', () => {
+    /**
+     * The conflict message told admins to "unmatch it there first" and there
+     * was no way to — releasing a title meant editing the database by hand.
+     */
+    it('forgets the match and keeps what was imported', async () => {
+      await applyToVideo({ fields: ['description', 'tagline'] }).expect(201);
+
+      await admin.delete(`/admin/metadata/videos/${videoId}/match`).expect(204);
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id: videoId } });
+      expect(video.tmdbId).toBeNull();
+      expect(video.tmdbType).toBeNull();
+      expect(video.metadataUpdatedAt).toBeNull();
+      // The admin approved these one at a time; unmatching is not undoing them.
+      expect(video.description).toContain('linguist');
+      expect(video.tagline).toBe('Why are they here?');
+      expect(video.imdbId).toBe('tt2543164');
+    });
+
+    it('frees the title for another collection', async () => {
+      tmdbStub.titleDetail.mockResolvedValue(SERIES);
+      await admin
+        .post(`/admin/metadata/collections/${collectionId}/apply`)
+        .send({ tmdbId: 95396, type: 'tv', fields: [] })
+        .expect(201);
+
+      const other = await prisma.collection.create({
+        data: { slug: 'other', title: 'Other', folderKey: 'Other' },
+        select: { id: true },
+      });
+      await admin
+        .post(`/admin/metadata/collections/${other.id}/apply`)
+        .send({ tmdbId: 95396, type: 'tv', fields: [] })
+        .expect(409);
+
+      await admin.delete(`/admin/metadata/collections/${collectionId}/match`).expect(204);
+
+      await admin
+        .post(`/admin/metadata/collections/${other.id}/apply`)
+        .send({ tmdbId: 95396, type: 'tv', fields: [] })
+        .expect(201);
+    });
+
+    it('refuses a viewer', async () => {
+      await viewer.delete(`/admin/metadata/videos/${videoId}/match`).expect(403);
+    });
+  });
+
   describe('person IMDb links', () => {
     /**
      * TMDB does not return a person's IMDb id with a title's credits, so

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   applyMetadataSchema,
   previewMetadataSchema,
@@ -85,6 +95,24 @@ export class MetadataController {
     @Body(validate(applyMetadataSchema)) dto: ApplyMetadataInput,
   ): Promise<MetadataPreview> {
     return this.metadata.apply(targetFor('video', id), dto);
+  }
+
+  /**
+   * Forgets the match, keeping everything that was imported from it.
+   *
+   * Not throttled: it reaches nothing off the machine, and an admin trying to
+   * free up a title they matched to the wrong thing should not meet a limit.
+   */
+  @Delete('collections/:id/match')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  unmatchCollection(@Param('id') id: string): Promise<void> {
+    return this.metadata.unmatch(targetFor('collection', id));
+  }
+
+  @Delete('videos/:id/match')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  unmatchVideo(@Param('id') id: string): Promise<void> {
+    return this.metadata.unmatch(targetFor('video', id));
   }
 
   /**

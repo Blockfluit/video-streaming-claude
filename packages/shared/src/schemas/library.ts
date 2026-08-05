@@ -1,9 +1,19 @@
 import { z } from 'zod';
 
+import { parseImdbId } from '../imdb.js';
 import { parseYoutubeId } from '../youtube.js';
 
 import { pageQuerySchema } from '../pagination.js';
-import { booleanParam, idSchema, nonEmptyText, optionalText, tagsSchema, yearSchema } from '../primitives.js';
+import {
+  booleanParam,
+  dateOnlyField,
+  genresSchema,
+  idSchema,
+  nonEmptyText,
+  optionalText,
+  tagsSchema,
+  yearSchema,
+} from '../primitives.js';
 
 export const publishStateSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED', 'MISSING']);
 export type PublishState = z.infer<typeof publishStateSchema>;
@@ -59,6 +69,50 @@ export const trailerField = z
   })
   .nullish();
 
+/**
+ * An IMDb id, as whatever the admin pasted.
+ *
+ * Parses rather than validates, exactly like `trailerField`: what somebody has
+ * in their address bar is `https://www.imdb.com/title/tt1179933/?ref_=nv_sr_1`,
+ * and storing that verbatim gives a link that goes nowhere with nothing on the
+ * form to say why. An explicit empty value clears it.
+ */
+export const imdbIdField = z
+  .string()
+  .trim()
+  .max(300)
+  .transform((value, ctx) => {
+    if (value.length === 0) return null;
+
+    const id = parseImdbId(value);
+    if (id === null) {
+      ctx.addIssue({ code: 'custom', message: 'That is not an IMDb title link this can read' });
+      return z.NEVER;
+    }
+
+    return id;
+  })
+  .nullish();
+
+/**
+ * The descriptive fields an import writes, editable by hand.
+ *
+ * Shared between a collection and a video because a film here is a video
+ * belonging to no collection, so both carry them. Everything a *provider* owns —
+ * the TMDB id, the rating, the vote count — is deliberately absent: those are
+ * facts about somebody else's database, and a hand-edited "TMDB rating" is a
+ * lie. Clearing the match is its own action, not a field.
+ */
+const importedFields = {
+  tagline: optionalText(300),
+  genres: genresSchema.optional(),
+  /** Short codes: "PG-13", "TV-MA", "12", "Kijkwijzer 16". */
+  certification: optionalText(40),
+  originalLanguage: z.string().trim().min(2).max(3).toLowerCase().nullish(),
+  releaseDate: dateOnlyField,
+  imdbId: imdbIdField,
+};
+
 export const updateCollectionSchema = z.object({
   title: nonEmptyText(200).optional(),
   description: optionalText(5000),
@@ -66,6 +120,8 @@ export const updateCollectionSchema = z.object({
   tags: tagsSchema.optional(),
   posterKey: optionalText(500),
   trailerYoutubeId: trailerField,
+  ...importedFields,
+  originalTitle: optionalText(200),
   regenerateSlug,
 });
 export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;
@@ -137,6 +193,8 @@ export const updateVideoSchema = z.object({
   year: yearSchema.optional(),
   tags: tagsSchema.optional(),
   trailerYoutubeId: trailerField,
+  ...importedFields,
+  originalTitle: optionalText(300),
   regenerateSlug,
 });
 export type UpdateVideoInput = z.infer<typeof updateVideoSchema>;
