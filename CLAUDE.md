@@ -192,6 +192,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `-map 0:<index>` uses the absolute stream index, not `0:s:<n>`. They are different things and only the
   first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
+- The watcher's `ignored` predicate (`ingest/watch-ignore.ts`) judges a path **relative to `MEDIA_ROOT`**,
+  never the absolute one. Matching a dot segment anywhere in the absolute path makes the verdict depend on
+  where the library lives rather than what is in it: a root under any dot directory ignores **itself**, so
+  chokidar watches nothing. Nothing is logged and no error is raised — a tree that never reacts looks
+  exactly like a tree nobody has touched, and the only thing that still worked was the startup scan, so
+  restarting the API "fixed" it every time. Every worktree checkout (`.claude/worktrees/<name>/media`) ran
+  that way, which is how it was found: a symlinked drive that every scan ingested correctly appeared not to
+  work. Segments split on the platform separator only, so a backslash stays a legal filename character.
+- Only the **drive level** — a folder directly under `MEDIA_ROOT` — may be a symlink. `readdir` reports a
+  symlinked directory as neither `isDirectory()` nor `isFile()`, so following it is explicit and deliberate.
+  Deeper links are not followed and symlinked files are not ingested; `MAX_WALK_DEPTH` bounds the drive case
+  in case a link points back up its own tree.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place, dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion. The rename

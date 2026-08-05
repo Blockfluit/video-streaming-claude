@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -547,6 +547,69 @@ describe('Ingest (real database)', () => {
       await user.post('/admin/ingest/scan').expect(403);
       await user.get('/admin/ingest/status').expect(403);
       await user.get('/admin/ingest/issues').expect(403);
+    });
+  });
+
+  /**
+   * The production layout: each folder directly under MEDIA_ROOT is a link to a
+   * different physical disk. The scanner has unit tests for what `readdir`
+   * reports; these are about the rows coming out the other end, which is the
+   * part an admin sees — and about an unmounted disk, which is the way this
+   * arrangement actually fails.
+   */
+  describe('a drive that is a symlink to another disk', () => {
+    /** Somewhere outside the media root, standing in for another disk. */
+    async function onDisk(relPath: string, body = 'video-bytes'): Promise<void> {
+      const absolute = join(workspace, 'disks', relPath);
+      await mkdir(dirname(absolute), { recursive: true });
+      await writeFile(absolute, body);
+    }
+
+    const mount = (name = 'disk-a', as = 'disk1'): Promise<void> =>
+      symlink(join(workspace, 'disks', name), join(mediaRoot, as), 'dir');
+
+    it('ingests the whole drive behind the link', async () => {
+      await onDisk('disk-a/South Park/Season 01/01 - Cartman.mp4');
+      await mount();
+
+      await reconcile.run();
+
+      expect((await videos()).map((video) => video.storageKey)).toEqual([
+        'disk1/South Park/Season 01/01 - Cartman.mp4',
+      ]);
+    });
+
+    /** Reconcile is keyed on `storageKey`, so a second pass must not re-create. */
+    it('stays idempotent across scans of a linked drive', async () => {
+      await onDisk('disk-a/Inception/Inception.mp4');
+      await mount();
+
+      await reconcile.run();
+      const [first] = await videos();
+      await reconcile.run();
+
+      const all = await videos();
+      expect(all).toHaveLength(1);
+      expect(all[0].id).toBe(first.id);
+    });
+
+    /**
+     * A disk that is not mounted must not empty the library. The row keeps the
+     * state it had and comes back when the disk does — the same contract as a
+     * file that goes away, which is what an unplugged drive amounts to.
+     */
+    it('marks a title MISSING when the disk goes away, and restores it', async () => {
+      await onDisk('disk-a/Inception/Inception.mp4');
+      await mount();
+      await reconcile.run();
+
+      await rm(join(mediaRoot, 'disk1'), { force: true });
+      await reconcile.run();
+      expect((await videos())[0]).toMatchObject({ state: 'MISSING' });
+
+      await mount();
+      await reconcile.run();
+      expect((await videos())[0]).toMatchObject({ state: 'DRAFT' });
     });
   });
 });

@@ -4,6 +4,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 
 import { StorageService } from '../common/storage.service';
 import { ReconcileService } from './reconcile.service';
+import { isHiddenEntry } from './watch-ignore';
 
 /**
  * Watches `MEDIA_ROOT` and reconciles after things settle.
@@ -54,7 +55,11 @@ export class WatcherService implements OnApplicationBootstrap, OnModuleDestroy {
       awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
       // The startup reconcile above has already seen everything that is there.
       ignoreInitial: true,
-      ignored: (path) => /(^|[/\\])\../.test(path),
+      // Judged relative to the root — see `isHiddenEntry`. Matching a dot
+      // segment anywhere in the absolute path made the root ignore itself
+      // wherever the library sat under one, and a watcher that watches nothing
+      // reports that exactly as it reports a tree nobody has touched.
+      ignored: (candidate) => isHiddenEntry(root, candidate),
     });
 
     this.watcher
