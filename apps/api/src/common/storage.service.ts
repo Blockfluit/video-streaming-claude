@@ -153,19 +153,39 @@ export class StorageService implements OnModuleInit {
     return directories.filter((name): name is string => name !== null).sort();
   }
 
-  /** The file names directly inside `key`, sorted. Dotfiles are never content. */
+  /**
+   * The file names directly inside `key`, sorted. Dotfiles are never content.
+   *
+   * A symlinked file counts, for the reason `listDirectories` follows a linked
+   * drive: the dirent alone hides it, so a title linked in from another disk is
+   * one the scan ingests and this listing denies is there. A dangling link is
+   * left out — there is nothing behind it to play.
+   */
   async listFiles(root: StorageRoot, key: string): Promise<string[]> {
     const path = this.listingPath(root, key);
 
+    let entries;
     try {
-      const entries = await readdir(path, { withFileTypes: true });
-      return entries
-        .filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
-        .map((entry) => entry.name)
-        .sort();
+      entries = await readdir(path, { withFileTypes: true });
     } catch {
       return [];
     }
+
+    const files = await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.name.startsWith('.')) return null;
+        if (entry.isFile()) return entry.name;
+        if (!entry.isSymbolicLink()) return null;
+
+        try {
+          return (await stat(join(path, entry.name))).isFile() ? entry.name : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return files.filter((name): name is string => name !== null).sort();
   }
 
   /** Creates a directory (and its parents) at `key`. */

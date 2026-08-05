@@ -192,6 +192,19 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `-map 0:<index>` uses the absolute stream index, not `0:s:<n>`. They are different things and only the
   first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
+- **Symlinks are followed everywhere in the media tree** — linked drives, linked titles, linked seasons and
+  linked files alike. `readdir(withFileTypes)` reports a symlink as neither `isDirectory()` nor `isFile()`,
+  so a walk that trusts the dirent skips the whole disk and returns an empty scan that reads as an empty
+  library. Following only the drive level was worse than either extreme: chokidar follows links at **every**
+  depth, so a link the scan passed over still fired events, and each one started a reconcile that found
+  nothing. `StorageService.listFiles`/`listDirectories` follow them for the same reason — the media browser
+  and the scan must not disagree about what is in a folder.
+- What makes that safe is the **visited set of resolved paths** in `scanMediaRoot`, not `MAX_WALK_DEPTH`. A
+  link pointing at its own ancestor is an infinite tree, and a depth bound alone turns that into a very large
+  scan rather than a refusal. The same check means two links to one disk are scanned once — otherwise the
+  same physical file lands under two storage keys and reconcile builds a row for each.
+- A **dangling** link is reported as `unreadable` whatever it is named, rather than passed over: an unmounted
+  disk is the most likely cause and that is worth an admin seeing.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place, dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion. The rename
