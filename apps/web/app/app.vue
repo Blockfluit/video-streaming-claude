@@ -13,7 +13,21 @@ useHead({
 </script>
 
 <template>
-  <UApp>
+  <!--
+    `scroll-body="false"` forwards to Reka's `ConfigProvider`.
+
+    When an overlay locks the body, Reka hides the scrollbar and adds a matching
+    `padding-right` to stand in for the width it just took away. `main.css`
+    already reserves that gutter permanently with `scrollbar-gutter: stable`, so
+    nothing is taken away and the padding is pure damage: it moves the centred
+    `.page-shell` while the `position: fixed` header — laid out against the
+    viewport, not the body's content box — stays where it is, and the two halves
+    of the page slide apart.
+
+    False keeps the lock (a modal should still stop the page scrolling behind it)
+    and drops only the compensation.
+  -->
+  <UApp :scroll-body="false">
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
