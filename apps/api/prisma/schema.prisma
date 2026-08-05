@@ -161,6 +161,36 @@ model Collection {
   description String?
   year        Int?
   tags        String[]     @default([])
+
+  /// ---- Imported from TMDB (step 19) ----
+  /// The ids are what make a re-import an update rather than a second copy, and
+  /// what the IMDb link is built from. TMDB numbers films and shows in separate
+  /// sequences, so `tmdbId` alone is ambiguous and `tmdbType` is half the key.
+  tmdbId            Int?
+  /// "movie" or "tv".
+  tmdbType          String?
+  imdbId            String?
+  /// Kept apart from `tags`, which is curator-authored. Sharing one column means
+  /// a re-import cannot tell which entries it owns and is free to replace.
+  genres            String[]  @default([])
+  tagline           String?
+  originalTitle     String?
+  originalLanguage  String?
+  /// The full date. `year` stays because it is editable by hand and a collection
+  /// an admin invented has one without ever having had a release.
+  releaseDate       DateTime?
+  /// Age rating for TMDB_CERTIFICATION_COUNTRY — "PG-13", "TV-MA".
+  certification     String?
+  tmdbRating        Float?
+  tmdbVoteCount     Int?
+  /// Series-only: "Ended", "Returning Series". Null on a film.
+  seriesStatus      String?
+  /// What TMDB says the whole show is, which is what makes "3 of 5 seasons here"
+  /// answerable against our own row counts.
+  seasonCount       Int?
+  episodeCount      Int?
+  metadataUpdatedAt DateTime?
+
   /// The admin's override, not the whole answer. Null means "not overridden": the
   /// artwork then resolves to the first video's, and to the stock image for a
   /// collection holding none. A collection is a shelf, so its picture follows what
@@ -184,6 +214,10 @@ model Collection {
   listItems     ListItem[]
   watchlistedBy WatchlistItem[]
 
+  /// Two collections cannot claim one TMDB title. Both columns are nullable and
+  /// Postgres treats NULLs as distinct, so every unmatched collection is
+  /// unaffected — this constrains only the rows that have been matched.
+  @@unique([tmdbType, tmdbId])
   @@index([state])
   @@index([normalisedTitle])
 }
@@ -248,6 +282,29 @@ model Video {
   tags         String[]     @default([])
   state        PublishState @default(DRAFT)
   origin       MediaOrigin  @default(INGEST)
+
+  /// ---- Imported from TMDB (step 19) ----
+  /// A film here is a video belonging to no collection, so these sit on Video as
+  /// well as on Collection rather than only on the latter — otherwise the half of
+  /// the library that is films could never carry any of it.
+  ///
+  /// Deliberately **not** unique on (tmdbType, tmdbId), where Collection is: two
+  /// files of one film are an ordinary thing to hold, and both are that film.
+  year              Int?
+  tmdbId            Int?
+  /// "movie" for a film, "episode" for an episode of a show.
+  tmdbType          String?
+  imdbId            String?
+  genres            String[]  @default([])
+  tagline           String?
+  originalTitle     String?
+  originalLanguage  String?
+  /// A film's release date; an episode's air date. One idea, so one column.
+  releaseDate       DateTime?
+  certification     String?
+  tmdbRating        Float?
+  tmdbVoteCount     Int?
+  metadataUpdatedAt DateTime?
 
   storageKey   String    @unique // SOURCE file, relative to MEDIA_ROOT
   contentTag   String // partial hash, for move detection
@@ -371,12 +428,30 @@ model Subtitle {
 // People and credits
 // ---------------------------------------------------------------------------
 
+/// Deliberately thin. A person row exists so that a person can be *found* — every
+/// cast and crew member of an imported title gets one, because a row that was
+/// never created can never be searched for. What they are *like* is a link to
+/// IMDb rather than a copy of it: a biography goes stale, costs a request each to
+/// fetch, and duplicates a page IMDb renders better.
 model Person {
   id        String   @id @default(cuid())
   slug      String   @unique
   name      String   @unique
+  /// Hand-written, and the importer never touches either of these.
   bio       String?
   photoKey  String?
+  /// TMDB's person id — the upsert key an import needs. `name` is unique but only
+  /// case-sensitively, so matching on it is what lets "ada lovelace" and "Ada
+  /// Lovelace" become two people.
+  tmdbId    Int?     @unique
+  /// Filled lazily behind the read: TMDB does not return it alongside credits, so
+  /// eagerly resolving one costs a request per person — 250 for a large film.
+  imdbId    String?
+  /// TMDB's known_for_department — "Acting", "Directing". One free string, and
+  /// what a people-search result row needs to show.
+  knownFor  String?
+  /// So somebody who genuinely has no IMDb id is not asked about forever.
+  imdbCheckedAt DateTime?
   credits   Credit[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -389,6 +464,15 @@ model Credit {
   role          CreditRole
   characterName String? // for ACTOR
   position      Int         @default(0) // billing order
+  /// TMDB's raw job — "Costume Designer", "Stunt Coordinator". An import stores
+  /// every crew member, and all but six jobs map to OTHER, so without this a
+  /// couple of hundred rows render as the same word with nothing to tell them
+  /// apart. It is also what makes the importer's duplicate rule work: one person
+  /// holding two OTHER credits is ordinary, and keying on (person, role) alone
+  /// silently drops the second.
+  jobTitle      String?
+  /// TMDB's department — "Camera", "Sound". What a grouped full-credits view keys on.
+  department    String?
   collectionId  String?
   collection    Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   videoId       String?

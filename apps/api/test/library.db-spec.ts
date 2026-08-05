@@ -277,6 +277,96 @@ describe('Library (real database)', () => {
     });
   });
 
+  /**
+   * Every imported field, on both parents.
+   *
+   * These assert the **round trip** rather than the status code, because the
+   * failure mode here is silent: `update()` builds its `data` field by field, so
+   * a field added to the zod schema and forgotten in the service is dropped and
+   * the PATCH still answers 200 with a response that looks right. That is
+   * exactly what happened with `trailerYoutubeId`.
+   */
+  describe('imported metadata, edited by hand', () => {
+    const EDITS = {
+      tagline: 'What is the cost of lies?',
+      genres: ['Drama', 'History'],
+      certification: 'TV-MA',
+      originalTitle: 'Chernobyl',
+      originalLanguage: 'en',
+      releaseDate: '2019-05-06',
+      imdbId: 'tt7366338',
+    };
+
+    it('round-trips every field on a collection', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin.patch(`/collections/${collection.id}`).send(EDITS).expect(200);
+
+      const read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body).toMatchObject({
+        tagline: EDITS.tagline,
+        genres: EDITS.genres,
+        certification: EDITS.certification,
+        originalTitle: EDITS.originalTitle,
+        originalLanguage: EDITS.originalLanguage,
+        imdbId: EDITS.imdbId,
+      });
+      // A day, not a moment: read back as UTC midnight rather than shifted by
+      // whatever zone the server happens to be in.
+      expect(read.body.releaseDate).toBe('2019-05-06T00:00:00.000Z');
+    });
+
+    it('round-trips every field on a video', async () => {
+      const collection = await createCollection('Harry Potter');
+      const video = await seedVideo(collection.id, 'Philosophers Stone');
+
+      await admin.patch(`/videos/${video.id}`).send(EDITS).expect(200);
+
+      const read = await admin.get(`/videos/${video.id}`).expect(200);
+      expect(read.body).toMatchObject({
+        tagline: EDITS.tagline,
+        genres: EDITS.genres,
+        certification: EDITS.certification,
+        originalLanguage: EDITS.originalLanguage,
+        imdbId: EDITS.imdbId,
+      });
+    });
+
+    it('clears a field on an explicit empty value, and leaves it alone when omitted', async () => {
+      const collection = await createCollection('Harry Potter');
+      await admin.patch(`/collections/${collection.id}`).send(EDITS).expect(200);
+
+      await admin.patch(`/collections/${collection.id}`).send({ title: 'Renamed' }).expect(200);
+      let read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.tagline).toBe(EDITS.tagline);
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ tagline: '', imdbId: '', releaseDate: '' })
+        .expect(200);
+      read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.tagline).toBeNull();
+      expect(read.body.imdbId).toBeNull();
+      expect(read.body.releaseDate).toBeNull();
+    });
+
+    /** Parsed at the edge, like a trailer: what an admin pastes is a URL. */
+    it('reads an IMDb id out of a pasted URL, and refuses what it cannot read', async () => {
+      const collection = await createCollection('Harry Potter');
+
+      await admin
+        .patch(`/collections/${collection.id}`)
+        .send({ imdbId: 'https://www.imdb.com/title/tt7366338/?ref_=nv_sr_1' })
+        .expect(200);
+      const read = await admin.get('/collections/harry-potter').expect(200);
+      expect(read.body.imdbId).toBe('tt7366338');
+
+      // A person id is a different namespace and would be a dead link.
+      await admin.patch(`/collections/${collection.id}`).send({ imdbId: 'nm0000158' }).expect(400);
+      await admin.patch(`/collections/${collection.id}`).send({ releaseDate: 'last May' }).expect(400);
+    });
+  });
+
   describe('slug scoping', () => {
     // The plan's manual check: two collections may both contain a `pilot`.
     /**

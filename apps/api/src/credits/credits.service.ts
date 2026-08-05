@@ -13,9 +13,16 @@ const CREDIT_SELECT = {
   role: true,
   characterName: true,
   position: true,
+  // The raw TMDB job and department. `role` collapses everything but six jobs to
+  // OTHER, so these are what let a full-credits view say "Costume Designer"
+  // rather than listing two hundred people under one word.
+  jobTitle: true,
+  department: true,
   collectionId: true,
   videoId: true,
-  person: { select: { id: true, slug: true, name: true, photoKey: true } },
+  person: {
+    select: { id: true, slug: true, name: true, photoKey: true, imdbId: true, knownFor: true },
+  },
 } as const;
 
 /**

@@ -34,6 +34,23 @@ interface VideoRow {
 
 interface CollectionDetail {
   id: string
+  updatedAt?: string
+  /** Imported. Shown and edited in the Metadata card. */
+  tmdbId?: number | null
+  tmdbType?: string | null
+  imdbId?: string | null
+  genres?: string[]
+  tagline?: string | null
+  originalTitle?: string | null
+  originalLanguage?: string | null
+  releaseDate?: string | null
+  certification?: string | null
+  tmdbRating?: number | null
+  tmdbVoteCount?: number | null
+  seriesStatus?: string | null
+  seasonCount?: number | null
+  episodeCount?: number | null
+  metadataUpdatedAt?: string | null
   slug: string
   title: string
   description: string | null
@@ -84,12 +101,33 @@ const { data: stats } = await useApiData<Stats>(
 )
 
 const form = reactive({
-  title: collection.value.title,
-  description: collection.value.description ?? '',
-  year: collection.value.year,
-  tags: collection.value.tags.join(', '),
-  trailer: collection.value.trailerYoutubeId ?? '',
+  title: '',
+  description: '',
+  year: null as number | null,
+  tags: '',
+  trailer: '',
 })
+
+/**
+ * Re-seeded when the server record changes, not only once at setup.
+ *
+ * It used to be built eagerly from the first fetch and never read again, so
+ * after a metadata import refreshed the page the form still held the *old*
+ * values — and pressing Save wrote them straight back over what had just been
+ * imported. Keying on `updatedAt` re-reads after a save or an import and leaves
+ * whatever is being typed alone otherwise.
+ */
+function resetForm() {
+  if (!collection.value) return
+  form.title = collection.value.title
+  form.description = collection.value.description ?? ''
+  form.year = collection.value.year
+  form.tags = collection.value.tags.join(', ')
+  form.trailer = collection.value.trailerYoutubeId ?? ''
+}
+
+resetForm()
+watch(() => collection.value?.updatedAt, resetForm)
 const saving = ref(false)
 
 async function save() {
@@ -420,6 +458,14 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         {{ collection.state }}
       </UBadge>
       <div class="ml-auto flex gap-2">
+        <MetadataMatchModal
+          kind="collection"
+          :id="collection.id"
+          :title="collection.title"
+          :year="collection.year"
+          :matched-to="collection.tmdbId"
+          @applied="refresh"
+        />
         <UButton :to="`/c/${collection.slug}`" color="neutral" variant="subtle" icon="i-lucide-eye">
           View
         </UButton>
@@ -546,6 +592,12 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             <UButton :loading="saving" @click="save">Save changes</UButton>
           </div>
         </UCard>
+
+        <MetadataCard
+          kind="collection"
+          :record="{ ...collection, releaseDate: collection.releaseDate ?? null }"
+          @saved="refresh"
+        />
 
         <UCard>
           <!-- The same editor the video page uses. A credit entered here is

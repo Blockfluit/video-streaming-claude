@@ -897,9 +897,18 @@ account's comments, watch history and watchlist; `PATCH { isActive: false }` is 
     need limits — and that streaming, artwork, subtitle tracks and `/auth/me` must never have one, because
     a single `<video>` issues a range request per seek.
 
+19. **Title metadata from TMDB** — an admin matches a `Collection` or a `Video` against themoviedb.org and
+    approves a field-by-field diff; the import writes descriptive fields, genres, an age rating, artwork,
+    the whole cast and crew, and per-episode titles for a series. Deep-links out to IMDb from the title
+    and person surfaces.
+    **Not IMDb as the source.** IMDb has no public API and its terms forbid scraping. TMDB returns the
+    IMDb id for titles and people, so the links still go where they were asked to.
+    *Checkpoint: match a real film, watch its synopsis, year, genres and cast fill in, drag-reorder the
+    cast, re-import, and confirm the order survived.*
+
 ## Configuration
 
-`apps/api/.env` — `DATABASE_URL`, `SESSION_SECRET`, `MEDIA_ROOT`, `DERIVED_ROOT`, `PORT=4000`, `NODE_ENV`, `MAX_UPLOAD_BYTES`, `INGEST_WATCHER_ENABLED`, `TRANSCODE_CONCURRENCY=1`, `TRANSCODE_PRESET=medium`, `TRANSCODE_CRF=25`, `FFMPEG_PATH`, `FFPROBE_PATH`.
+`apps/api/.env` — `DATABASE_URL`, `SESSION_SECRET`, `MEDIA_ROOT`, `DERIVED_ROOT`, `PORT=4000`, `NODE_ENV`, `MAX_UPLOAD_BYTES`, `INGEST_WATCHER_ENABLED`, `TRANSCODE_CONCURRENCY=1`, `TRANSCODE_PRESET=medium`, `TRANSCODE_CRF=25`, `FFMPEG_PATH`, `FFPROBE_PATH`, and — all optional, the feature being simply off without the first — `TMDB_API_TOKEN`, `TMDB_LANGUAGE`, `TMDB_CERTIFICATION_COUNTRY`, `TMDB_IMAGE_SIZE`.
 `.env.example` committed; `.env`, `.bootstrap-token`, `media/`, `derived/` gitignored.
 
 Cookie: `httpOnly: true`, `sameSite: 'lax'`, `secure: NODE_ENV === 'production'`, `maxAge` 7 days, rolling.
@@ -969,5 +978,24 @@ curl -i -b cookies.txt -H "Range: bytes=99999999999-" http://localhost:3000/api/
 38. Build a row mixing a collection and a single video → renders in order on the home page; reordering persists. Archiving a collection hides it from `USER` but not `ADMIN`.
 39. Slugs: `/c/south-park/season-1/cartman-gets-an-anal-probe` resolves; two collections may both contain a `pilot` without collision.
 40. **My List:** add a film and a series → both appear on `/my-list` and in the home row. Double-click Add → still one entry (idempotent, no duplicate). Remove → gone from both places. The saved series shows its next unwatched episode, and that advances after you finish an episode. Each user's list is their own — a second account sees an empty list.
+
+**Metadata import**
+41. Set `TMDB_API_TOKEN`, open a draft film's admin page → **Find metadata** appears. Unset it and reload →
+    the button is gone rather than present and failing.
+42. Search a title → candidates list. Pick one → a diff of current against proposed, with only the changed
+    fields shown and everything **except the title** ticked. Untick a field → it stays as it was.
+43. Import with cast and crew → every one of them lands, not a top-billed few. The panel shows the leading
+    cast and the six key jobs; **Show all** reveals the rest with their real job titles, so two hundred
+    people are not all labelled "Other".
+44. Drag-reorder the cast, then import the same title again → nothing is duplicated and the billing order
+    you set is still there.
+45. Import artwork onto a video whose poster was chosen by hand → the dialog says it will replace it rather
+    than skipping silently, and the result is `MANUAL`, so the next reprobe leaves it alone.
+46. Match a second collection to a title already claimed → refused with a message naming the problem, not a
+    500.
+47. Point `TMDB_API_TOKEN` at nonsense → the screen says TMDB rejected the token. It must never say
+    "Internal server error", and the token must appear in no response and no log line.
+48. The IMDb icon appears beside a matched title on `/v/:slug` and `/c/:slug`, and beside people in the
+    credits panel once **Resolve IMDb links** has run. It opens the right page in a new tab.
 
 **Automated** — Jest unit tests for `path-parser.ts`, the subtitle matcher, `qualityLabel()` (including the `1920×800` letterbox case), and `needsConversion()` codec/container rules — all pure functions, all cheap to cover exhaustively. `supertest` e2e for the bootstrap-redeem-once invariant, role enforcement, publish gating, comment ownership rules, and Range responses (`206` / `416` / no-header `200`). Reconcile gets an integration test against a temp directory covering move, delete, restore, **and the `sourceDeletedAt` exemption** — these are the behaviours most likely to regress silently. Transcoding is verified manually against a real MKV; mocking ffmpeg would test the mock, not the pipeline.

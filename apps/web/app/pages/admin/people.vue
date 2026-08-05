@@ -15,6 +15,8 @@ interface Person {
   slug: string
   name: string
   bio: string | null
+  imdbId: string | null
+  knownFor: string | null
   _count?: { credits: number }
 }
 
@@ -29,6 +31,38 @@ const { data, refresh } = await useApiData<Page<Person>>(
 )
 
 const newName = ref('')
+const resolving = ref(false)
+
+/**
+ * Fills in the IMDb ids an import could not.
+ *
+ * TMDB does not return a person's IMDb id alongside a title's credits, so they
+ * are normally resolved lazily behind whoever gets looked at. That is fine for a
+ * library being browsed and slow for one that has just had a hundred films
+ * imported, which is what this is for.
+ */
+async function resolveLinks() {
+  resolving.value = true
+  try {
+    const result = await api<{ resolved: number, checked: number }>(
+      '/admin/metadata/people/resolve-links',
+      { method: 'POST' },
+    )
+    await refresh()
+    toast.add({
+      title: result.checked === 0
+        ? 'Everybody who can be linked already is'
+        : `Linked ${result.resolved} of ${result.checked}`,
+      color: 'success',
+    })
+  }
+  catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not resolve links'), color: 'error' })
+  }
+  finally {
+    resolving.value = false
+  }
+}
 
 async function create() {
   if (!newName.value.trim()) return
@@ -55,7 +89,18 @@ useHead({ title: 'People' })
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight">People</h1>
+      <div class="flex items-center justify-between gap-3">
+        <h1 class="text-2xl font-bold tracking-tight">People</h1>
+        <UButton
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-link"
+          :loading="resolving"
+          @click="resolveLinks"
+        >
+          Resolve IMDb links
+        </UButton>
+      </div>
       <p class="text-sm text-(--ui-text-muted)">Cast and crew, shared across the library.</p>
     </div>
 
@@ -80,8 +125,13 @@ useHead({ title: 'People' })
           <NuxtLink :to="`/people/${person.slug}`" class="truncate text-sm font-medium hover:underline">
             {{ person.name }}
           </NuxtLink>
-          <p class="text-xs text-(--ui-text-muted)">{{ person._count?.credits ?? 0 }} credits</p>
+          <p class="text-xs text-(--ui-text-muted)">
+            {{ person._count?.credits ?? 0 }} credits
+            <!-- What they do, which is what a people search wants to show. -->
+            <span v-if="person.knownFor"> · {{ person.knownFor }}</span>
+          </p>
         </div>
+        <ImdbLink :imdb-id="person.imdbId" kind="person" :label="person.name" />
         <UButton
           size="xs"
           variant="ghost"

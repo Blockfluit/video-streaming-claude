@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { collectionPath, playPath, videoPath } from './links'
+import { collectionPath, imdbPersonUrl, imdbTitleUrl, playPath, videoPath } from './links'
 
 describe('collectionPath', () => {
   it('points at the collection page', () => {
@@ -62,5 +62,47 @@ describe('playPath', () => {
 
   it('has a link for a video that belongs to no collection', () => {
     expect(playPath({ slug: 'orphan' })).toBe('/watch/orphan')
+  })
+})
+
+/**
+ * IMDb numbers titles and people in different namespaces, and the two paths are
+ * not interchangeable. The ids arrive from a third party, so the prefix is
+ * checked rather than trusted: a link to somebody else's 404 is not something
+ * this app can explain, and no link at all is the more honest answer.
+ */
+describe('imdbTitleUrl', () => {
+  it('points at the title', () => {
+    expect(imdbTitleUrl('tt0133093')).toBe('https://www.imdb.com/title/tt0133093/')
+  })
+
+  it('tolerates surrounding whitespace', () => {
+    expect(imdbTitleUrl('  tt0133093 ')).toBe('https://www.imdb.com/title/tt0133093/')
+  })
+
+  it('refuses a person id in a title field', () => {
+    expect(imdbTitleUrl('nm0000158')).toBeNull()
+  })
+
+  it('has nothing to offer for a title nobody has matched', () => {
+    expect(imdbTitleUrl(null)).toBeNull()
+    expect(imdbTitleUrl(undefined)).toBeNull()
+    expect(imdbTitleUrl('')).toBeNull()
+  })
+
+  it('refuses something merely containing an id', () => {
+    expect(imdbTitleUrl('tt0133093/reviews')).toBeNull()
+    expect(imdbTitleUrl('see tt0133093')).toBeNull()
+    expect(imdbTitleUrl('tt')).toBeNull()
+  })
+})
+
+describe('imdbPersonUrl', () => {
+  it('points at the person', () => {
+    expect(imdbPersonUrl('nm0000158')).toBe('https://www.imdb.com/name/nm0000158/')
+  })
+
+  it('refuses a title id in a person field', () => {
+    expect(imdbPersonUrl('tt0133093')).toBeNull()
   })
 })

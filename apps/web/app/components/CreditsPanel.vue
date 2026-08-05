@@ -9,13 +9,21 @@ import type { Page } from '@video/shared'
  * winning a clash — were reachable only from a test. An inherited credit is
  * marked, because that is the difference between "the series' director" and
  * "the director of this episode".
+ *
+ * An import stores **every** crew member, which is a couple of hundred people on
+ * a film, so the panel shows the top-billed cast and the jobs that have a
+ * heading of their own, keeping the rest behind a toggle. The trimming is here
+ * rather than in the API on purpose: the whole list already arrives in one
+ * response, so expanding costs nothing and a future people search has the data.
  */
 interface Credit {
   id: string
   role: string
   characterName: string | null
+  jobTitle: string | null
+  department: string | null
   inherited: boolean
-  person: { id: string, slug: string, name: string }
+  person: { id: string, slug: string, name: string, imdbId: string | null }
 }
 
 const props = defineProps<{ videoId: string }>()
@@ -25,36 +33,113 @@ const { data } = await useApiData<Page<Credit>>(
   `/videos/${props.videoId}/credits`,
 )
 
+const expanded = ref(false)
+
+/**
+ * How many of the cast are shown before expanding.
+ *
+ * Roughly a poster's billing block — enough to include anybody a viewer came
+ * looking for, and few enough that the crew below is still on the screen.
+ */
+const TOP_BILLED = 8
+
 /** Sentence case from the enum, so a new role needs no change here. */
 function roleLabel(role: string): string {
   return role.charAt(0) + role.slice(1).toLowerCase()
 }
 
+const all = computed(() => data.value?.items ?? [])
+
+const cast = computed(() => all.value.filter(credit => credit.role === 'ACTOR'))
+
+/** The billing block: as many as fit on a poster, in the order the server sent. */
+const topBilled = computed(() => cast.value.slice(0, TOP_BILLED))
+
 /**
- * Grouped by role, preserving the order the API sent.
+ * Collapsed, the panel is the cast and **one line** of crew.
  *
- * The sort is total and deliberate on the server (role, position,
+ * It used to cap only the cast and hide `OTHER`, leaving every key-crew group at
+ * full length — so a film with one director, one composer and one editor spent
+ * three headings on three names, and a series with forty producers spent rather
+ * more. Reported as "the list of people credited is very large", which it was:
+ * seven headings holding a dozen chips took more room than the cast did.
+ */
+const headline = computed(() => headlineCrew(all.value))
+
+const hiddenCount = computed(() => Math.max(all.value.length - topBilled.value.length, 0))
+
+/**
+ * Everybody, grouped by role — the expanded view only.
+ *
+ * The order is total and deliberate on the server (role, position,
  * collection-before-video, name, id); re-sorting here would throw that away and
  * make the panel reshuffle between requests.
  */
 const groups = computed(() => {
   const byRole = new Map<string, Credit[]>()
-  for (const credit of data.value?.items ?? []) {
+
+  for (const credit of all.value) {
     const list = byRole.get(credit.role)
     if (list) list.push(credit)
     else byRole.set(credit.role, [credit])
   }
+
   return [...byRole].map(([role, credits]) => ({ role, credits }))
 })
 </script>
 
 <template>
-  <section v-if="groups.length" class="space-y-4">
-    <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
-      Cast and crew
-    </h2>
+  <section v-if="all.length" class="space-y-4">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
+        Cast and crew
+      </h2>
+      <UButton
+        v-if="hiddenCount > 0 || expanded"
+        size="xs"
+        color="neutral"
+        variant="ghost"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? 'Show less' : `Show all ${all.length} credits` }}
+      </UButton>
+    </div>
 
-    <div class="space-y-4">
+    <!--
+      Collapsed: the billing block, then one line naming the crew people
+      actually look for. Everyone else is a button away.
+    -->
+    <div v-if="!expanded" class="space-y-3">
+      <ul class="flex flex-wrap gap-2">
+        <li v-for="credit in topBilled" :key="credit.id">
+          <span
+            class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
+          >
+            <span class="font-medium">{{ credit.person.name }}</span>
+            <span v-if="credit.characterName" class="text-(--ui-text-muted)">
+              as {{ credit.characterName }}
+            </span>
+            <ImdbLink :imdb-id="credit.person.imdbId" kind="person" :label="credit.person.name" />
+          </span>
+        </li>
+      </ul>
+
+      <p v-if="headline.length" class="text-sm text-(--ui-text-muted)">
+        <!--
+          The separators are inside the interpolation, not trailing whitespace in
+          the template: Vue trims a text node's edges, so `{{ label }} ` rendered
+          as "Directed byDan Trachtenberg".
+        -->
+        <template v-for="(group, index) in headline" :key="group.label">
+          <span v-if="index > 0" aria-hidden="true">{{ ' · ' }}</span>
+          <span>{{ group.label }}</span>
+          <span class="text-(--ui-text-toned)">{{ ` ${group.names.join(', ')}` }}</span>
+          <span v-if="group.more">{{ ` and ${group.more} more` }}</span>
+        </template>
+      </p>
+    </div>
+
+    <div v-else class="space-y-4">
       <div v-for="group in groups" :key="group.role" class="space-y-2">
         <h3 class="text-xs font-medium tracking-wide text-(--ui-text-dimmed) uppercase">
           {{ roleLabel(group.role) }}
@@ -69,6 +154,17 @@ const groups = computed(() => {
                 as {{ credit.characterName }}
               </span>
               <!--
+                The raw job, which is the only thing telling two OTHER credits
+                apart — without it a costume designer and a stunt coordinator both
+                read as "Other" and nothing distinguishes them.
+              -->
+              <span
+                v-else-if="credit.jobTitle && credit.role === 'OTHER'"
+                class="text-(--ui-text-muted)"
+              >
+                {{ credit.jobTitle }}
+              </span>
+              <!--
                 Marked, not hidden: an inherited credit is edited on the show,
                 and editing it from an episode would change every other episode.
               -->
@@ -77,6 +173,7 @@ const groups = computed(() => {
                 class="text-xs text-(--ui-text-dimmed)"
                 title="From the collection"
               >series</span>
+              <ImdbLink :imdb-id="credit.person.imdbId" kind="person" :label="credit.person.name" />
             </span>
           </li>
         </ul>
