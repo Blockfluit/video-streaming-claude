@@ -9,6 +9,8 @@
  */
 import type { MetadataField } from '@video/shared'
 
+import type { ArtworkShape } from '~/composables/useArtworkBust'
+
 const props = defineProps<{
   kind: 'collection' | 'video'
   id: string
@@ -18,7 +20,14 @@ const props = defineProps<{
   matchedTo?: number | null
 }>()
 
-const emit = defineEmits<{ applied: [] }>()
+/**
+ * Which pictures the import replaced, so the page can re-request exactly those.
+ *
+ * Told rather than inferred: the record the page refetches afterwards reads the same
+ * either way — `posterSource` may already have been MANUAL, and a collection's
+ * `posterKey` may already have been set — so this dialog is the only thing that knows.
+ */
+const emit = defineEmits<{ applied: [replaced: ArtworkShape[]] }>()
 
 const api = useApi()
 const toast = useToast()
@@ -152,8 +161,16 @@ async function apply() {
         includeEpisodes: includeEpisodes.value && preview.value?.episodes !== null,
       },
     })
+
+    // The tick alone is not the answer: `includeArtwork` stays true while its checkbox is
+    // hidden, which is what a title TMDB has no artwork for gets, and TMDB may hold one
+    // shape and not the other. Naming a picture that never moved would reload it.
+    const replaced = includeArtwork.value
+      ? (['poster', 'banner'] as const).filter(shape => preview.value?.artwork[shape])
+      : []
+
     open.value = false
-    emit('applied')
+    emit('applied', replaced)
     toast.add({ title: 'Metadata imported', color: 'success' })
   }
   catch (error) {

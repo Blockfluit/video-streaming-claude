@@ -195,17 +195,13 @@ async function confirmPublish() {
  * leave the shelf blank — which is why the panel says which of the two it is
  * currently showing.
  */
-const artworkBust = reactive<{ poster: number, banner: number }>({ poster: 0, banner: 0 })
+const artwork = useArtworkBust('collections', () => collection.value?.id)
 
-function collectionArtworkUrl(shape: 'poster' | 'banner'): string {
-  return `/api/collections/${collection.value!.id}/${shape}?v=${artworkBust[shape]}`
-}
-
-function isOwnArtwork(shape: 'poster' | 'banner'): boolean {
+function isOwnArtwork(shape: ArtworkShape): boolean {
   return Boolean(shape === 'poster' ? collection.value?.posterKey : collection.value?.bannerKey)
 }
 
-async function uploadArtwork(event: Event, shape: 'poster' | 'banner') {
+async function uploadArtwork(event: Event, shape: ArtworkShape) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
 
@@ -213,7 +209,7 @@ async function uploadArtwork(event: Event, shape: 'poster' | 'banner') {
   body.append('file', file)
   try {
     await api(`/collections/${collection.value!.id}/${shape}`, { method: 'POST', body })
-    artworkBust[shape] = Date.now()
+    artwork.replaced(shape)
     await refresh()
     toast.add({ title: 'Artwork updated', color: 'success' })
   }
@@ -222,16 +218,26 @@ async function uploadArtwork(event: Event, shape: 'poster' | 'banner') {
   }
 }
 
-async function resetArtwork(shape: 'poster' | 'banner') {
+async function resetArtwork(shape: ArtworkShape) {
   try {
     await api(`/collections/${collection.value!.id}/${shape}`, { method: 'DELETE' })
-    artworkBust[shape] = Date.now()
+    artwork.replaced(shape)
     await refresh()
     toast.add({ title: 'Back to inheriting', color: 'success' })
   }
   catch (error) {
     toast.add({ title: apiMessage(error, 'Could not reset that'), color: 'error' })
   }
+}
+
+/**
+ * An import can replace either shape, both, or neither — the dialog says which, because
+ * the refreshed record reads the same either way. A collection's `posterKey` may already
+ * have been set, so "it has one now" is no evidence that this import gave it one.
+ */
+async function metadataApplied(replaced: ArtworkShape[]) {
+  artwork.replaced(...replaced)
+  await refresh()
 }
 
 /* --- seasons --------------------------------------------------------- */
@@ -464,7 +470,7 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
           :title="collection.title"
           :year="collection.year"
           :matched-to="collection.tmdbId"
-          @applied="refresh"
+          @applied="metadataApplied"
         />
         <UButton :to="`/c/${collection.slug}`" color="neutral" variant="subtle" icon="i-lucide-eye">
           View
@@ -771,7 +777,7 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             <div v-for="shape in (['poster', 'banner'] as const)" :key="shape">
               <div class="flex items-start gap-3">
                 <img
-                  :src="collectionArtworkUrl(shape)"
+                  :src="artwork.url(shape)"
                   :alt="shape === 'poster' ? 'Poster' : 'Banner'"
                   class="shrink-0 rounded-md bg-(--ui-bg-accented) object-cover"
                   :class="shape === 'poster' ? 'aspect-2/3 w-20' : 'aspect-video w-32'"

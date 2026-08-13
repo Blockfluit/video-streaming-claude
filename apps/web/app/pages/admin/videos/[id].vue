@@ -173,8 +173,6 @@ async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Do
  * hand-pick a poster for a film and still let the banner regenerate on the next
  * probe. One combined control would have to overwrite both.
  */
-type ArtworkShape = 'poster' | 'banner'
-
 const ARTWORK = [
   {
     shape: 'poster' as const,
@@ -190,19 +188,7 @@ const ARTWORK = [
   },
 ]
 
-/**
- * A cache-buster per shape.
- *
- * The storage key does not change when a picture is replaced, so the ETag alone
- * cannot help an `<img>` the browser never re-requests. Per shape rather than
- * shared, or replacing the banner would silently reload the poster too and hide
- * whether the thing you just did worked.
- */
-const bust = reactive<Record<ArtworkShape, number>>({ poster: 0, banner: 0 })
-
-function artworkUrl(shape: ArtworkShape): string {
-  return `/api/videos/${id}/${shape}?v=${bust[shape]}`
-}
+const artwork = useArtworkBust('videos', id)
 
 function artworkSource(shape: ArtworkShape): string {
   return shape === 'poster' ? (video.value?.posterSource ?? '') : (video.value?.bannerSource ?? '')
@@ -214,7 +200,7 @@ async function captureArtwork(shape: ArtworkShape) {
       method: 'POST',
       body: { atSeconds: Math.round(previewTime.value * 10) / 10 },
     })
-    bust[shape] = Date.now()
+    artwork.replaced(shape)
     await refresh()
     toast.add({ title: `${shape === 'poster' ? 'Poster' : 'Banner'} captured`, color: 'success' })
   } catch (error) {
@@ -230,7 +216,7 @@ async function uploadArtwork(event: Event, shape: ArtworkShape) {
   body.append('file', file)
   try {
     await api(`/videos/${id}/${shape}`, { method: 'POST', body })
-    bust[shape] = Date.now()
+    artwork.replaced(shape)
     await refresh()
   } catch (error) {
     toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
@@ -239,7 +225,18 @@ async function uploadArtwork(event: Event, shape: ArtworkShape) {
 
 async function resetArtwork(shape: ArtworkShape) {
   await act(`/${shape}`, 'DELETE', 'Back to automatic')
-  bust[shape] = Date.now()
+  artwork.replaced(shape)
+}
+
+/**
+ * An import can replace either shape, both, or neither — the dialog says which, because
+ * the refreshed record reads the same either way. Bumping more than it names would reload
+ * a picture the import never touched, and the panel would stop telling the truth about
+ * what the import just did.
+ */
+async function metadataApplied(replaced: ArtworkShape[]) {
+  artwork.replaced(...replaced)
+  await refresh()
 }
 
 async function uploadSubtitle(event: Event) {
@@ -297,7 +294,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
           :title="video.title"
           :year="video.year"
           :matched-to="video.tmdbId"
-          @applied="refresh"
+          @applied="metadataApplied"
         />
         <UButton
           v-if="video.state !== 'PUBLISHED'"
@@ -482,7 +479,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
           </template>
 
           <img
-            :src="artworkUrl(art.shape)"
+            :src="artwork.url(art.shape)"
             alt=""
             class="mb-3 rounded bg-(--ui-bg-accented) object-cover"
             :class="art.frame"
