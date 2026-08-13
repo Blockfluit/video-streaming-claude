@@ -112,6 +112,36 @@ test.describe('viewer', () => {
     await expect(page.getByPlaceholder('Search the library')).toHaveValue('zzzznothing')
   })
 
+  /**
+   * Browse lists a shelf and the films on it side by side, so a card has to say
+   * which it is. The chip is the whole of that answer.
+   *
+   * The film half is decided from the **data**, never from `locator.count()`:
+   * a count guard runs before the client-side route has rendered and is
+   * therefore always true, which is how a skip reports green for months. The
+   * fetch also drives `?film=true` through the proxy end to end, so a rename
+   * that missed the API would fail here rather than quietly find nothing.
+   */
+  test('browse says which cards are shelves and which are films', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const shelf = page.locator('main a[href^="/c/"]').first()
+    await expect(shelf).toBeVisible()
+    await expect(shelf.getByText(/\d+ (season|film)s?|Collection/)).toBeVisible()
+
+    const films = await page.evaluate(async () => {
+      const response = await fetch('/api/videos?film=true&limit=1')
+      return response.ok ? ((await response.json()).items ?? []).length : 0
+    })
+
+    if (films > 0) {
+      const film = page.locator('main a[href^="/v/"]').first()
+      await expect(film).toBeVisible()
+      // A film is the ordinary case, and says so by carrying no chip.
+      await expect(film.getByText(/\d+ (season|film)s?/)).toHaveCount(0)
+    }
+  })
+
   test('history renders what has been watched', async ({ page }) => {
     await visit(page, '/history')
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()

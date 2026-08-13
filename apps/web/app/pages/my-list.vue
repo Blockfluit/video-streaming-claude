@@ -23,7 +23,16 @@ interface CardVideo {
 interface SavedItem {
   id: string
   video: CardVideo | null
-  collection: { id: string, slug: string, title: string, year: number | null, posterKey: string | null } | null
+  collection: {
+    id: string
+    slug: string
+    title: string
+    year: number | null
+    posterKey: string | null
+    /** What it holds, which is what its chip says. */
+    seasonsHere?: number | null
+    videosHere?: number | null
+  } | null
   next: { id: string, video: CardVideo } | null
 }
 
@@ -81,6 +90,7 @@ useHead({ title: 'My List' })
           "
           :width="item.collection ? item.next?.video.width : item.video!.width"
           :height="item.collection ? item.next?.video.height : item.video!.height"
+          :kind="item.collection ? collectionChip(item.collection) : null"
         />
 
         <!--
