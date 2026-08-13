@@ -31,7 +31,7 @@ test.describe('admin', () => {
       ['Upload', '/admin/upload'],
       ['Jobs', '/admin/jobs'],
       ['Ingest', '/admin/ingest'],
-      ['Curated rows', '/admin/lists'],
+      ['Home page rows', '/admin/lists'],
       ['People', '/admin/people'],
       ['Accounts', '/admin/users'],
     ] as const) {
@@ -122,6 +122,33 @@ test.describe('admin', () => {
       await expect(other).toHaveAttribute('src', otherBefore!)
     })
   }
+
+  /**
+   * Reached by clicking the sidebar, not by `goto`.
+   *
+   * The page once shipped throwing in `setup` — its whole content area rendered
+   * as nothing inside an intact admin layout — and the stack came through
+   * Suspense's `registerDep`, which is the client-side navigation path. A direct
+   * `goto` server-renders first and is a different route into the same screen,
+   * so this asserts the one that actually broke.
+   *
+   * Its real assertion is the `pageerror` watchdog in `fixtures.ts`. Note it can
+   * only catch a *dev-mode* throw: the fault that prompted this test appeared
+   * solely in the production build, and this suite runs against the dev servers.
+   * `app/utils/auto-imports.spec.ts` is what covers that half.
+   */
+  test('the home page rows screen renders when opened from the sidebar', async ({ page }) => {
+    await visit(page, '/admin')
+    await page.getByRole('link', { name: 'Home page rows', exact: true }).first().click()
+    await page.waitForURL('/admin/lists')
+
+    await expect(page.getByRole('heading', { name: 'Home page rows' })).toBeVisible()
+    await expect(page.getByPlaceholder('New row title')).toBeVisible()
+
+    // Seeded by the configurable-home-rows migration, so they are always there.
+    await expect(page.getByRole('heading', { name: 'Continue watching' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'My list' })).toBeVisible()
+  })
 
   test('a curated row can be created, filled, reordered and deleted', async ({ page }) => {
     await visit(page, '/admin/lists')

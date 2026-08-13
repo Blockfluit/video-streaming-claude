@@ -105,10 +105,18 @@ async function patch(row: HomeRow, body: Record<string, unknown>) {
   }
 }
 
-/** The body is already `{ collectionId }` or `{ videoId }` — exactly one, as the API requires. */
-async function addItem(row: HomeRow, ref: { collectionId: string } | { videoId: string }) {
+/**
+ * The body is already `{ collectionId }` or `{ videoId }` — exactly one, as the API requires.
+ *
+ * The parameter is `entry` and must not be called `ref`. A binding of that name
+ * anywhere in the script makes the **production** build drop Nuxt's auto-imported
+ * `ref`, so `ref('')` above becomes a free global and setup throws
+ * `ReferenceError: ref is not defined` — which renders the page as nothing at all
+ * inside an intact admin layout. `npm run dev` does not reproduce it.
+ */
+async function addItem(row: HomeRow, entry: { collectionId: string } | { videoId: string }) {
   try {
-    await api(`/lists/${row.id}/items`, { method: 'POST', body: ref })
+    await api(`/lists/${row.id}/items`, { method: 'POST', body: entry })
     await refresh()
   }
   catch (error) {
@@ -344,7 +352,7 @@ useHead({ title: 'Home page rows' })
           :row-title="row.title"
           :present-collection-ids="presentIds(row, 'collection')"
           :present-video-ids="presentIds(row, 'video')"
-          @add="(ref) => addItem(row, ref)"
+          @add="(entry) => addItem(row, entry)"
         />
       </template>
 

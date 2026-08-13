@@ -33,7 +33,7 @@ const props = defineProps<{
   presentVideoIds: string[]
 }>()
 
-const emit = defineEmits<{ add: [ref: { collectionId: string } | { videoId: string }] }>()
+const emit = defineEmits<{ add: [entry: { collectionId: string } | { videoId: string }] }>()
 
 const api = useApi()
 
