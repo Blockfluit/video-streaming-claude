@@ -57,10 +57,21 @@ interface FeaturedCollection extends CardCollection {
   description: string | null
 }
 
-const [{ data: rows }, { data: collections }] = await Promise.all([
-  useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20'),
-  useApiData<Page<FeaturedCollection>>('home-featured', '/collections?limit=1'),
-])
+/**
+ * Both errors are kept.
+ *
+ * Every shelf here hides itself when it resolves to nothing, so a failed fetch
+ * and an empty library render identically — right down to "Nothing here yet",
+ * which tells a viewer the library is empty when in fact the server is down.
+ * One is a state worth designing for; the other is worth reporting.
+ */
+const [{ data: rows, error: rowsError }, { data: collections, error: featuredError }]
+  = await Promise.all([
+    useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20'),
+    useApiData<Page<FeaturedCollection>>('home-featured', '/collections?limit=1'),
+  ])
+
+const failed = computed(() => rowsError.value ?? featuredError.value ?? null)
 
 /**
  * A row that resolves to nothing is not rendered.
@@ -200,8 +211,21 @@ useHead({ title: 'Home' })
       </MediaRow>
     </div>
 
+    <!--
+      Checked before the empty state, which would otherwise announce an empty
+      library on behalf of a server that never answered.
+    -->
+    <div v-if="failed" class="grid min-h-screen place-items-center px-6 text-center">
+      <div class="space-y-4">
+        <UIcon name="i-lucide-unplug" class="size-12 text-(--ui-text-dimmed)" />
+        <h1 class="text-2xl font-semibold">The library could not be reached</h1>
+        <p class="text-(--ui-text-muted)">{{ apiMessage(failed, 'Something went wrong loading this page.') }}</p>
+        <UButton color="neutral" variant="subtle" @click="reloadNuxtApp()">Try again</UButton>
+      </div>
+    </div>
+
     <!-- A new library is empty, and that is a state worth designing for. -->
-    <div v-if="isEmpty" class="grid min-h-screen place-items-center px-6 text-center">
+    <div v-else-if="isEmpty" class="grid min-h-screen place-items-center px-6 text-center">
       <div class="space-y-4">
         <UIcon name="i-lucide-clapperboard" class="size-12 text-(--ui-text-dimmed)" />
         <h1 class="text-2xl font-semibold">Nothing here yet</h1>

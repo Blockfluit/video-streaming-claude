@@ -697,6 +697,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   been proven to honour any convention.**
 - **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
   A frontend change is verified in a browser or it is not verified.
+- **Never name a local binding after an auto-imported Vue API.** A parameter called `ref` in
+  `admin/lists.vue` made the **production** build emit that page's chunk with no `import { ref }` in it, so
+  `ref('')` called a free global and setup threw `ReferenceError: ref is not defined`. A component whose
+  setup throws renders **nothing**, so the screen was a blank content area inside an intact admin sidebar —
+  no heading, no error, nothing to click, and an API and database that were both fine. Isolated by building
+  it each way round: the name of the *template's* arrow parameter makes no difference (it is minified away,
+  and both builds are byte-identical); the *script* binding is the whole of it. `auto-imports.spec.ts`
+  parses every SFC for this and is verified by mutation. It is parsed rather than grepped because the two
+  cases genuinely differ and a regex cannot separate them — `{ watch: [q, tag] }` in `browse.vue` is an
+  option key and is fine, `(row, ref: T)` is a binding and is not.
+- **`npm run dev` and the browser suite cannot see a production-only build fault.** The one above appeared
+  solely in `nuxt build` output, and `apps/web/e2e` runs against the **dev servers** — so its `pageerror`
+  watchdog, which is exactly the right assertion, never ran against the code that was broken. Anything that
+  depends on how the bundle is *built* needs either a source-level check or a run against `.output`.
+- A blank screen and an empty library must not look alike. `useApiData` returns `null` for both a failed
+  request and no results, so a page that destructures only `{ data }` renders an outage as "No rows yet" or
+  "Nothing here yet" — which sends whoever reads it looking in entirely the wrong place. Take `error` too
+  and check it **before** the empty state.
 - **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every control
   on the page cleared AA — the worst was 5.78:1 and the `Edit` buttons measured 6.19:1. The formula weights
   red at 0.2126, so saturated red text on near-black scores well and reads badly at 12–14px. The fix was to
