@@ -50,7 +50,15 @@ interface HomeRow {
 const api = useApi()
 const toast = useToast()
 
-const { data, refresh } = await useApiData<Page<HomeRow>>(
+/**
+ * `error` is taken, not discarded.
+ *
+ * `data` is null whether the request failed or the library simply has no rows,
+ * and both then fall into `v-if="!data?.items?.length"` — so an outage read as
+ * "No rows yet, so the home page has nothing to show", which is a sentence that
+ * sends an admin looking in the wrong place entirely.
+ */
+const { data, error, refresh } = await useApiData<Page<HomeRow>>(
   'admin-lists',
   '/lists?includeHidden=true&limit=100',
 )
@@ -68,8 +76,10 @@ const kindOptions: { label: string, value: RowKind }[] = [
   { label: 'Individual videos', value: 'VIDEOS' },
 ]
 
+// `rowSpec` rather than a bare lookup: `row.source` is whatever the API sent,
+// and an unrecognised one throwing here would draw nothing at all.
 const reads = (row: HomeRow, field: string): boolean =>
-  (ROW_SOURCE_SPECS[row.source].fields as readonly string[]).includes(field)
+  (rowSpec(row.source).fields as readonly string[]).includes(field)
 
 async function create() {
   if (!newTitle.value.trim()) return
@@ -220,7 +230,7 @@ useHead({ title: 'Home page rows' })
       <div class="mb-3 flex flex-wrap items-center gap-3">
         <h2 class="font-semibold">{{ row.title }}</h2>
         <UBadge color="neutral" variant="subtle" size="sm">
-          {{ ROW_SOURCE_SPECS[row.source].label }}
+          {{ rowSpec(row.source).label }}
         </UBadge>
         <UBadge v-if="!row.isVisible" color="neutral" variant="subtle" size="sm">hidden</UBadge>
 
@@ -255,7 +265,7 @@ useHead({ title: 'Home page rows' })
         </div>
       </div>
 
-      <p class="mb-3 text-sm text-(--ui-text-muted)">{{ ROW_SOURCE_SPECS[row.source].hint }}</p>
+      <p class="mb-3 text-sm text-(--ui-text-muted)">{{ rowSpec(row.source).hint }}</p>
 
       <!-- Only the settings this source actually reads. -->
       <div v-if="!reads(row, 'items')" class="mb-4 flex flex-wrap items-end gap-3">
@@ -375,7 +385,16 @@ useHead({ title: 'Home page rows' })
       </div>
     </div>
 
-    <p v-if="!data?.items?.length" class="py-20 text-center text-(--ui-text-muted)">
+    <!--
+      A failure and an empty library are different things and must not read the
+      same. `error` first, because when it is set `data` is null and the line
+      below would otherwise claim there are no rows.
+    -->
+    <div v-if="error" class="py-20 text-center">
+      <p class="text-(--ui-text)">{{ apiMessage(error, 'Could not load the rows.') }}</p>
+      <UButton class="mt-3" color="neutral" variant="subtle" @click="refresh()">Try again</UButton>
+    </div>
+    <p v-else-if="!data?.items?.length" class="py-20 text-center text-(--ui-text-muted)">
       No rows yet, so the home page has nothing to show.
     </p>
   </div>
