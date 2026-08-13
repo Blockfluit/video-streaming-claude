@@ -58,6 +58,40 @@ Drop files into `media/` and the watcher ingests them. That works because this i
 — `inotify` does not fire reliably over NFS or SMB, so if the library ever moves to a network share,
 expect to trigger a rescan by hand.
 
+#### Drives that are symlinks
+
+Every folder directly under `MEDIA_PATH` is a *drive*, and in practice a symlink to a physical disk:
+
+```sh
+ln -s /mnt/hdd1/videos /srv/docker/streaming-platform-dev/media/disk1
+```
+
+**The target has to be mounted into the container too, under the same absolute path.** A symlink is
+resolved by the kernel in the *container's* mount namespace, not the host's, so a link naming
+`/mnt/hdd1/videos` finds nothing unless that path exists in there as well. `DISKS_PATH` (default
+`/mnt`) is mounted at the same path on both sides for exactly this, so adding a disk under it needs
+no change to the stack. A link pointing outside `DISKS_PATH` still dangles.
+
+The symptom when it is wrong is **`ENOENT` against the drive in the admin ingest list**, which is
+easy to read as broken symlink support and is not: the scan followed the link correctly and found
+nothing on the other side. The detail column names the target it could not reach. Confirm it
+directly with:
+
+```sh
+docker exec <stack>-api ls -l /media      # the link, and what it points at
+docker exec <stack>-api stat /media/disk1 # "No such file or directory" when the target is unmounted
+```
+
+Two things that bite next, once the path resolves:
+
+- The disk must be readable **and writable by uid 1000** — the container runs as `node`, and uploads
+  land on a drive. Wrong ownership gives `EACCES` where this gave `ENOENT`.
+- `inotify` still does not cross NFS or SMB. A disk mounted that way is scanned but never watched,
+  so new files need a rescan.
+
+If mounting all of `DISKS_PATH` is too broad, replace that one volume with a line per disk
+(`- /mnt/hdd1:/mnt/hdd1`) — same rule, narrower, at the cost of a stack edit per disk.
+
 ### 2. GHCR access
 
 Nothing to do, but worth knowing why. The repository is public, so the stack needs no Git credential,

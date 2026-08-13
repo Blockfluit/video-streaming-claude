@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readlink, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import { parseMediaPath, type MediaPath } from './path-parser';
@@ -91,7 +91,7 @@ async function walk(root: string, directory: string, result: ScanResult, depth: 
         // A drive that is not mounted. Worth reporting, not worth crashing over.
         result.unreadable.push({
           relPath: toRelPath(root, absolute),
-          reason: (error as NodeJS.ErrnoException).code ?? 'unreadable',
+          reason: await describeBrokenDrive(absolute, error),
         });
         continue;
       }
@@ -128,6 +128,31 @@ async function walk(root: string, directory: string, result: ScanResult, depth: 
     if (parsed.kind === 'video') result.videos.push(file);
     else if (parsed.kind === 'subtitle') result.subtitles.push(file);
     else result.issues.push(file);
+  }
+}
+
+/**
+ * Why a drive symlink could not be followed, in a sentence an admin can act on.
+ *
+ * The bare errno is true and useless: `ENOENT` on a drive that is plainly there
+ * on the host reads as a bug in the library. It usually means the link's target
+ * is not reachable from where the API is running — under Docker, a link naming
+ * `/mnt/hdd1/videos` needs that path mounted into the container, because the
+ * kernel resolves symlinks in the container's own mount namespace. Naming the
+ * target is the difference between a diagnosis and a code.
+ *
+ * This prints an absolute server path on purpose. The rule about reducing those
+ * to filenames is about ffmpeg output, where the path is incidental to the
+ * error; here it *is* the error, and the ingest list is ADMIN-only.
+ */
+async function describeBrokenDrive(absolute: string, error: unknown): Promise<string> {
+  const code = (error as NodeJS.ErrnoException).code ?? 'unreadable';
+
+  try {
+    return `${code}: links to ${await readlink(absolute)}, which is not there`;
+  } catch {
+    // Not a link after all, or unreadable itself. The code alone still beats nothing.
+    return code;
   }
 }
 
