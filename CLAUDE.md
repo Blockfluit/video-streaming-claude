@@ -204,6 +204,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   symlinked directory as neither `isDirectory()` nor `isFile()`, so following it is explicit and deliberate.
   Deeper links are not followed and symlinked files are not ingested; `MAX_WALK_DEPTH` bounds the drive case
   in case a link points back up its own tree.
+- A symlinked drive is resolved in the **container's** mount namespace, so a deployment has to mount the
+  target at the same absolute path the link names (`DISKS_PATH` in `deploy/compose.yml`). Bind-mounting
+  `MEDIA_PATH` alone leaves `media/disk1 -> /mnt/hdd1/videos` dangling, and the scan reports `ENOENT`
+  against a disk that is plainly there on the host — which reads as broken symlink support and is the
+  opposite: the link was followed correctly and there was nothing behind it. Mounting a disk *onto*
+  `/media/disk1` instead does not work, because Docker resolves that mount point through the very symlink
+  that is broken.
+- A dangling drive is reported with the **target it could not reach**, not a bare errno. `ENOENT` alone
+  sends an admin looking for a bug in the library rather than at their mounts. That message prints an
+  absolute server path deliberately — the rule about reducing those to filenames is about ffmpeg output,
+  where the path is incidental; here it is the entire diagnosis, and the ingest list is ADMIN-only.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place, dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion. The rename

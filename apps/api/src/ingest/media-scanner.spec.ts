@@ -92,6 +92,26 @@ describe('scanMediaRoot', () => {
     await expect(scanMediaRoot(root)).resolves.toMatchObject({ videos: [] });
   });
 
+  /**
+   * The message an admin is left with when a drive will not mount.
+   *
+   * A bare `ENOENT` against a disk that is plainly there on the host reads as a
+   * bug in the library. It is usually the target being unreachable from where
+   * the API runs — under Docker, a link naming a host path needs that path
+   * mounted in, since symlinks resolve in the container's mount namespace. The
+   * target is the whole diagnosis, so it has to be in the text.
+   */
+  it('names the target a dangling drive points at', async () => {
+    const missing = join(elsewhere, 'not-mounted');
+    await symlink(missing, join(root, 'disk1'), 'dir');
+
+    const scan = await scanMediaRoot(root);
+
+    expect(scan.unreadable).toEqual([
+      { relPath: 'disk1', reason: `ENOENT: links to ${missing}, which is not there` },
+    ]);
+  });
+
   it('still skips a symlinked file rather than ingesting it', async () => {
     await file(elsewhere, 'Inception.mp4');
     await mkdir(join(root, 'disk1', 'Inception'), { recursive: true });

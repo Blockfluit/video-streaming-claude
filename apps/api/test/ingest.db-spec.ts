@@ -611,5 +611,31 @@ describe('Ingest (real database)', () => {
       await reconcile.run();
       expect((await videos())[0]).toMatchObject({ state: 'DRAFT' });
     });
+
+    /**
+     * The string the admin ingest page prints in its detail column.
+     *
+     * It said `ENOENT` and nothing else, against a disk that was plainly there
+     * on the host — which reads as the library being broken rather than as a
+     * drive it cannot reach. Under Docker that is the usual case: the link names
+     * a host path that was never mounted into the container, and symlinks
+     * resolve in the container's own mount namespace. Asserted here rather than
+     * only in the scanner's unit tests because this is the value that actually
+     * reaches the screen.
+     */
+    it('files an issue naming what an unmounted drive points at', async () => {
+      const target = join(workspace, 'disks', 'disk-a');
+      await mount();
+
+      await reconcile.run();
+
+      expect(await openIssues()).toEqual([
+        expect.objectContaining({
+          kind: 'UNREADABLE_FILE',
+          path: 'disk1',
+          detail: `ENOENT: links to ${target}, which is not there`,
+        }),
+      ]);
+    });
   });
 });

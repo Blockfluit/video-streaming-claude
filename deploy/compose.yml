@@ -103,6 +103,21 @@ services:
     volumes:
       - ${MEDIA_PATH}:/media
       - ${DERIVED_PATH}:/derived
+
+      # Where the drives actually live.
+      #
+      # Every folder directly under MEDIA_ROOT is a symlink to a physical disk,
+      # and a symlink is resolved in the *container's* mount namespace, not the
+      # host's. So `media/disk1 -> /mnt/hdd1/videos` needs /mnt/hdd1/videos to
+      # exist in here as well, under that exact path, or the link dangles and
+      # the scan reports ENOENT against a disk that is plainly there on the
+      # host. Mounting the parent at the same path on both sides keeps the link
+      # text true and means a new disk needs no change to this file.
+      #
+      # Read-write: uploads land on a drive. Narrow DISKS_PATH, or replace this
+      # with one line per disk, if exposing every mount is too much.
+      - ${DISKS_PATH:-/mnt}:${DISKS_PATH:-/mnt}
+
       - apistate:/state
     networks:
       - internal
