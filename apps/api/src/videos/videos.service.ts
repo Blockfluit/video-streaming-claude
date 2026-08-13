@@ -7,6 +7,7 @@ import {
   type UpdateVideoInput,
 } from '@video/shared';
 
+import { whereEpisode, whereFilm } from '../common/films';
 import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
 import { titleUpdate } from '../common/title';
@@ -22,19 +23,21 @@ import { validateMarkers, type Markers } from './markers';
  * dropped the collection and answered about the season alone. Building the
  * clause once is what makes that impossible rather than merely unlikely.
  *
- * `standalone` is the odd one: it asks for the videos in *no* collection, which
- * is `none` over the join and cannot be expressed as a `some` at all. Omitted
- * means "do not filter"; `false` genuinely means "in at least one".
+ * `film` is the odd one: it is a fact about the *seasons behind* the join —
+ * see `common/films.ts` — so it is `none`/`some` across two relations and
+ * cannot be folded into the membership object below. Omitted means "do not
+ * filter"; `false` asks for the episodes.
  */
-function membershipFilter(query: ListVideosQuery) {
-  if (query.standalone === true) return { collections: { none: {} } };
+function membershipFilter(query: ListVideosQuery, role: Role) {
+  if (query.film === true) return whereFilm(role);
+  if (query.film === false) return whereEpisode();
 
   const membership = {
     ...(query.collectionId ? { collectionId: query.collectionId } : {}),
     ...(query.seasonId ? { seasonId: query.seasonId } : {}),
   };
 
-  if (Object.keys(membership).length === 0 && query.standalone === undefined) return {};
+  if (Object.keys(membership).length === 0) return {};
 
   return { collections: { some: membership } };
 }
@@ -110,7 +113,7 @@ export class VideosService {
    */
   async list(query: ListVideosQuery, role: Role): Promise<Page<unknown>> {
     const where = {
-      ...membershipFilter(query),
+      ...membershipFilter(query, role),
       ...(query.tag ? { tags: { has: query.tag } } : {}),
       ...(query.q
         ? {

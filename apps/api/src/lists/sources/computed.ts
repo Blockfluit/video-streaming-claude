@@ -1,5 +1,6 @@
 import { DEFAULT_TRENDING_WINDOW_DAYS } from '@video/shared';
 
+import { COUNTS_HERE_SELECT, withCountsHere } from '../../common/films';
 import { visibleStates, whereVisible } from '../../common/publishing';
 import type { PublishState, Role, RowKind, RowSource } from '../../prisma/generated/enums';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -35,6 +36,12 @@ export interface ComputedRow {
  */
 const POOL_LIMIT = 2000;
 
+/**
+ * One shared shape, because a collection card is a collection card wherever it
+ * is rendered. It was hand-copied into `lists.service` and `watchlist.service`,
+ * so a field added here reached a computed row's cards and neither of theirs —
+ * which is how a shelf ends up rendering a chip its neighbour cannot.
+ */
 export const COLLECTION_CARD_SELECT = {
   id: true,
   slug: true,
@@ -42,6 +49,7 @@ export const COLLECTION_CARD_SELECT = {
   year: true,
   posterKey: true,
   state: true,
+  ...COUNTS_HERE_SELECT,
 } as const;
 
 export const VIDEO_CARD_SELECT = {
@@ -218,7 +226,9 @@ async function hydrate(
   ]);
 
   const byId = new Map<string, { collection?: unknown; video?: unknown }>();
-  for (const collection of collections) byId.set(collection.id, { collection });
+  for (const collection of collections) {
+    byId.set(collection.id, { collection: withCountsHere(collection) });
+  }
   for (const video of videos) byId.set(video.id, { video });
 
   return ranked.flatMap((entry) => {

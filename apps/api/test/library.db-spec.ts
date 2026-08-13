@@ -71,9 +71,10 @@ describe('Library (real database)', () => {
   }
 
   /**
-   * A video in no collection at all — a standalone film, which is what a folder
-   * holding one video becomes. It is an ordinary row with no membership, not a
-   * special kind of video.
+   * A video in no collection at all, which is what a folder holding one video
+   * becomes. It is an ordinary row with no membership, not a special kind of
+   * video — and it is *one* way to be a film rather than the definition of one:
+   * a film on a season-less shelf is equally a film.
    */
   async function seedStandaloneVideo(
     title: string,
@@ -105,6 +106,17 @@ describe('Library (real database)', () => {
 
   async function createCollection(title: string, extra: Record<string, unknown> = {}) {
     const response = await admin.post('/collections').send({ title, ...extra }).expect(201);
+    return response.body;
+  }
+
+  /**
+   * A season on a collection, which is what makes it a *series*.
+   *
+   * Worth a helper because it is the whole of the film rule: a collection with
+   * one of these holds instalments, and a collection without one holds films.
+   */
+  async function addSeason(collectionId: string, number: number) {
+    const response = await admin.post('/seasons').send({ collectionId, number }).expect(201);
     return response.body;
   }
 
@@ -191,6 +203,47 @@ describe('Library (real database)', () => {
       const user = await asUser();
 
       await user.post('/collections').send({ title: 'Nope' }).expect(403);
+    });
+  });
+
+  /**
+   * What a card needs to say whether it is a shelf of seasons or of films.
+   *
+   * `seasonCount` is TMDB's count of the whole show and is routinely larger
+   * than what we hold — "3 of 5 seasons here" is a sentence only because they
+   * are two different numbers — so it cannot answer this.
+   */
+  describe('how much a collection holds', () => {
+    it('counts the seasons and videos it actually holds', async () => {
+      const show = await createCollection('South Park');
+      await addSeason(show.id, 1);
+      const season = await addSeason(show.id, 2);
+      await seedVideo(show.id, 'Cartman', {}, { seasonId: season.id });
+
+      const saga = await createCollection('Harry Potter');
+      await seedVideo(saga.id, 'Chamber of Secrets');
+      await seedVideo(saga.id, 'Philosophers Stone');
+
+      const listed = await admin.get('/collections').expect(200);
+      const byTitle = new Map(
+        listed.body.items.map((collection: { title: string }) => [collection.title, collection]),
+      );
+
+      expect(byTitle.get('South Park')).toMatchObject({ seasonsHere: 2, videosHere: 1 });
+      expect(byTitle.get('Harry Potter')).toMatchObject({ seasonsHere: 0, videosHere: 2 });
+
+      // Prisma's shape is not the API's, and TMDB's count is a different fact.
+      expect(byTitle.get('South Park')).not.toHaveProperty('_count');
+      expect(byTitle.get('South Park')).toMatchObject({ seasonCount: null });
+    });
+
+    it('counts them on the collection page too', async () => {
+      const saga = await createCollection('Harry Potter');
+      await seedVideo(saga.id, 'Goblet of Fire');
+
+      const page = await admin.get(`/collections/${saga.slug}`).expect(200);
+      expect(page.body).toMatchObject({ seasonsHere: 0, videosHere: 1 });
+      expect(page.body).not.toHaveProperty('_count');
     });
   });
 
@@ -1067,48 +1120,115 @@ describe('Library (real database)', () => {
     /**
      * The filter a catalogue listing needs.
      *
-     * Browse shows collections, and a standalone film has none — so without a
-     * way to ask for "the videos that are in no collection", publishing one
-     * puts it nowhere anybody can find it. `some`/`none` over the join is the
-     * only thing that can answer it: there is no column saying so, which is the
-     * whole point of memberships.
+     * Browse shows collections, so the films on one have nowhere to appear:
+     * the shelf is a single card and they are all on it. A film is therefore a
+     * video that **no season-holding collection claims** — each of the eight
+     * films in one folder is findable, while episode 3 of season 2 is reached
+     * through its show rather than listed beside them.
+     *
+     * Only the join, and the seasons behind it, can answer that. There is no
+     * column saying so, which is the whole point of memberships.
      */
-    it('filters down to the videos that belong to no collection', async () => {
-      const south = await createCollection('South Park');
-      await seedVideo(south.id, 'Cartman');
+    it('lists the films: the videos no season-holding collection claims', async () => {
+      const show = await createCollection('South Park');
+      const season = await addSeason(show.id, 1);
+      await seedVideo(show.id, 'Cartman', {}, { seasonId: season.id });
+
+      // A shelf with no seasons is a shelf of films, and each of them is one.
+      const saga = await createCollection('Harry Potter');
+      await seedVideo(saga.id, 'Chamber of Secrets');
+      await seedVideo(saga.id, 'Philosophers Stone');
+
       await seedStandaloneVideo('Chinatown');
 
-      const standalone = await admin.get('/videos?standalone=true').expect(200);
-      expect(standalone.body.items.map((video: { title: string }) => video.title)).toEqual([
+      const films = await admin.get('/videos?film=true').expect(200);
+      expect(films.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Chamber of Secrets',
         'Chinatown',
+        'Philosophers Stone',
       ]);
-      expect(standalone.body.total).toBe(1);
+      expect(films.body.total).toBe(3);
 
       // The opposite has to mean the opposite. `z.coerce.boolean()` would read
-      // "false" as true and hand back the standalone film as well.
-      const inACollection = await admin.get('/videos?standalone=false').expect(200);
-      expect(inACollection.body.items.map((video: { title: string }) => video.title)).toEqual([
+      // "false" as true and hand back the films as well.
+      const episodes = await admin.get('/videos?film=false').expect(200);
+      expect(episodes.body.items.map((video: { title: string }) => video.title)).toEqual([
         'Cartman',
       ]);
 
       // Omitted is not the same as false: it means "do not filter".
       const everything = await admin.get('/videos').expect(200);
-      expect(everything.body.items).toHaveLength(2);
+      expect(everything.body.items).toHaveLength(4);
     });
 
     /**
-     * A standalone video is only interesting to browse once it is published,
-     * and the visibility rule is not something the new filter may weaken.
+     * The case that fails if the rule is written as "the membership has no
+     * `seasonId`". A null season says only that nobody filed it — an extra
+     * sitting beside three seasons of a show is part of that show, not a film.
      */
-    it('keeps the visibility rule when filtering to standalone videos', async () => {
+    it('keeps a special filed straight under a show out of the films', async () => {
+      const show = await createCollection('South Park');
+      await addSeason(show.id, 1);
+      await seedVideo(show.id, 'Behind the Scenes');
+
+      const films = await admin.get('/videos?film=true').expect(200);
+      expect(films.body.items).toEqual([]);
+      expect(films.body.total).toBe(0);
+    });
+
+    /**
+     * A film is only interesting to browse once it is published, and the
+     * visibility rule is not something the new filter may weaken.
+     */
+    it('keeps the visibility rule when filtering to films', async () => {
       await seedStandaloneVideo('Draft Film');
       const live = await seedStandaloneVideo('Live Film', publishable);
       await admin.post(`/videos/${live.id}/publish`).expect(200);
 
       const user = await asUser();
-      const visible = await user.get('/videos?standalone=true').expect(200);
+      const visible = await user.get('/videos?film=true').expect(200);
       expect(visible.body.items.map((video: { title: string }) => video.title)).toEqual([
         'Live Film',
+      ]);
+    });
+
+    /**
+     * The video's own state is not the whole answer.
+     *
+     * A published film whose only shelf is a draft is not a film this caller
+     * may see standing on its own — it is an instalment of something hidden
+     * from them, and offering it as though it stood alone is the leak the
+     * visibility rule exists to prevent. A video on *no* shelf is the
+     * different, ordinary case and is kept.
+     */
+    it('withholds a film whose only shelf is one the viewer cannot see', async () => {
+      const unreleased = await createCollection('Unreleased Saga');
+      const film = await seedVideo(unreleased.id, 'Secret Film', publishable);
+      await admin.post(`/videos/${film.id}/publish`).expect(200);
+
+      const user = await asUser();
+      const theirs = await user.get('/videos?film=true').expect(200);
+      expect(theirs.body.items).toEqual([]);
+      expect(theirs.body.total).toBe(0);
+
+      // The admin can see the shelf, so the film on it stands as one.
+      const mine = await admin.get('/videos?film=true').expect(200);
+      expect(mine.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Secret Film',
+      ]);
+    });
+
+    /** The other half of that rule: a published shelf hides nothing. */
+    it('shows a film whose shelf the viewer can see', async () => {
+      const saga = await createCollection('Harry Potter');
+      const film = await seedVideo(saga.id, 'Goblet of Fire', publishable);
+      await admin.post(`/videos/${film.id}/publish`).expect(200);
+      await publishCollection(saga.id);
+
+      const user = await asUser();
+      const films = await user.get('/videos?film=true').expect(200);
+      expect(films.body.items.map((video: { title: string }) => video.title)).toEqual([
+        'Goblet of Fire',
       ]);
     });
   });
