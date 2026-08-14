@@ -8,6 +8,7 @@ import {
 } from '@video/shared';
 
 import { whereVisible } from '../common/publishing';
+import { savedToList } from '../common/watchlist';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { applyBeat, creditedSeconds } from './progress';
@@ -162,9 +163,15 @@ export class WatchService {
       select: PROGRESS_SELECT,
     });
 
-    if (role !== 'ADMIN') return { mine };
+    // A sibling of `mine` rather than a field of it: `mine` is null for a video
+    // nobody has started, and saving something is independent of watching it.
+    // This is the only per-caller read a video's page makes, so it is what the
+    // My List button has to learn its own state from.
+    const inMyList = await savedToList(this.prisma, userId, { videoId });
 
-    return { mine, totals: await this.totals({ videoId }, video.durationSec) };
+    if (role !== 'ADMIN') return { mine, inMyList };
+
+    return { mine, inMyList, totals: await this.totals({ videoId }, video.durationSec) };
   }
 
   /**
