@@ -34,6 +34,12 @@ const props = defineProps<{
   trailerId?: string | null
 }>()
 
+/**
+ * Only the deliberate one. A page that swaps `trailerId` on a timer needs to
+ * know when the viewer has said no, so it can stop swapping.
+ */
+const emit = defineEmits<{ dismiss: [] }>()
+
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
 
@@ -78,6 +84,20 @@ function startTrailer(): void {
   if (!props.trailerId) return
   mounted.value = true
   playing.value = true
+}
+
+/**
+ * The ✕, as opposed to the internal stop.
+ *
+ * `stopTrailer` is also how `scheduleTrailer` clears the previous trailer, so
+ * emitting from there would fire on every change of `trailerId`. Only a person
+ * pressing the button means "I do not want this", and only that is worth
+ * telling the page about — the home hero rotates, and a trailer somebody just
+ * dismissed coming back ten seconds later is the same annoyance twice.
+ */
+function dismissTrailer(): void {
+  stopTrailer()
+  emit('dismiss')
 }
 
 /**
@@ -236,7 +256,7 @@ watch(
             class="pointer-events-auto"
             icon="i-lucide-x"
             aria-label="Stop the trailer"
-            @click="stopTrailer"
+            @click="dismissTrailer"
           />
         </template>
         <UButton

@@ -26,7 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WatchService } from '../watch/watch.service';
 import { WatchlistService } from '../watchlist/watchlist.service';
 
-import { computedItems, COLLECTION_CARD_SELECT } from './sources/computed';
+import { computedItems, COLLECTION_CARD_SELECT, VIDEO_CARD_SELECT } from './sources/computed';
 
 const LIST_SELECT = {
   id: true,
@@ -47,27 +47,15 @@ const LIST_SELECT = {
 const ITEM_SELECT = {
   id: true,
   position: true,
-  // The shared shape, not a copy of it: a card on a hand-picked row and a card
-  // on a computed one are the same card, and two literals is how one of them
-  // silently stops carrying a field the other gained.
+  // The shared shapes, not copies of them: a card on a hand-picked row and a
+  // card on a computed one are the same card, and two literals is how one of
+  // them silently stops carrying a field the other gained.
+  //
+  // The video half *was* such a copy — identical field for field, sitting under
+  // this very comment — until the hero needed `trailerYoutubeId` and there were
+  // two places to add it. Both selects are the imported ones now.
   collection: { select: COLLECTION_CARD_SELECT },
-  video: {
-    select: {
-      id: true,
-      slug: true,
-      title: true,
-      durationSec: true,
-      bannerKey: true,
-      width: true,
-      height: true,
-      state: true,
-      // Through the membership: a video may be in several collections, or
-      // none, so a card names them rather than assuming one parent.
-      collections: {
-        select: { collection: { select: { id: true, slug: true, title: true } } },
-      },
-    },
-  },
+  video: { select: VIDEO_CARD_SELECT },
 } as const;
 
 /** A home-page row is a shelf, not a catalogue. Past this, it is a browse page. */

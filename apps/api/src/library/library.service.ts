@@ -44,6 +44,9 @@ const COLLECTION_CARD = {
   tags: true,
   genres: true,
   state: true,
+  // The home hero features whatever was added last and plays its trailer, and
+  // it reads this endpoint when no `RECENTLY_ADDED` row exists to read instead.
+  trailerYoutubeId: true,
   // Sort keys, stripped before the response. `normalisedTitle` is a comparison
   // key — it answers "is this the same title" and no client has a use for it.
   normalisedTitle: true,
@@ -60,6 +63,7 @@ const FILM_CARD = {
   genres: true,
   state: true,
   durationSec: true,
+  trailerYoutubeId: true,
   normalisedTitle: true,
   createdAt: true,
 } as const;
@@ -76,6 +80,7 @@ interface CollectionRow {
   tags: string[];
   genres: string[];
   state: PublishState;
+  trailerYoutubeId: string | null;
   normalisedTitle: string;
   createdAt: Date;
   _count: { seasons: number; videos: number };
@@ -298,6 +303,7 @@ function toCollectionCard(row: CollectionRow): SortableCard {
     state: row.state,
     seasonsHere: row._count.seasons,
     videosHere: row._count.videos,
+    trailerYoutubeId: row.trailerYoutubeId,
     normalisedTitle: row.normalisedTitle,
     createdAt: row.createdAt,
   };
@@ -314,6 +320,7 @@ function toFilmCard(row: FilmRow): SortableCard {
     genres: row.genres,
     state: row.state,
     durationSec: row.durationSec,
+    trailerYoutubeId: row.trailerYoutubeId,
     normalisedTitle: row.normalisedTitle,
     createdAt: row.createdAt,
   };
@@ -335,6 +342,7 @@ function withoutSortKeys(entry: SortableCard): LibraryCard {
     tags: entry.tags,
     genres: entry.genres,
     state: entry.state,
+    trailerYoutubeId: entry.trailerYoutubeId,
   };
 
   return entry.kind === 'collection'

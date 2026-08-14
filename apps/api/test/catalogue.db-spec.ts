@@ -202,6 +202,38 @@ describe('Catalogue (real database)', () => {
       expect(film).not.toHaveProperty('normalisedTitle');
       expect(film).not.toHaveProperty('createdAt');
     });
+
+    /**
+     * The home hero reads this endpoint when there is no `RECENTLY_ADDED` row
+     * to read instead, and plays the trailer of whatever it features.
+     *
+     * Asserted positively because the way this breaks is silent: `withoutSortKeys`
+     * rebuilds the card field by field, so a field missing from *it* is
+     * `undefined` in the response while the select, the row type and the mapper
+     * all still carry it — and every other assertion here is a subset match that
+     * would not notice. The symptom is a hero that never plays a trailer.
+     */
+    it('carries the trailer id the home hero plays', async () => {
+      const alien = await shelf('Alien', { trailerYoutubeId: 'dQw4w9WgXcQ' });
+      await season(alien.id);
+      await video('Brazil', { trailerYoutubeId: 'aaaaaaaaaaa' });
+
+      const { items } = (await admin.get('/library?sort=title').expect(200)).body;
+
+      expect(items).toMatchObject([
+        { kind: 'collection', title: 'Alien', trailerYoutubeId: 'dQw4w9WgXcQ' },
+        { kind: 'film', title: 'Brazil', trailerYoutubeId: 'aaaaaaaaaaa' },
+      ]);
+    });
+
+    /** Absent is the ordinary case, and it must arrive as null rather than missing. */
+    it('says null for an entry with no trailer', async () => {
+      await video('Brazil');
+
+      const [film] = (await admin.get('/library').expect(200)).body.items;
+
+      expect(film).toHaveProperty('trailerYoutubeId', null);
+    });
   });
 
   describe('paging across the union', () => {

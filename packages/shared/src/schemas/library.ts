@@ -280,6 +280,13 @@ export interface LibraryCardBase {
   /** Provider-authored. Kept apart from tags, like the columns. */
   genres: string[];
   state: PublishState;
+  /**
+   * The YouTube id, so the home hero can play a trailer for whatever it is
+   * featuring. Required rather than optional on purpose: `withoutSortKeys`
+   * rebuilds this object field by field, and a field it forgets is `undefined`
+   * at runtime with nothing to fail. Required is what makes tsc point at it.
+   */
+  trailerYoutubeId: string | null;
 }
 
 export interface LibraryCollectionCard extends LibraryCardBase {

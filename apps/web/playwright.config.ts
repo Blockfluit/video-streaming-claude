@@ -28,6 +28,22 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    /*
+     * The whole suite asks for reduced motion, and the home hero is why.
+     *
+     * It auto-plays a trailer and rotates, which would put a third-party
+     * YouTube iframe on `/` — a page a dozen tests visit only to get a base URL
+     * for a `fetch`. The watchdog below fails any response ≥400 in *any* frame,
+     * so somebody else's beacon returning a 4xx would fail an unrelated test,
+     * `visit`'s `networkidle` would race the iframe, and the run would need
+     * outbound internet to be green.
+     *
+     * `HeroBackdrop` already honours this setting, so asking for it here keeps
+     * every existing test deterministic and offline. The auto-play path is
+     * covered deliberately instead — see `hero.spec.ts`, which opts back out
+     * and stubs YouTube rather than reaching it.
+     */
+    reducedMotion: 'reduce',
   },
   projects: [
     /*

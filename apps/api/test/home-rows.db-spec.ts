@@ -191,6 +191,64 @@ describe('Computed home-page rows (real database)', () => {
 
       expect(await titlesOf(admin, rowId)).toEqual(['Show', 'Other']);
     });
+
+    /**
+     * The home hero features the first entry of this row and plays its trailer,
+     * so the card has to carry the id.
+     *
+     * Asserted on both halves because they are two selects: a shelf's card and
+     * an episode's card are built separately, and a hero that features a
+     * collection one moment and a film the next would otherwise play a trailer
+     * for only one of them. Every other assertion in this file maps to titles
+     * and would not see the difference.
+     */
+    it('carries the trailer id on both a shelf card and a video card', async () => {
+      await prisma.collection.update({
+        where: { id: showId },
+        data: { trailerYoutubeId: 'dQw4w9WgXcQ' },
+      });
+      await seedVideo(showId);
+      await seedVideo(null, {
+        title: 'A Film',
+        slug: 'a-film',
+        storageKey: 'A Film.mkv',
+        trailerYoutubeId: 'aaaaaaaaaaa',
+      });
+
+      const rowId = await createRow({ title: 'New', source: 'RECENTLY_ADDED', kind: 'AUTO' });
+      const response = await admin.get('/lists?includeHidden=true&limit=50').expect(200);
+      const row = response.body.items.find((item: { id: string }) => item.id === rowId);
+
+      expect(row.items).toMatchObject([
+        { video: { title: 'A Film', trailerYoutubeId: 'aaaaaaaaaaa' } },
+        { collection: { title: 'Show', trailerYoutubeId: 'dQw4w9WgXcQ' } },
+      ]);
+    });
+
+    /**
+     * `ITEM_SELECT` used to hand-copy the video half of `VIDEO_CARD_SELECT`, so
+     * a field added to the shared shape reached a computed row's cards and not a
+     * hand-picked row's. Both read the imported select now, and this is what
+     * says so.
+     */
+    it('carries it on a hand-picked row too, not only a computed one', async () => {
+      const videoId = await seedVideo(null, {
+        title: 'A Film',
+        slug: 'a-film',
+        storageKey: 'A Film.mkv',
+        trailerYoutubeId: 'aaaaaaaaaaa',
+      });
+
+      const rowId = await createRow({ title: 'Picked', source: 'MANUAL' });
+      await admin.post(`/lists/${rowId}/items`).send({ videoId }).expect(200);
+
+      const response = await admin.get('/lists?includeHidden=true&limit=50').expect(200);
+      const row = response.body.items.find((item: { id: string }) => item.id === rowId);
+
+      expect(row.items).toMatchObject([
+        { video: { title: 'A Film', trailerYoutubeId: 'aaaaaaaaaaa' } },
+      ]);
+    });
   });
 
   describe('visibility', () => {
