@@ -825,6 +825,31 @@ describe('Library (real database)', () => {
       expect(response.body.next).toMatchObject({ videoId: first.id, lastPositionSec: 0 });
     });
 
+    /**
+     * The collection's My List button reads this, for the same reason the
+     * video's page reads it off `/videos/:id/stats`: it is the per-caller read
+     * the title page already makes, so the button can say "in my list" on the
+     * first paint rather than after a round trip nobody asked for.
+     */
+    it('says whether the collection is on the caller’s list', async () => {
+      const before = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+      expect(before.body.inMyList).toBe(false);
+
+      await admin.post('/me/watchlist').send({ collectionId: show.id }).expect(200);
+
+      const after = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+      expect(after.body.inMyList).toBe(true);
+    });
+
+    it('reports another caller’s saved collection as unsaved', async () => {
+      await admin.post('/me/watchlist').send({ collectionId: show.id }).expect(200);
+      const user = await asUser();
+
+      const response = await user.get(`/collections/${show.slug}/progress`).expect(200);
+
+      expect(response.body.inMyList).toBe(false);
+    });
+
     it('never offers a draft video to a USER', async () => {
       const draft = await seedVideo(show.id, 'Zero', publishable, { orderIndex: 0 });
       const user = await asUser();
@@ -868,7 +893,7 @@ describe('Library (real database)', () => {
 
       const response = await admin.get(`/collections/${empty.slug}/progress`).expect(200);
 
-      expect(response.body).toEqual({ next: null, items: [] });
+      expect(response.body).toEqual({ next: null, items: [], inMyList: false });
     });
   });
 

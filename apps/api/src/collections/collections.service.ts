@@ -20,6 +20,7 @@ import { isUniqueViolation } from '../common/prisma-errors';
 import { slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleData, titleUpdate } from '../common/title';
+import { savedToList } from '../common/watchlist';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { nextEpisode, type EpisodeProgress } from '../watchlist/next-episode';
@@ -252,6 +253,9 @@ export class CollectionsService {
       // Only the videos actually started have a row, so this stays short even
       // for a long-running show.
       items: rows,
+      // The title page's My List button, answered by the read it already makes.
+      // Without it the button paints "add" for a collection already saved.
+      inMyList: await savedToList(this.prisma, userId, { collectionId: collection.id }),
     };
   }
 

@@ -93,7 +93,19 @@ const otherVideos = computed(() =>
  * arrives; asking here as well is what lets the button name a time before anyone
  * has committed to loading a stream.
  */
-const { data: stats } = await useApiData<{ mine: { lastPositionSec: number } | null }>(
+const { data: stats } = await useApiData<{
+  mine: { lastPositionSec: number } | null
+  /**
+   * Whether this video is already on the caller's list.
+   *
+   * A sibling of `mine` rather than part of it: `mine` is null for a video
+   * nobody has started, and saving something is independent of watching it.
+   * Read here because this is the per-caller request the page already makes —
+   * the button had nothing to go on before, so it painted "add to my list" for
+   * something already saved, every time.
+   */
+  inMyList: boolean
+}>(
   () => `summary-stats-${video.value?.id ?? 'none'}`,
   () => `/videos/${video.value!.id}/stats`,
   { watch: [() => video.value?.id], immediate: !!video.value },
@@ -217,7 +229,7 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
           <UButton :to="playPath(video)" size="lg" icon="i-lucide-play" class="font-semibold">
             {{ resumeAt === null ? 'Play' : `Resume from ${timecode(resumeAt)}` }}
           </UButton>
-          <AddToListButton :video-id="video.id" label />
+          <AddToListButton :video-id="video.id" :saved="stats?.inMyList" label />
           <!--
             Straight to this video's editor, so fixing a title or a marker does
             not mean walking back through the admin library to find the row you

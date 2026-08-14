@@ -366,10 +366,37 @@ test.describe('viewer', () => {
     test('the my-list button saves and unsaves', async ({ page }) => {
       await visit(page, await aVideoPage(page))
 
+      // The button reads the server now rather than always starting empty, so a
+      // previous run that left this video saved would make the first press a
+      // removal and every assertion below meaningless. Start from a known state
+      // instead of from whatever the last run happened to leave behind.
+      const videoId = await currentVideoId(page)
+      await page.evaluate(async (id) => {
+        await fetch('/api/me/watchlist', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: id }),
+        })
+      }, videoId)
+      await page.reload()
+      await page.waitForLoadState('networkidle')
+
       const button = page.getByRole('button', { name: /my list/i })
-      await expect(button).toBeVisible()
+      await expect(button).toHaveText(/^my list$/i)
 
       await expectsRequest(page, /\/me\/watchlist/, 'POST', () => button.click())
+      await expect(button).toHaveText(/in my list/i)
+      await expect(button).toHaveAttribute('aria-pressed', 'true')
+
+      /*
+       * The half that was broken, and the only way to catch it: the button
+       * painted "My list" for a video already on the list, on every load,
+       * because nothing in the page's data ever said it was saved. The state
+       * straight after a click is optimistic and looks right either way — it is
+       * what survives a reload that says whether the server was ever asked.
+       */
+      await page.reload()
+      await page.waitForLoadState('networkidle')
       await expect(button).toHaveText(/in my list/i)
       await expect(button).toHaveAttribute('aria-pressed', 'true')
 
@@ -664,5 +691,90 @@ test.describe('viewer', () => {
 
     await page.locator('main [aria-label^="Remove"]').first().click()
     await expect(cards).toHaveCount(before - 1)
+  })
+
+  /**
+   * The same fault as the video page's button, on the other screen that carries
+   * one — and the reason it is worth its own test: the two read their saved
+   * state from different endpoints (`/videos/:id/stats` and
+   * `/collections/:slug/progress`), so fixing one proves nothing about the
+   * other.
+   */
+  test('a collection’s my-list button survives a reload', async ({ page }) => {
+    // A page of the app first: the fetch below is relative to the origin.
+    await visit(page, '/')
+    const slug = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=1')).json()
+      return (list.items?.[0]?.slug ?? null) as string | null
+    })
+    expect(slug, 'the library holds no collection').not.toBeNull()
+
+    await visit(page, `/c/${slug}`)
+    const button = page.getByRole('button', { name: /my list/i })
+    await expect(button).toBeVisible()
+
+    // Whatever a previous run left behind, start from "not saved".
+    if (await button.getAttribute('aria-pressed') === 'true') {
+      await expectsRequest(page, /\/me\/watchlist/, 'DELETE', () => button.click())
+    }
+    await expect(button).toHaveText(/^my list$/i)
+
+    await expectsRequest(page, /\/me\/watchlist/, 'POST', () => button.click())
+    await expect(button).toHaveText(/in my list/i)
+
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    await expect(button).toHaveText(/in my list/i)
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+
+    await expectsRequest(page, /\/me\/watchlist/, 'DELETE', () => button.click())
+  })
+
+  /**
+   * The remove button sits over a card that raises *itself* on hover:
+   * `.card-lift:hover` scales the card and takes `z-index: 1`, and the button
+   * was at `z-index: auto` underneath it. Nobody can reach the button without
+   * crossing the card, so the card came forward and covered the only control
+   * that takes something off this list — visible at rest, gone the moment you
+   * went for it, and clicking where it had been followed the card's link.
+   *
+   * The test above cannot catch this, and passed throughout. Playwright jumps
+   * the mouse straight to its target, so the card is never `:hover` at click
+   * time and the button is never covered — a click succeeds against the broken
+   * code. The assertion has to be about **stacking while the card is hovered**,
+   * which is why this hovers the card and then asks the document what is
+   * actually painted at the button's own centre. Do not simplify it back into
+   * a click.
+   */
+  test('the remove button stays on top while the card is hovered', async ({ page }) => {
+    await visit(page, '/')
+    await page.evaluate(async () => {
+      const videos = await (await fetch('/api/videos?limit=1')).json()
+      await fetch('/api/me/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: videos.items[0].id }),
+      })
+    })
+
+    await visit(page, '/my-list')
+    const card = page.locator('main a[href^="/c/"], main a[href^="/v/"]').first()
+    const remove = page.locator('main [aria-label^="Remove"]').first()
+    await expect(card).toBeVisible()
+    await expect(remove).toBeVisible()
+
+    // The card's centre, which is nowhere near the button — so what happens to
+    // the button is the card's doing and not its own hover state.
+    await card.hover()
+
+    const onTop = await remove.evaluate((button) => {
+      const box = button.getBoundingClientRect()
+      const painted = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      )
+      return painted !== null && button.contains(painted)
+    })
+    expect(onTop, 'the hovered card is covering the remove button').toBe(true)
   })
 })

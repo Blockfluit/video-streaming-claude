@@ -98,12 +98,20 @@ useHead({ title: 'My List' })
           something off the list, and gating it behind hover left a control a
           keyboard user could tab to and see nothing of — an invisible tab stop.
           It stays quiet at 70% and comes forward on hover.
+
+          `z-2` is what makes it usable, and it is not decoration. The card under
+          it raises *itself* — `.card-lift:hover` scales it and takes
+          `z-index: 1` — and nobody can reach a control sitting on a card without
+          crossing the card first. At `z-index: auto` the button was therefore
+          covered by the very gesture that reaches for it: plainly there at rest,
+          gone the instant you went for it, and a click landing on the card's
+          link instead. Anything laid over a `.card-lift` has to outrank it.
         -->
         <UButton
           icon="i-lucide-x"
           color="neutral"
           size="xs"
-          class="absolute top-1.5 left-1.5 opacity-70 transition group-hover/item:opacity-100 focus-visible:opacity-100"
+          class="absolute top-1.5 left-1.5 z-2 opacity-70 transition group-hover/item:opacity-100 focus-visible:opacity-100"
           :aria-label="`Remove ${item.collection?.title ?? item.video!.title}`"
           @click="remove(item)"
         />

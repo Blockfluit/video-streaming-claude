@@ -86,6 +86,13 @@ const { data: progress } = await useApiData<{
     maxPositionSec: number
     completed: boolean
   }[]
+  /**
+   * Whether this collection is already on the caller's list — read from the
+   * request this component already makes, for the same reason a video's page
+   * reads it off its stats. Without it the button said "add" for a collection
+   * that was already saved.
+   */
+  inMyList: boolean
 }>(
   () => `collection-progress-${props.collection.slug}`,
   () => `/collections/${props.collection.slug}/progress`,
@@ -318,7 +325,11 @@ const heading = computed(() => {
               >
                 {{ playLabel }}
               </UButton>
-              <AddToListButton :collection-id="collection.id" label />
+              <AddToListButton
+                :collection-id="collection.id"
+                :saved="progress?.inMyList"
+                label
+              />
               <!--
                 The same shortcut a video's page has. Without it, fixing a
                 collection's artwork means walking back through the admin library
