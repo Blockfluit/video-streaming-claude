@@ -203,37 +203,55 @@ watch(
       The trailer's controls, and the only way to start one when
       `prefers-reduced-motion` has stopped it doing so itself. Real buttons with
       real labels, sitting above the scrim rather than over the artwork.
+
+      They align to the page column, not to the window, which is why this is a
+      full-width band around a `page-shell` rather than a `right-*` inset. The
+      gutter grows from 1rem to 5rem across the breakpoints and then the shell
+      starts centring inside `max-width: 110rem` — so a fixed inset matched the
+      content on a phone and hung 1.5–5rem outside it on every desktop, drifting
+      further the wider the screen got. Reusing the shell also keeps one
+      definition of the gutter rather than a second copy to keep in sync.
+
+      The band spans the hero, so it is `pointer-events-none` and each button
+      takes pointer events back: an invisible full-width strip lying over the
+      hero would otherwise swallow the clicks meant for Play underneath it,
+      exactly as the iframe above does.
     -->
-    <div v-if="trailerId" class="absolute right-4 bottom-6 z-1 flex items-center gap-2 sm:right-8">
-      <template v-if="playing">
+    <div v-if="trailerId" class="pointer-events-none absolute inset-x-0 bottom-6 z-1">
+      <div class="page-shell flex w-full items-center justify-end gap-2">
+        <template v-if="playing">
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            class="pointer-events-auto"
+            :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+            :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
+            @click="toggleSound"
+          />
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            class="pointer-events-auto"
+            icon="i-lucide-x"
+            aria-label="Stop the trailer"
+            @click="stopTrailer"
+          />
+        </template>
         <UButton
+          v-else
           size="sm"
           color="neutral"
           variant="subtle"
-          :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
-          :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
-          @click="toggleSound"
-        />
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="subtle"
-          icon="i-lucide-x"
-          aria-label="Stop the trailer"
-          @click="stopTrailer"
-        />
-      </template>
-      <UButton
-        v-else
-        size="sm"
-        color="neutral"
-        variant="subtle"
-        icon="i-lucide-clapperboard"
-        aria-label="Play the trailer"
-        @click="startTrailer"
-      >
-        Trailer
-      </UButton>
+          class="pointer-events-auto"
+          icon="i-lucide-clapperboard"
+          aria-label="Play the trailer"
+          @click="startTrailer"
+        >
+          Trailer
+        </UButton>
+      </div>
     </div>
   </section>
 </template>
