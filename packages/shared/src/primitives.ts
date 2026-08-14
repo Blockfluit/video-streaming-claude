@@ -46,6 +46,24 @@ export const yearSchema = z.coerce.number().int().min(1888).max(2200);
 export const genresSchema = z.array(z.string().trim().min(1).max(50)).max(30);
 
 /**
+ * A repeatable query parameter, as a list.
+ *
+ * `?genre=a&genre=b` arrives from Express's parser as an array and `?genre=a`
+ * as a bare string, so a filter that reads one shape silently ignores the
+ * other — and the one it ignores is whichever the caller happened to send.
+ * Normalising both here, beside `booleanParam`, keeps "how a list arrives in a
+ * query string" a decision made once rather than per endpoint.
+ *
+ * Bounded like the write-side schemas: a filter is not a place to accept an
+ * unbounded number of terms, each of which is another array containment test.
+ */
+export const listParam = (max: number) =>
+  z
+    .union([z.string(), z.array(z.string())])
+    .transform((value) => (Array.isArray(value) ? value : [value]))
+    .pipe(z.array(z.string().trim().min(1).max(50)).max(max));
+
+/**
  * A calendar date from a date input, as `YYYY-MM-DD`.
  *
  * Not `z.coerce.date()`: that accepts anything `new Date()` will swallow,

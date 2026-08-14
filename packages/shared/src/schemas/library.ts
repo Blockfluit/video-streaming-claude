@@ -9,6 +9,7 @@ import {
   dateOnlyField,
   genresSchema,
   idSchema,
+  listParam,
   nonEmptyText,
   optionalText,
   tagsSchema,
@@ -177,6 +178,123 @@ export const listVideosSchema = pageQuerySchema.extend({
   tag: z.string().trim().max(50).optional(),
 });
 export type ListVideosQuery = z.infer<typeof listVideosSchema>;
+
+/**
+ * What the catalogue holds, as one list.
+ *
+ * `GET /library` answers the question `/browse` asks — "what is in here, and
+ * which of it do I want" — over **both** things the library is made of: a
+ * collection is a shelf and a film is a video no season-holding shelf claims.
+ * Browse used to ask the two endpoints separately and stitch the answers
+ * together in the browser, which cannot page or sort across the join: each
+ * half was capped, and the order was only ever right inside whatever window
+ * happened to load.
+ *
+ * The filters are the same ideas both halves already understand, so nothing
+ * here is a third definition of anything.
+ */
+export const libraryKindSchema = z.enum(['FILM', 'SHOW']);
+export type LibraryKind = z.infer<typeof libraryKindSchema>;
+
+/**
+ * Sorts, named for what a reader would call them rather than for the column.
+ *
+ * Every one of them is made total by the service, which breaks ties on the
+ * entry's kind and id — offset paging over a non-total order repeats and skips
+ * rows, and here the rows come from two tables that number themselves
+ * independently, so ties are the norm rather than the exception.
+ */
+export const librarySortSchema = z.enum(['title', 'year', 'added']);
+export type LibrarySort = z.infer<typeof librarySortSchema>;
+
+/**
+ * How deep a page may be asked for.
+ *
+ * Answering for the union means reading `offset + limit` rows from **both**
+ * tables and merging — neither side can be skipped, because row 1 of one table
+ * may be row 1 or row 900 of the merged order and nothing short of looking says
+ * which. So the offset is what the work scales with, and an unbounded one is a
+ * request to read the library several times over.
+ *
+ * 200 pages of 50. Nobody finds anything past page 200 by paging; they find it
+ * by filtering, which is what the rest of this schema is for.
+ */
+export const MAX_LIBRARY_OFFSET = 10_000;
+
+export const listLibrarySchema = pageQuerySchema.extend({
+  offset: z.coerce.number().int().min(0).max(MAX_LIBRARY_OFFSET).default(0),
+  state: publishStateSchema.optional(),
+  q: z.string().trim().max(200).optional(),
+  /**
+   * Curator-authored, and deliberately still one value. The tag chips on a
+   * collection page link here as `?tag=…`, and those links keep meaning
+   * exactly what they meant.
+   */
+  tag: z.string().trim().max(50).optional(),
+  /**
+   * Provider-authored, and repeatable: `?genre=Drama&genre=Horror`.
+   *
+   * Kept apart from `tag` for the same reason the columns are — see
+   * `genresSchema`. Several narrow rather than widen, which is what every
+   * other control on the filter bar does.
+   */
+  genre: listParam(20).optional(),
+  kind: libraryKindSchema.optional(),
+  sort: librarySortSchema.default('title'),
+});
+export type ListLibraryQuery = z.infer<typeof listLibrarySchema>;
+
+/**
+ * One genre and how many visible entries carry it.
+ *
+ * A response shape, so a type rather than a schema — the barrel only holds
+ * zod for *requests*. It exists so the filter can offer the vocabulary the
+ * library actually has: `genres` is free text as far as the database is
+ * concerned, and a control that lets you type one is a control that mostly
+ * returns nothing.
+ */
+export interface GenreFacet {
+  genre: string;
+  count: number;
+}
+
+/**
+ * One tile in the catalogue.
+ *
+ * A discriminated union rather than one shape with everything optional,
+ * because the two halves genuinely differ: only a shelf can say how many
+ * seasons it holds, and only a film has a running time. `kind` is what a card
+ * reads to know which of the two it is drawing — and the absence of a chip on
+ * a film is a deliberate part of that design, not a missing value.
+ *
+ * Shared so the endpoint and the grid cannot disagree about the shape; a
+ * response type, so no zod.
+ */
+export interface LibraryCardBase {
+  id: string;
+  slug: string;
+  title: string;
+  year: number | null;
+  /** Curator-authored. */
+  tags: string[];
+  /** Provider-authored. Kept apart from tags, like the columns. */
+  genres: string[];
+  state: PublishState;
+}
+
+export interface LibraryCollectionCard extends LibraryCardBase {
+  kind: 'collection';
+  /** What it holds — never TMDB's `seasonCount`, which counts the whole show. */
+  seasonsHere: number;
+  videosHere: number;
+}
+
+export interface LibraryFilmCard extends LibraryCardBase {
+  kind: 'film';
+  durationSec: number | null;
+}
+
+export type LibraryCard = LibraryCollectionCard | LibraryFilmCard;
 
 /**
  * Metadata only. Nothing here touches `storageKey`, `contentTag` or the probed

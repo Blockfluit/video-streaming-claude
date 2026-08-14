@@ -11,6 +11,7 @@ import { CommonModule } from './common/common.module';
 import { CreditsModule } from './credits/credits.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
+import { LibraryModule } from './library/library.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { TmdbModule } from './metadata/tmdb.module';
 import { ListsModule } from './lists/lists.module';
@@ -43,6 +44,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     UsersModule,
     CollectionsModule,
     VideosModule,
+    LibraryModule,
     SubtitlesModule,
     TranscodeModule,
     UploadsModule,

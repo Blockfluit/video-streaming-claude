@@ -48,6 +48,26 @@ test.describe('admin', () => {
     await expect(page.getByText('Nothing matches.')).toBeVisible()
   })
 
+  /**
+   * Browse carries a lifecycle filter that only an admin is shown.
+   *
+   * The rendering is gated on `isAdmin`, which is a convenience rather than an
+   * authority — the API narrows a caller's `state` to what their role may see,
+   * so a viewer who writes the parameter by hand gets an empty page. This
+   * asserts the half a browser can see: that an admin gets the control, and
+   * that it reaches the endpoint.
+   */
+  test('an admin can filter browse by lifecycle state', async ({ page }) => {
+    await visit(page, '/browse')
+
+    await expectsRequest(page, /\/api\/library\?.*state=DRAFT/, 'GET', async () => {
+      await page.getByLabel('Filter by lifecycle state').click()
+      await page.getByRole('option', { name: 'Draft' }).click()
+    })
+
+    await expect(page).toHaveURL(/state=DRAFT/)
+  })
+
   test('the video editor saves details', async ({ page }) => {
     await visit(page, '/admin/library')
     await page.getByRole('link', { name: 'Edit' }).first().click()
