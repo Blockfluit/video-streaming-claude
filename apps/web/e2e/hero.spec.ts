@@ -19,9 +19,16 @@ import { test, visit } from './fixtures'
 test.describe('the home hero', () => {
   test.use({ reducedMotion: 'no-preference' })
 
-  /** Nothing leaves the machine, and the iframe still mounts and loads. */
+  /**
+   * Nothing leaves the machine, and the iframe still mounts and loads.
+   *
+   * Scoped to the two YouTube hosts rather than a `*youtube*` glob. The broad
+   * pattern also matched Vite's own module requests during a dev run — the page
+   * came back as a 500 with "failed to fetch dynamically imported module", which
+   * reads as a broken component and is really an over-eager stub.
+   */
   test.beforeEach(async ({ page }) => {
-    await page.route('**/*youtube*', route =>
+    await page.route(/youtube(-nocookie)?\.com/, route =>
       route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title>' }),
     )
   })
