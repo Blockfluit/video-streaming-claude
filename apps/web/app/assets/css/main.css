@@ -169,6 +169,63 @@ body {
 }
 
 /**
+ * The backdrop behind the sign-in and invite screens.
+ *
+ * Everywhere else in the app, artwork is the bright thing and the chrome stays
+ * out of its way. These two pages have no artwork available and should not:
+ * the caller has not authenticated, and the library is private, so a poster
+ * here would be a poster served to a stranger. Whoever is looking at this page
+ * is the one person entitled to see nothing of the library at all.
+ *
+ * So the atmosphere is generated rather than borrowed — two wide accent washes
+ * well under the surface, and a vignette closing the corners so the panel sits
+ * in a pool of light instead of on a flat field.
+ *
+ * **Order matters.** The first background image is painted on top, so the
+ * vignette is listed first: it has to darken the washes at the edges rather
+ * than sit underneath them being darkened itself.
+ *
+ * Interpolated to `var(--ui-bg)`, never a hex. The hero faded to `#08080a`
+ * after the page moved to `#0a0a0c` and the scrim stopped landing on the colour
+ * behind it; the same trap is one careless paste away here.
+ *
+ * The washes are bounded for a reason beyond taste. `visible.spec.ts` reads an
+ * element's computed background **colour** and cannot see a background image,
+ * so every ratio it reports on these pages is taken against a flat `--ui-bg`.
+ * A wash strong enough to move those numbers would be one the audit is blind
+ * to, and its answer would quietly stop describing the page.
+ *
+ * So the drift was measured rather than assumed — screenshotting single pixels
+ * of real backdrop and compositing against them, because the computed value of
+ * `--ui-primary` comes back as `oklch()` and reading its three numbers as r/g/b
+ * invents a ratio. At 22% and 14%:
+ *
+ *   top centre (brightest)   painted #241315   muted text 7.24:1  (audit: 8.04)
+ *   behind the wordmark      painted #110c0e   muted text 7.88:1  (audit: 8.04)
+ *   behind the tagline       painted #0e0b0d   muted text 7.96:1  (audit: 8.04)
+ *
+ * Worst case the audit flatters a ratio by 0.80, and behind the text that
+ * actually sits on this backdrop by less than 0.2 — against a 4.5:1 floor with
+ * over two points to spare. Strengthen these percentages much further and that
+ * headroom is what goes first.
+ */
+.auth-backdrop {
+  background-color: var(--ui-bg);
+  background-image:
+    radial-gradient(75rem 55rem at 50% 45%, transparent 25%, var(--ui-bg) 100%),
+    radial-gradient(
+      60rem 40rem at 50% -15%,
+      color-mix(in oklab, var(--ui-primary) 22%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      45rem 35rem at 12% 108%,
+      color-mix(in oklab, var(--ui-primary) 14%, transparent),
+      transparent 70%
+    );
+}
+
+/**
  * The card lift. Transform and opacity only — both are composited, so a row of
  * twenty cards animates on the GPU instead of forcing layout every frame.
  */

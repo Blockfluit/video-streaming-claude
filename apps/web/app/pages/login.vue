@@ -7,7 +7,7 @@ import { loginSchema, type LoginInput } from '@video/shared'
  * produces the worst kind of error: the client says the input is fine and the
  * server says it is not.
  */
-definePageMeta({ layout: false })
+definePageMeta({ layout: 'auth' })
 
 const route = useRoute()
 const api = useApi()
@@ -41,20 +41,23 @@ useHead({ title: 'Sign in' })
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center p-6">
-    <UCard class="w-full max-w-sm">
+  <div>
+    <UCard>
       <template #header>
-        <h1 class="text-lg font-semibold">Sign in</h1>
+        <h1 class="text-lg font-semibold text-(--ui-text-highlighted)">Sign in</h1>
+        <p class="mt-1 text-sm text-(--ui-text-muted)">Welcome back.</p>
       </template>
 
       <UForm :schema="loginSchema" :state="state" class="space-y-4" @submit="submit">
+        <!--
+          `autocomplete="username"` and `type="password"` below are how the
+          whole browser suite signs in (`e2e/auth.setup.ts`), as is this form's
+          submit button being named exactly "Sign in". They are ordinary correct
+          markup and would be here anyway — but changing any of the three fails
+          every browser test in the project, not just an auth one.
+        -->
         <UFormField label="Username" name="username" required>
-          <UInput
-            v-model="state.username"
-            autocomplete="username"
-            autofocus
-            class="w-full"
-          />
+          <UInput v-model="state.username" autocomplete="username" autofocus class="w-full" />
         </UFormField>
 
         <UFormField label="Password" name="password" required>
@@ -66,19 +69,26 @@ useHead({ title: 'Sign in' })
           />
         </UFormField>
 
-        <UAlert
-          v-if="failure"
-          color="error"
-          variant="subtle"
-          :title="failure"
-        />
+        <UAlert v-if="failure" color="error" variant="subtle" :title="failure" />
 
-        <UButton type="submit" block :loading="pending">Sign in</UButton>
+        <!--
+          The one real call to action on the screen, so this is the one place a
+          solid button is right. Everything else here is a link.
+        -->
+        <UButton type="submit" block variant="solid" :loading="pending">Sign in</UButton>
       </UForm>
 
       <template #footer>
+        <!-- Underlined and a tier brighter: accent colour never sets type here,
+             so an unmarked link is only a slight shift in grey. -->
         <p class="text-sm text-(--ui-text-muted)">
-          Have an invite? <ULink to="/setup">Redeem it here.</ULink>
+          Have an invite?
+          <ULink
+            to="/setup"
+            class="text-(--ui-text) underline underline-offset-2 hover:text-(--ui-text-highlighted)"
+          >
+            Redeem it here.
+          </ULink>
         </p>
       </template>
     </UCard>
