@@ -99,17 +99,76 @@ test.describe('viewer', () => {
     await expect(page.locator('video')).toHaveCount(0)
   })
 
+  const SEARCH = 'input[placeholder="Search titles, genres and cast"]'
+
   test('search narrows the browse page and survives a reload', async ({ page }) => {
     await visit(page, '/browse')
     await expect(page.locator('main a[href^="/c/"]').first()).toBeVisible()
 
-    await fillStable(page, 'input[placeholder="Search the library"]', 'zzzznothing')
+    await fillStable(page, SEARCH, 'zzzznothing')
     await expect(page.getByText(/Nothing matches/)).toBeVisible()
 
     // Debounced into the URL, so the search is shareable.
     await expect(page).toHaveURL(/q=zzzznothing/)
     await page.reload()
-    await expect(page.getByPlaceholder('Search the library')).toHaveValue('zzzznothing')
+    await expect(page.getByPlaceholder('Search titles, genres and cast')).toHaveValue('zzzznothing')
+  })
+
+  /**
+   * The type filter partitions the grid rather than hiding half of it.
+   *
+   * Asserted through `expectsRequest`, because a select that renders perfectly
+   * and reaches no endpoint looks identical from the outside — and the whole
+   * point of moving the merge onto the server is that this one request is what
+   * decides the page.
+   */
+  test('the type filter reaches the API and lands in the URL', async ({ page }) => {
+    await visit(page, '/browse')
+
+    await expectsRequest(page, /\/api\/library\?.*kind=SHOW/, 'GET', async () => {
+      await page.getByLabel('Filter by films or shows').click()
+      await page.getByRole('option', { name: 'Shows' }).click()
+    })
+
+    await expect(page).toHaveURL(/kind=SHOW/)
+  })
+
+  test('the sort control reaches the API and lands in the URL', async ({ page }) => {
+    await visit(page, '/browse')
+
+    await expectsRequest(page, /\/api\/library\?.*sort=year/, 'GET', async () => {
+      await page.getByLabel('Sort the library').click()
+      await page.getByRole('option', { name: 'Year' }).click()
+    })
+
+    await expect(page).toHaveURL(/sort=year/)
+  })
+
+  /**
+   * The genre control offers the vocabulary the library actually holds, so a
+   * library with no imported metadata legitimately has nothing to offer. The
+   * skip is decided from the **data** rather than from `locator.count()`,
+   * which does not retry and is therefore always true before the route has
+   * rendered — a guard written that way reports green without ever running.
+   */
+  test('the genre filter offers real genres and narrows the grid', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const genres = await page.evaluate(async () => {
+      const response = await fetch('/api/library/genres?limit=1')
+      return response.ok ? ((await response.json()).items ?? []) : []
+    })
+    test.skip(genres.length === 0, 'this library has no genres on it yet')
+
+    const genre = (genres[0] as { genre: string }).genre
+    await expectsRequest(page, /\/api\/library\?.*genre=/, 'GET', async () => {
+      await page.getByLabel('Filter by genre').click()
+      await page.getByRole('option', { name: genre, exact: true }).click()
+    })
+
+    await expect(page).toHaveURL(/genre=/)
+    // The chip is how a filter says it is on, and how it is taken off again.
+    await expect(page.getByRole('button', { name: `Remove the ${genre} filter` })).toBeVisible()
   })
 
   /**

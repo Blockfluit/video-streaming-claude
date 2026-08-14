@@ -137,7 +137,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 536 unit, 19 e2e and 457 db. The thin wrapper in
+  which is where every API test runs — 723 unit, 19 e2e and 572 db. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -375,6 +375,54 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   while the popover is open leaves it stuck open with its own search box focused, so the next thing typed
   lands in the search field. A plain input with results under it has no popover to get stuck.
 
+**The catalogue** (`library/merge.ts` is pure; `library.service.ts` is the IO around it)
+- `GET /library` is the union of the two things the library is made of — shelves and films — as one
+  `Page`. It exists because `browse.vue` used to ask `/collections` and `/videos?film=true` separately and
+  merge them in the browser, which **cannot page or sort**: each half was capped at 100, and the order was
+  only ever right inside whichever window happened to load.
+- Prisma cannot union two tables, so each side is queried and merged in memory. Deliberately **not** raw
+  SQL: `whereFilm(role)` carries the orphan rule — a video whose every collection is hidden is not a film
+  for that caller — and restating the most delicate rule in the codebase in a second language is how one
+  copy of it quietly stops being true. Every filter here composes `whereFilm`, `whereVisible` and
+  `narrowToVisibleStates` rather than re-deriving any of them.
+- **Neither side may `skip`.** Row 1 of one table can be row 1 or row 900 of the merged order, and nothing
+  short of looking says which, so the offset is applied after merging. `perSideWindow` takes
+  `offset + limit` from each side, which is exactly enough: the first `offset + limit` rows of a merged
+  order can only have come from the first that many of each source. That is also what `MAX_LIBRARY_OFFSET`
+  bounds — the work scales with the offset, so an unbounded one reads the library several times over.
+- **The sort key is `normalisedTitle`, not `title`**, and that is load-bearing. A page boundary is decided
+  by the SQL order and the JS comparator *together* — the database picks the candidates, the merge picks
+  the cut — so the two must agree, and `localeCompare` applies ICU rules no Postgres collation shares.
+  A normalised title is lowercase ASCII alphanumerics, where they coincide. Checked rather than assumed,
+  because the database is `en_US.utf8` rather than `C`: real-shaped titles (`10things`, `a1`, `ab`,
+  `se7en`, `seven`) sort identically in both, as does `normaliseTitle`'s fallback for a name with no Latin
+  alphanumerics, since glibc drops to code-point order there. The one live divergence is **astral-plane**
+  characters — Postgres orders by code point, JS by UTF-16 code unit — which could show an emoji-titled
+  film on the wrong side of a boundary. Not worth teaching this file a collation for.
+- `LIBRARY_SORTS` declares the Prisma `orderBy` and the comparator **in one table**, so a sort cannot be
+  changed in one place and not the other. Every order ends in the entry's kind and id: the two tables
+  number themselves independently, so ties are the norm rather than the exception.
+- A **collection sorts before a film** on an equal title. A saga and one of the films on it genuinely share
+  a name, both are right answers, and the shelf is the more general one. Postgres cannot express it — each
+  query sees one kind — so it is the one comparison that exists only in `merge.ts`.
+- `kind` **partitions** the grid rather than filtering half of it away: `FILM` is the films *and* the
+  shelves holding no seasons (a saga of eight films is films, and its chip says so), `SHOW` is the shelves
+  that do. Between them they cover everything, so nothing becomes unreachable the moment the filter is on.
+  There is no `kind` column and there must not be — it is a fact about the seasons behind the join.
+- Searching matches **cast and crew**, not just title and description — every one of them is a `Person` row
+  created on import precisely so a name can be looked up. A film also matches on the credits of a shelf it
+  stands on, because `credits/merge.ts` shows those on its page: searching less than the panel displays
+  means a cast member you can plainly read is one you cannot find. Both nested reads carry
+  `whereVisible(role)`, or a draft episode's credit becomes a way to learn who is in something unpublished.
+- On the film side the search `OR` goes **inside** `whereFilm`'s `AND` array, never beside it. Two `OR`
+  keys spread into one object leave only the last — the same trap `films.ts` documents from the other side.
+- `genre` narrows with `hasEvery` and is repeatable; `tag` stays a single value, because the chips on a
+  collection page link here as `?tag=…` and those links keep meaning what they meant. The two vocabularies
+  stay apart for the same reason the columns do.
+- `GET /library/genres` tallies in memory rather than in SQL. Unnesting an array column needs raw SQL, and
+  that would mean a second copy of `whereFilm` again; one narrow column off a private library is the
+  cheaper thing to spend. If it stops being, `unnest` goes here and the endpoint's shape does not change.
+
 **Imported metadata** (`metadata/tmdb.mapper.ts`, `crew-role.ts`, `diff.ts` are pure; the client is the seam)
 - **The source is TMDB, not IMDb.** IMDb has no public API and its terms forbid scraping. TMDB returns the
   IMDb id for titles and people, so the deep-links still work and are sourced legitimately.
@@ -599,13 +647,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   curated rows describe**, because there the question is still what to watch. `videoPath` was called
   `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
   that; every bug here is "which of the two did I call", so the names have to point at their own routes.
-- **`browse.vue` lists collections *and* films** (`?film=true`), merged into one grid. It listed only
-  collections, so a film could never appear there however often it was published — a folder of eight films
-  is one shelf, and the films are *on* it rather than on none. Reported twice: "I published it and browse
-  does not show it", then "browse does not return individual movies when they are part of a collection".
-  Episodes stay out deliberately: they are reachable through their show, and listing them would bury four
-  films under forty episodes of one of them. `q` and `tag` are passed to **both** requests, or searching
-  quietly stops finding half the library.
+- **`browse.vue` lists collections *and* films**, merged into one grid. It listed only collections, so a
+  film could never appear there however often it was published — a folder of eight films is one shelf, and
+  the films are *on* it rather than on none. Reported twice: "I published it and browse does not show it",
+  then "browse does not return individual movies when they are part of a collection". Episodes stay out
+  deliberately: they are reachable through their show, and listing them would bury four films under forty
+  episodes of one of them. It asks **`GET /library`** for both halves at once; it used to fetch
+  `/collections` and `/videos?film=true` separately and stitch them together here, which is why the merge
+  moved to the API — see **The catalogue** above.
+- Every filter lives in the **URL**, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
+  library is something you share and come back to, and none of that survives state held only in a `ref`.
+  The search box is the one control that types locally, debounced 250ms into the URL. Changing any filter
+  resets `offset`, or narrowing while on page seven lands on an empty page that looks exactly like an empty
+  library.
+- The genre control is filled from **`GET /library/genres`**, never a hardcoded list: `genres` is free text
+  as far as Postgres is concerned, so a control offering a vocabulary the library does not use is a control
+  that mostly returns nothing.
 - A saga and the films on it **both** match one search, on purpose — two different right answers — and the
   count chip is what separates them. `collectionChip` (`app/utils/kinds.ts`) says what a shelf holds
   ("1 season", "8 films", "Collection" when empty); a film carries **no** chip, because most of the library

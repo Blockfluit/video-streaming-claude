@@ -1,138 +1,135 @@
 <script setup lang="ts">
-import type { Page } from '@video/shared'
+import type { GenreFacet, LibraryCard, Page } from '@video/shared'
 
 /**
- * Everything in the library, searchable.
+ * Everything in the library, narrowable.
  *
  * "Everything" is two things, not one: a collection is a shelf, and a **film**
- * is a video no season-holding shelf claims. Listing only the shelves meant the
- * eight films on one were findable nowhere — the shelf was a single card and
- * they were all on it — so searching one by name returned nothing. That was the
- * bug: the model says a video stands on its own, and the one screen for finding
- * things disagreed.
+ * is a video no season-holding shelf claims. A saga and the films on it both
+ * match one search, on purpose — they are two different right answers to
+ * "Harry Potter", and the count chip on the shelf is what tells them apart.
+ * Episodes stay out: they are reachable through their show, and listing them
+ * would bury four films under forty instalments of one of them.
  *
- * A saga and the films on it therefore **both** match one search, on purpose.
- * They are two different right answers to "Harry Potter", and the count chip on
- * the collection card is what tells them apart.
+ * Both used to be fetched separately and stitched together here, from two
+ * requests capped at 100 each. That cannot page and cannot sort: the order was
+ * only ever right inside whichever window had loaded, and a library past either
+ * cap simply hid the rest. `GET /library` returns the union, so this page asks
+ * one question and gets one answer.
  *
- * Episodes deliberately stay out. They are reachable through their show, and
- * listing them would bury four films under forty episodes of one of them.
- *
- * The API pages and filters by role, so a viewer simply never sees a draft —
- * there is nothing to hide here.
+ * The URL holds every filter, because a narrowed library is something you
+ * share, bookmark and come back to. `browse-filters.ts` owns both directions of
+ * that mapping and is where the awkward cases are tested.
  */
-interface CollectionCard {
-  id: string
-  slug: string
-  title: string
-  year: number | null
-  tags: string[]
-  state: string
-  /** Null means there is none, so the card does not ask for it. */
-  posterKey: string | null
-  /** What it holds, which is what the chip says. Never TMDB's `seasonCount`. */
-  seasonsHere: number
-  videosHere: number
-}
-
-interface VideoCard {
-  id: string
-  slug: string
-  title: string
-  durationSec: number | null
-  tags: string[]
-  state: string
-  bannerKey: string | null
-}
-
-/** One grid, so the two kinds sort together rather than in separate blocks. */
-interface Card {
-  key: string
-  to: string
-  title: string
-  subtitle: string | null
-  imageUrl: string | null
-  /** The publish state, for the drafts only an admin sees. */
-  badge: string | null
-  /** What it holds, or nothing at all for a film. */
-  kind: string | null
-}
 
 const route = useRoute()
 const router = useRouter()
+const { isAdmin } = useSession()
 
-const q = ref(String(route.query.q ?? ''))
-const tag = computed(() => (route.query.tag ? String(route.query.tag) : null))
-
-/** `q` and `tag` mean the same thing to both endpoints, so they are built once. */
-function search(): URLSearchParams {
-  const params = new URLSearchParams({ limit: '100' })
-  if (q.value) params.set('q', q.value)
-  if (tag.value) params.set('tag', tag.value)
-  return params
-}
-
-const { data, status } = await useApiData<Page<CollectionCard>>(
-  'browse-collections',
-  () => `/collections?${search().toString()}`,
-  // The URL is a function of these, so the fetch has to follow them.
-  { watch: [q, tag] },
-)
-
-const { data: films, status: filmStatus } = await useApiData<Page<VideoCard>>(
-  'browse-films',
-  () => {
-    const params = search()
-    // The videos no season-holding shelf claims. Without this the eight films
-    // on one are unreachable from here: the shelf is a card and they are on it.
-    params.set('film', 'true')
-    return `/videos?${params.toString()}`
-  },
-  { watch: [q, tag] },
-)
-
-// Debounced into the URL, so a search is shareable and the back button works.
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(q, (value) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => {
-    router.replace({ query: { ...route.query, q: value || undefined } })
-  }, 250)
-})
+/** The filters, read from the URL — which is the only place they live. */
+const filters = computed(() => parseBrowseFilters(route.query))
 
 /**
- * Both windows merged and sorted by title.
+ * Change one thing and go back to the first page.
  *
- * Two capped lists stitched together locally is not real paging, and it is the
- * same cap this page always had — worth knowing before the library outgrows it.
+ * Anything but paging resets the offset: a search narrowed to three results
+ * while you were on page seven otherwise lands on an empty page that looks
+ * exactly like an empty library.
  */
-const cards = computed<Card[]>(() => {
-  const collections: Card[] = (data.value?.items ?? []).map(collection => ({
-    key: `c:${collection.id}`,
-    to: collectionPath(collection),
-    title: collection.title,
-    subtitle: collection.year ? String(collection.year) : null,
-    imageUrl: collectionPoster(collection),
-    badge: collection.state === 'PUBLISHED' ? null : collection.state,
-    kind: collectionChip(collection),
-  }))
+function apply(change: Partial<BrowseFilters>): void {
+  const next = { ...filters.value, ...change }
+  if (!('offset' in change)) next.offset = 0
 
-  const videos: Card[] = (films.value?.items ?? []).map(video => ({
-    key: `v:${video.id}`,
-    to: videoPath(video),
-    title: video.title,
-    subtitle: runtime(video.durationSec),
-    imageUrl: videoPoster(video),
-    badge: video.state === 'PUBLISHED' ? null : video.state,
-    // Nothing. A film is the ordinary case and most of this grid, so it is the
-    // absence of a chip that says so.
-    kind: null,
-  }))
+  router.replace({ query: browseFiltersToQuery(next) })
+}
 
-  return [...collections, ...videos].sort((a, b) => a.title.localeCompare(b.title))
+/*
+ * The search box types locally and lands in the URL 250ms later.
+ *
+ * Debounced by hand — `refDebounced` is VueUse and not a dependency. Without
+ * it every keystroke is a request and the answers can arrive out of order, so
+ * the list settles on whatever the slowest one returned.
+ */
+const search = ref(filters.value.q)
+let timer: ReturnType<typeof setTimeout> | undefined
+
+watch(search, (value) => {
+  clearTimeout(timer)
+  timer = setTimeout(() => apply({ q: value }), 250)
 })
+onBeforeUnmount(() => clearTimeout(timer))
 
-const pending = computed(() => status.value === 'pending' || filmStatus.value === 'pending')
+// The back button moves the URL without touching the box, so it is followed.
+watch(
+  () => filters.value.q,
+  (value) => {
+    if (value !== search.value) search.value = value
+  },
+)
+
+const query = computed(() => browseSearchParams(filters.value))
+
+const { data, status, error } = await useApiData<Page<LibraryCard>>(
+  'browse-library',
+  () => `/library?${query.value}`,
+  // The URL is a function of the filters, so the fetch has to follow them.
+  { watch: [query] },
+)
+
+/**
+ * The genres the library actually holds.
+ *
+ * Fetched rather than hardcoded: `genres` is free text as far as the database
+ * is concerned, and a control offering a vocabulary the library does not use is
+ * a control that mostly returns nothing.
+ */
+const { data: genreFacets } = await useApiData<Page<GenreFacet>>(
+  'browse-genres',
+  '/library/genres?limit=100',
+)
+
+const genreOptions = computed(() => (genreFacets.value?.items ?? []).map((facet) => facet.genre))
+
+/*
+ * `ANY` rather than `''` in every one of these. Reka UI reserves the empty
+ * string for "cleared" and throws during render if given one as a value, which
+ * takes the whole page down rather than just the control.
+ */
+/*
+ * Each control names its own dimension in its resting state.
+ *
+ * A bar of bare values reads as "Any genre / Anything / Title / Any state",
+ * where the middle two say nothing about what they do — "Title" in particular
+ * looks like a filter for things called Title rather than the sort order. The
+ * "any" option carries the noun, and the sort carries an icon, so the bar is
+ * legible without labels above it eating a row of vertical space.
+ */
+const KIND_OPTIONS = [
+  { label: 'Any type', value: ANY },
+  { label: 'Films', value: 'FILM' },
+  { label: 'Shows', value: 'SHOW' },
+]
+
+const SORT_OPTIONS = [
+  { label: 'Title', value: 'title' },
+  { label: 'Year', value: 'year' },
+  { label: 'Recently added', value: 'added' },
+]
+
+const STATE_OPTIONS = [
+  { label: 'Any state', value: ANY },
+  ...BROWSE_STATES.map((state) => ({ label: stateLabel(state), value: state })),
+]
+
+const cards = computed(() => data.value?.items ?? [])
+const total = computed(() => data.value?.total ?? 0)
+const chips = computed(() => activeFilterChips(filters.value))
+
+const page = computed(() => Math.floor(filters.value.offset / BROWSE_PAGE_SIZE) + 1)
+
+function goToPage(next: number): void {
+  apply({ offset: (next - 1) * BROWSE_PAGE_SIZE })
+}
 
 useHead({ title: 'Browse' })
 </script>
@@ -142,35 +139,125 @@ useHead({ title: 'Browse' })
     <div class="flex items-center gap-4 flex-wrap">
       <h1 class="text-2xl font-semibold grow">Browse</h1>
       <UInput
-        v-model="q"
+        v-model="search"
         icon="i-lucide-search"
-        placeholder="Search the library"
-        class="w-64"
+        placeholder="Search titles, genres and cast"
+        class="w-72"
       />
     </div>
 
-    <div v-if="tag" class="flex items-center gap-2">
-      <span class="text-sm text-(--ui-text-muted)">Tagged</span>
-      <UBadge color="primary" variant="subtle">{{ tag }}</UBadge>
-      <ULink :to="{ query: { ...route.query, tag: undefined } }" class="text-sm">Clear</ULink>
+    <!--
+      Every control names its own job in an aria-label. @nuxt/ui's triggers ship
+      one of their own — USelectMenu's is "Show popup" — which shadows the
+      visible text, so the accessible name of the control that picks a genre
+      would otherwise say nothing about genres.
+    -->
+    <div class="flex flex-wrap items-center gap-3">
+      <USelectMenu
+        :model-value="filters.genres"
+        :items="genreOptions"
+        multiple
+        placeholder="Any genre"
+        aria-label="Filter by genre"
+        class="w-52"
+        @update:model-value="(genres: string[]) => apply({ genres })"
+      />
+      <USelect
+        :model-value="filters.kind"
+        :items="KIND_OPTIONS"
+        aria-label="Filter by films or shows"
+        class="w-36"
+        @update:model-value="(value: string) => apply({ kind: asKind(value) })"
+      />
+      <USelect
+        :model-value="filters.sort"
+        :items="SORT_OPTIONS"
+        icon="i-lucide-arrow-up-down"
+        aria-label="Sort the library"
+        class="w-44"
+        @update:model-value="(value: string) => apply({ sort: asSort(value) })"
+      />
+      <!--
+        Rendering only. `useSession` is a convenience, never an authority: the
+        API narrows a state filter to what the caller's role may see, so a USER
+        who writes `?state=DRAFT` by hand gets an empty page rather than drafts.
+      -->
+      <USelect
+        v-if="isAdmin"
+        :model-value="filters.state"
+        :items="STATE_OPTIONS"
+        aria-label="Filter by lifecycle state"
+        class="w-40"
+        @update:model-value="(value: string) => apply({ state: asState(value) })"
+      />
+
+      <span class="ml-auto text-sm text-(--ui-text-muted)">
+        {{ total }} {{ total === 1 ? 'title' : 'titles' }}
+      </span>
     </div>
 
-    <div v-if="cards.length" class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4">
+    <div v-if="chips.length" class="flex flex-wrap items-center gap-2">
+      <UButton
+        v-for="chip in chips"
+        :key="chip.label"
+        size="xs"
+        color="neutral"
+        variant="subtle"
+        trailing-icon="i-lucide-x"
+        :aria-label="`Remove the ${chip.label} filter`"
+        @click="apply(chip.clear)"
+      >
+        {{ chip.label }}
+      </UButton>
+      <ULink class="text-sm" @click="router.replace({ query: {} })">Clear all</ULink>
+    </div>
+
+    <!--
+      An outage and an empty library must not look alike. `useApiData` returns
+      null for a failed request and for no results, so a page that reads only
+      `data` reports a dead API as "The library is empty" and sends whoever
+      reads it looking in entirely the wrong place.
+    -->
+    <p v-if="error" class="py-20 text-center text-(--ui-text-muted)">
+      The library could not be loaded. Try again in a moment.
+    </p>
+
+    <div
+      v-else-if="cards.length"
+      class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4"
+    >
       <MediaCard
         v-for="card in cards"
-        :key="card.key"
+        :key="`${card.kind}:${card.id}`"
         class="w-full"
-        :to="card.to"
+        :to="card.kind === 'collection' ? collectionPath(card) : videoPath(card)"
         :title="card.title"
-        :subtitle="card.subtitle"
-        :image-url="card.imageUrl"
-        :badge="card.badge"
-        :kind="card.kind"
+        :subtitle="
+          card.kind === 'collection'
+            ? card.year ? String(card.year) : null
+            : runtime(card.durationSec)
+        "
+        :image-url="card.kind === 'collection' ? collectionPoster(card) : videoPoster(card)"
+        :badge="card.state === 'PUBLISHED' ? null : card.state"
+        :kind="card.kind === 'collection' ? collectionChip(card) : null"
       />
     </div>
 
-    <p v-else-if="!pending" class="py-20 text-center text-(--ui-text-muted)">
-      {{ q ? `Nothing matches “${q}”.` : 'The library is empty.' }}
+    <p v-else-if="status !== 'pending'" class="py-20 text-center text-(--ui-text-muted)">
+      {{
+        hasActiveFilters(filters)
+          ? 'Nothing matches those filters.'
+          : 'The library is empty.'
+      }}
     </p>
+
+    <div v-if="total > BROWSE_PAGE_SIZE" class="flex justify-center pt-2">
+      <UPagination
+        :page="page"
+        :total="total"
+        :items-per-page="BROWSE_PAGE_SIZE"
+        @update:page="goToPage"
+      />
+    </div>
   </div>
 </template>
