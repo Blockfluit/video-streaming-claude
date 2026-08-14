@@ -106,6 +106,28 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   iframe must be `pointer-events-none`: an iframe swallows every click that lands on it, so without
   that the Play button underneath stops working the moment the trailer fades in, and the page looks
   perfectly fine while doing it.
+- **The home hero rotates**, and does so on a **fixed interval** rather than when a trailer ends.
+  There is no ended signal: `enablejsapi` is set and *nothing listens*, so "play the next one when
+  this finishes" would need a `postMessage` listener that does not exist. The interval is ~10s
+  against `HeroBackdrop`'s 2s fade-in — roughly two seconds of banner and eight of trailer. Much
+  shorter and the entry changes before its trailer has said anything, while opening a YouTube iframe
+  every few seconds.
+- The rotation stops for all three of: `prefers-reduced-motion` (it never starts — the same rule the
+  trailer follows), a pointer resting on the hero or focus inside it, and an explicit pause button.
+  Auto-updating content needs a way to stop it. `HeroBackdrop` emits `dismiss` from the trailer's ✕
+  and **only** from there — `stopTrailer` is also how it clears the previous trailer on a change of
+  `trailerId`, so emitting from inside it would fire on every turn of the carousel. Dismissing stops
+  the rotation too: somebody who closed a trailer is not asking for the next one ten seconds later.
+- The rotation's dots are dimmed with a **colour**, never `opacity`. `visible.spec.ts` reports an
+  interactive element under 0.35 effective opacity as invisible, and opacity multiplies down the
+  whole ancestor chain. Inactive is `--ui-border-accented` (3:1, the non-text floor for something
+  that bounds rather than sets type); active is `--ui-primary`.
+- The browser suite therefore runs with `reducedMotion: 'reduce'` set in `playwright.config.ts`.
+  Without it the auto-playing trailer puts a third-party iframe on `/` — a page a dozen tests visit
+  only to get a base URL for a `fetch` — where the response watchdog fails any 4xx in any frame,
+  `visit`'s `networkidle` races the 2s mount, and the run needs outbound internet. `e2e/hero.spec.ts`
+  opts back out for exactly the tests that are about the motion, and stubs YouTube rather than
+  reaching it. A setting that switches a feature off everywhere needs the one place it stays on.
 - **A collection's artwork is derived, not stored.** Its own `posterKey`/`bannerKey` are the *admin
   override*; null means "not overridden", and it then shows its **first video's** picture by
   `MEMBERSHIP_ORDER`, falling back to a stock image only when it holds nothing. Deriving on read is what
@@ -137,7 +159,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 723 unit, 19 e2e and 572 db. The thin wrapper in
+  which is where every API test runs — 723 unit, 19 e2e and 576 db. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -335,6 +357,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   another row.
 
 **Home-page rows** (`lists/sources/rank.ts` is pure; `computed.ts` is the IO around it)
+- **The home hero features what was recently added** (`app/utils/hero.ts`, pure). It reads the
+  `RECENTLY_ADDED` row out of the same `/lists` response the shelves come from, the way it used to read
+  Continue Watching — so moving, renaming or hiding that row moves the hero with it. It reads
+  **`shelves`**, not the raw rows: a `RECENTLY_ADDED` row that resolved to nothing must not shadow the
+  fallback, or a new row over an empty filter renders an empty hero on a full library.
+- **No migration seeds such a row** — only the two personal ones are seeded — so the hero falls back to
+  `GET /library?sort=added`, the catalogue's own recency answer and the one `/browse` already sorts by.
+  Without that fallback the feature does nothing at all on a fresh install, which is the install where
+  it matters most. It replaced the old `/collections?limit=1` "Featured" fetch, so the page still makes
+  two requests. The consequence for tests: a browser run against a fresh database only ever exercises
+  the fallback, and `hero.spec.ts` is the only thing covering the row branch.
+- The hero carries **no description**. Neither card select has one and neither should gain one — a
+  synopsis on the shared card shape is paid for by every card on every shelf, to serve three lines in
+  one place. `trailerYoutubeId` is eleven characters and is on both, which is the distinction.
 - A row is a **source, a kind, a limit and filters**. `MANUAL` reads its `ListItem`s; the computed sources
   rank the library; `CONTINUE_WATCHING` and `MY_LIST` delegate to `WatchService.history` and
   `WatchlistService.list` rather than restating either — both already resolve visibility on the nested video
@@ -644,7 +680,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `videoPath` (`/v/<slug>`, describes) and `playPath` (`/watch/<slug>`, plays) are picked between on a rule,
   not by feel: **inside a collection it plays** — an episode row, a collection's grid, the "more from"
   shelf — as do Continue Watching and History, because the choice was already made. **Browse, My List and
-  curated rows describe**, because there the question is still what to watch. `videoPath` was called
+  curated rows describe**, because there the question is still what to watch. The **home hero** is on that
+  side of the rule now rather than being the exception to it: it features a new arrival, which is
+  precisely something nobody has decided about yet, and a collection has nothing single to play in any
+  case. `videoPath` was called
   `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
   that; every bug here is "which of the two did I call", so the names have to point at their own routes.
 - **`browse.vue` lists collections *and* films**, merged into one grid. It listed only collections, so a

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Page } from '@video/shared'
+import type { LibraryCard, Page } from '@video/shared'
 
 /**
  * The home page: a hero, then whatever rows an admin has configured, in order.
@@ -9,12 +9,18 @@ import type { Page } from '@video/shared'
  * could not move, rename or hide. They are rows now like everything else — the
  * API resolves each one from its source and this page renders what comes back,
  * so there is one shelf-shaped thing here rather than three.
+ *
+ * The hero leads with what was **recently added** and rotates through the
+ * newest few, playing each one's trailer. It used to lead with whatever the
+ * viewer had last been watching, which made the largest thing on the page
+ * always something they had already seen — a new arrival was a card in a shelf
+ * below the fold. `app/utils/hero.ts` decides *what* it shows; this file is the
+ * rotation around it.
  */
 interface CardVideo {
   id: string
   slug: string
   title: string
-  description?: string | null
   durationSec: number | null
   width?: number | null
   height?: number | null
@@ -22,6 +28,8 @@ interface CardVideo {
   collections: { collection: { slug: string, title: string } }[]
   /** Null means there is none, so the card does not ask for it. */
   bannerKey?: string | null
+  /** The hero plays it. Null is the ordinary state of most of a library. */
+  trailerYoutubeId?: string | null
 }
 
 interface CardCollection {
@@ -33,6 +41,7 @@ interface CardCollection {
   /** What it holds, which is what its chip says. Never TMDB's `seasonCount`. */
   seasonsHere?: number | null
   videosHere?: number | null
+  trailerYoutubeId?: string | null
 }
 
 /**
@@ -56,10 +65,6 @@ interface HomeRow {
   items: RowItem[]
 }
 
-interface FeaturedCollection extends CardCollection {
-  description: string | null
-}
-
 /**
  * Both errors are kept.
  *
@@ -67,14 +72,20 @@ interface FeaturedCollection extends CardCollection {
  * and an empty library render identically — right down to "Nothing here yet",
  * which tells a viewer the library is empty when in fact the server is down.
  * One is a state worth designing for; the other is worth reporting.
+ *
+ * The second request is the hero's fallback, and it replaced a
+ * `/collections?limit=1` "Featured" one — so the page still makes two. Its key
+ * is named for the URL it now asks for: `useApiData` resolves a key once at
+ * setup and never derives it from the path, so a key left saying "featured"
+ * over a `/library` request is a payload key that lies for good.
  */
-const [{ data: rows, error: rowsError }, { data: collections, error: featuredError }]
+const [{ data: rows, error: rowsError }, { data: newest, error: newestError }]
   = await Promise.all([
     useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20'),
-    useApiData<Page<FeaturedCollection>>('home-featured', '/collections?limit=1'),
+    useApiData<Page<LibraryCard>>('home-newest', `/library?sort=added&limit=${HERO_LIMIT}`),
   ])
 
-const failed = computed(() => rowsError.value ?? featuredError.value ?? null)
+const failed = computed(() => rowsError.value ?? newestError.value ?? null)
 
 /**
  * A row that resolves to nothing is not rendered.
@@ -86,44 +97,97 @@ const failed = computed(() => rowsError.value ?? featuredError.value ?? null)
 const shelves = computed(() => (rows.value?.items ?? []).filter(row => row.items.length > 0))
 
 /**
- * The hero prefers something already started — the most likely thing you came
- * back for — and falls back to the first collection in the library.
+ * What the hero can feature, newest first.
  *
- * It reads the Continue Watching row rather than fetching history again, so
- * hiding that row also stops the hero leading with a resume. That is the
- * coherent reading of hiding it, not a side effect.
+ * `shelves` rather than the raw rows on purpose — a `RECENTLY_ADDED` row that
+ * resolved to nothing must not shadow the library fallback, or a brand-new row
+ * over an empty filter renders an empty hero on a library full of things.
+ *
+ * `?limit=20` on the rows request bounds this: a `RECENTLY_ADDED` row sitting
+ * at position 21 is not in the payload, and the hero takes the fallback. That
+ * has always been true of Continue Watching and is not worth a second request.
  */
-const hero = computed(() => {
-  const resuming = shelves.value.find(row => row.source === 'CONTINUE_WATCHING')?.items[0]
-  if (resuming?.video) {
-    return {
-      eyebrow: 'Continue watching',
-      title: resuming.video.title,
-      meta: collectionTitle(resuming.video),
-      description: resuming.video.description ?? null,
-      // Straight into playback. Someone resuming has already decided what
-      // they want; a page describing it is a page they have read.
-      to: playPath(resuming.video),
-      image: videoBanner(resuming.video),
-      resume: progressPercent(resuming.progress?.lastPositionSec ?? 0, resuming.video.durationSec),
-    }
-  }
+const entries = computed(() => heroEntries(shelves.value, newest.value?.items ?? []))
 
-  const featured = collections.value?.items?.[0]
-  if (!featured) return null
+/**
+ * Which one is showing.
+ *
+ * Starts at 0 deterministically. Anything derived from a clock or a random
+ * number renders one entry on the server and a different one in the browser,
+ * and a hydration mismatch is a warning rather than an error — so it would
+ * simply be wrong, quietly, forever.
+ */
+const active = ref(0)
 
-  return {
-    eyebrow: 'Featured',
-    title: featured.title,
-    meta: featured.year ? String(featured.year) : null,
-    description: featured.description,
-    to: collectionPath(featured),
-    image: collectionBanner(featured),
-    resume: 0,
-  }
+/**
+ * Read through the modulo rather than trusting the index.
+ *
+ * `entries` can shrink under a refetch, which would otherwise leave `active`
+ * past the end and the hero blank while `v-if` still passed.
+ */
+const hero = computed(() =>
+  entries.value.length === 0 ? null : entries.value[active.value % entries.value.length] ?? null,
+)
+
+/**
+ * How long each entry holds the hero.
+ *
+ * `HeroBackdrop` waits two seconds before its trailer fades in, so this is
+ * roughly two seconds of banner and eight of trailer. Much shorter and the
+ * entry changes before its trailer has said anything, while opening a YouTube
+ * iframe every few seconds. Advancing when a trailer actually *ends* would need
+ * the YouTube JS API — `enablejsapi` is set and nothing listens — so a fixed
+ * interval is the honest version of "then play the next in line".
+ */
+const ROTATE_MS = 10_000
+
+/**
+ * Rotation stops for the three things that should stop it.
+ *
+ * `paused` covers a pointer resting on the hero, keyboard focus inside it, and
+ * the explicit control — auto-updating content needs a way to stop it, and
+ * "wait, what was that" is the commonest reason to want one. `dismissed` is
+ * separate and permanent for the visit: somebody who closed the trailer is not
+ * asking to be shown the next one ten seconds later.
+ */
+const paused = ref(false)
+const hovering = ref(false)
+const dismissed = ref(false)
+
+const rotating = computed(() =>
+  entries.value.length > 1 && !paused.value && !hovering.value && !dismissed.value,
+)
+
+let timer: ReturnType<typeof setInterval> | undefined
+
+function advance(): void {
+  if (!rotating.value) return
+  active.value = (active.value + 1) % entries.value.length
+}
+
+/**
+ * Started in `onMounted`, so it never runs during SSR: an interval created in
+ * `setup` runs in Nitro on every render, is never cleared, and mutates state
+ * between rendering the markup and serialising the payload.
+ *
+ * Not under `prefers-reduced-motion` either. A hero that begins moving on its
+ * own is precisely what that setting is about, and it is the same rule the
+ * trailer already follows — the dots still work, and so does the pause button.
+ */
+onMounted(() => {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  timer = setInterval(advance, ROTATE_MS)
 })
 
-const isEmpty = computed(() => shelves.value.length === 0 && hero.value === null)
+onBeforeUnmount(() => clearInterval(timer))
+
+/** Picking one by hand is a decision, so it stops the carousel moving under you. */
+function show(index: number): void {
+  active.value = index
+  paused.value = true
+}
+
+const isEmpty = computed(() => shelves.value.length === 0 && entries.value.length === 0)
 
 /** Where a shelf's "see all" arrow goes, for the two rows that have a page of their own. */
 const rowLink = (source: string): string | undefined =>
@@ -174,8 +238,28 @@ useHead({ title: 'Home' })
       page background moved out from under it and the artwork ended on a visible
       horizontal seam.
     -->
-    <HeroBackdrop v-if="hero" :image="hero.image">
-      <div class="rise max-w-xl space-y-4">
+    <!--
+      Rotation pauses while a pointer rests on the hero or focus is inside it.
+      Reading the thing it is describing is the commonest reason to want it to
+      hold still, and `focus-within` is the same courtesy for a keyboard.
+    -->
+    <HeroBackdrop
+      v-if="hero"
+      :image="hero.image"
+      :trailer-id="hero.trailerId"
+      @dismiss="dismissed = true"
+      @pointerenter="hovering = true"
+      @pointerleave="hovering = false"
+      @focusin="hovering = true"
+      @focusout="hovering = false"
+    >
+      <!--
+        Keyed on the entry, so the text animates in on each turn rather than
+        mutating in place. The backdrop itself is deliberately *not* keyed: it
+        crossfades its own artwork, and remounting it would restart the trailer
+        and flash the banner.
+      -->
+      <div :key="hero.id" class="rise max-w-xl space-y-4">
         <!--
           The eyebrow is set in muted text with a red rule beside it rather than
           in red type. Red on near-black passes WCAG and still reads poorly at
@@ -183,21 +267,60 @@ useHead({ title: 'Home' })
         -->
         <p class="flex items-center gap-2 text-xs font-semibold tracking-[0.2em] text-(--ui-text-muted) uppercase">
           <span aria-hidden="true" class="h-3 w-0.5 rounded-full bg-(--ui-primary)" />
-          {{ hero.eyebrow }}
+          Recently added
         </p>
         <h1 class="text-4xl font-bold tracking-tight text-white sm:text-6xl">{{ hero.title }}</h1>
         <p v-if="hero.meta" class="text-sm text-(--ui-text-muted)">{{ hero.meta }}</p>
-        <p v-if="hero.description" class="line-clamp-3 text-(--ui-text-muted)">{{ hero.description }}</p>
 
         <div class="flex items-center gap-3 pt-2">
-          <UButton :to="hero.to" size="lg" icon="i-lucide-play" class="font-semibold">
-            {{ hero.resume ? 'Resume' : 'Play' }}
+          <!--
+            It describes rather than plays. Something newly arrived is something
+            the viewer is still deciding about — the same rule browse, My List
+            and the curated rows follow — and a collection has nothing single to
+            play in any case.
+          -->
+          <UButton :to="hero.to" size="lg" icon="i-lucide-info" class="font-semibold">
+            More info
           </UButton>
-          <div v-if="hero.resume" class="h-1 w-40 overflow-hidden rounded-full bg-white/20">
-            <div class="h-full bg-(--ui-primary)" :style="{ width: `${hero.resume}%` }" />
-          </div>
         </div>
       </div>
+
+      <!--
+        The rotation's own controls, on the floor of the hero opposite the
+        trailer's.
+
+        Real buttons with real labels: `visible.spec.ts` fails a control that is
+        focusable and invisible, and a bare row of divs would be neither
+        reachable nor announced. An inactive dot is dimmed with a *colour*, never
+        with `opacity` — the audit reports an interactive element under 0.35
+        effective opacity, and opacity multiplies down the whole ancestor chain.
+      -->
+      <template v-if="entries.length > 1" #controls>
+        <div class="flex items-center gap-3">
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            :icon="rotating ? 'i-lucide-pause' : 'i-lucide-play'"
+            :aria-label="rotating ? 'Pause the rotation' : 'Resume the rotation'"
+            @click="paused = !paused"
+          />
+          <div class="flex items-center gap-2">
+            <button
+              v-for="(entry, index) in entries"
+              :key="entry.id"
+              type="button"
+              class="size-2.5 rounded-full transition-colors"
+              :class="index === active % entries.length
+                ? 'bg-(--ui-primary)'
+                : 'bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
+              :aria-label="`Show ${entry.title}`"
+              :aria-current="index === active % entries.length ? 'true' : undefined"
+              @click="show(index)"
+            />
+          </div>
+        </div>
+      </template>
     </HeroBackdrop>
 
     <div

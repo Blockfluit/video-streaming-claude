@@ -34,6 +34,12 @@ const props = defineProps<{
   trailerId?: string | null
 }>()
 
+/**
+ * Only the deliberate one. A page that swaps `trailerId` on a timer needs to
+ * know when the viewer has said no, so it can stop swapping.
+ */
+const emit = defineEmits<{ dismiss: [] }>()
+
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
 
@@ -78,6 +84,20 @@ function startTrailer(): void {
   if (!props.trailerId) return
   mounted.value = true
   playing.value = true
+}
+
+/**
+ * The ✕, as opposed to the internal stop.
+ *
+ * `stopTrailer` is also how `scheduleTrailer` clears the previous trailer, so
+ * emitting from there would fire on every change of `trailerId`. Only a person
+ * pressing the button means "I do not want this", and only that is worth
+ * telling the page about — the home hero rotates, and a trailer somebody just
+ * dismissed coming back ten seconds later is the same annoyance twice.
+ */
+function dismissTrailer(): void {
+  stopTrailer()
+  emit('dismiss')
 }
 
 /**
@@ -200,6 +220,18 @@ watch(
     </div>
 
     <!--
+      Anything the page itself puts on the floor of the hero — the home page's
+      rotation dots and its pause button.
+
+      Bottom-**left**, because the trailer's own controls are pinned bottom-right
+      and a carousel control placed in the default slot would either sit in the
+      middle of the text or land on top of them. Same z-index, opposite corner.
+    -->
+    <div v-if="$slots.controls" class="absolute bottom-6 left-4 z-1 sm:left-8">
+      <slot name="controls" />
+    </div>
+
+    <!--
       The trailer's controls, and the only way to start one when
       `prefers-reduced-motion` has stopped it doing so itself. Real buttons with
       real labels, sitting above the scrim rather than over the artwork.
@@ -220,7 +252,7 @@ watch(
           variant="subtle"
           icon="i-lucide-x"
           aria-label="Stop the trailer"
-          @click="stopTrailer"
+          @click="dismissTrailer"
         />
       </template>
       <UButton

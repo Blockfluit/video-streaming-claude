@@ -48,22 +48,26 @@ async function startPlaying(page: Page): Promise<void> {
 test.describe('viewer', () => {
 
   /**
-   * The home hero is a resume surface, so it plays. Where it lands depends on
-   * whether this account has watched anything — both are correct; what must
-   * hold is that it gets somewhere you can press play.
+   * The home hero features something recently added, so it *describes* — a new
+   * arrival is something you are still deciding about. It lands on a title page
+   * or a collection page depending on what arrived last; both are correct, and
+   * what must hold is that a player is one press away from either.
+   *
+   * It used to be a resume surface offering Play, which is why this looks for
+   * "More info" now rather than a relaxed version of the old regex: a locator
+   * loose enough to match both would have passed against a hero that had
+   * stopped working.
    */
-  test('the hero play button reaches a player', async ({ page }) => {
+  test('the hero reaches a title page, and a player from there', async ({ page }) => {
     await visit(page, '/')
-    const hero = page.getByRole('link', { name: /^(Resume|Play)$/ }).first()
+    const hero = page.getByRole('link', { name: 'More info' }).first()
     await expect(hero).toBeVisible()
 
     await hero.click()
-    await page.waitForURL(/\/(watch|v|c)\//)
+    await page.waitForURL(/\/(v|c)\//)
 
-    if (!/\/watch\//.test(page.url())) {
-      await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
-      await page.waitForURL(/\/watch\//)
-    }
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
     await expect(page.locator('video')).toBeVisible()
   })
 

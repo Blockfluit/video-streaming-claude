@@ -49,6 +49,10 @@ export const COLLECTION_CARD_SELECT = {
   year: true,
   posterKey: true,
   state: true,
+  // Eleven characters, and the home hero plays the trailer of whatever it is
+  // featuring. `description` is deliberately *not* here for the same reason
+  // this is: a card select is paid for by every card on every shelf.
+  trailerYoutubeId: true,
   ...COUNTS_HERE_SELECT,
 } as const;
 
@@ -61,6 +65,7 @@ export const VIDEO_CARD_SELECT = {
   width: true,
   height: true,
   state: true,
+  trailerYoutubeId: true,
   collections: {
     select: { collection: { select: { id: true, slug: true, title: true } } },
   },
