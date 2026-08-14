@@ -143,6 +143,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   interactive element under 0.35 effective opacity as invisible, and opacity multiplies down the
   whole ancestor chain. Inactive is `--ui-border-accented` (3:1, the non-text floor for something
   that bounds rather than sets type); active is `--ui-primary`.
+- They live in the hero's **text column**, under the call to action — not on the floor of the hero,
+  where they were first put. The home page is pulled up over its hero by `-mt-16` so the artwork
+  runs behind the cards, which means the bottom 4rem of the hero is underneath a row heading:
+  "Recently added" landed exactly on top of the pause button. Anything the *page* owns inside the
+  hero has to sit above that band, and the text column is the one place clear of it at every width.
+  The trailer's own controls are bottom-**right** and escape this only because a shelf heading is
+  short — do not read their position as a precedent for anything on the left.
 - The browser suite therefore runs with `reducedMotion: 'reduce'` set in `playwright.config.ts`.
   Without it the auto-playing trailer puts a third-party iframe on `/` — a page a dozen tests visit
   only to get a base URL for a `fetch` — where the response watchdog fails any 4xx in any frame,

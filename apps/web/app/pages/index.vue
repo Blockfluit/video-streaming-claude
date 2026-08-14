@@ -286,41 +286,49 @@ useHead({ title: 'Home' })
       </div>
 
       <!--
-        The rotation's own controls, on the floor of the hero opposite the
-        trailer's.
+        The rotation's controls, in the hero's own column rather than on the
+        floor of it.
 
-        Real buttons with real labels: `visible.spec.ts` fails a control that is
+        They sat bottom-left to begin with and collided with the first shelf:
+        the page below is pulled up over the hero by `-mt-16` so the artwork
+        runs behind the cards, which puts the bottom 4rem of the hero underneath
+        a row heading — "Recently added" landed exactly on top of the pause
+        button. Anything the hero owns has to live above that band, and the text
+        column is the one place guaranteed to be clear of it at every width.
+
+        Not keyed on `hero.id` like the text above: re-running the fade on every
+        turn would blink the control you just pressed.
+
+        Real buttons with real labels — `visible.spec.ts` fails a control that is
         focusable and invisible, and a bare row of divs would be neither
         reachable nor announced. An inactive dot is dimmed with a *colour*, never
-        with `opacity` — the audit reports an interactive element under 0.35
+        with `opacity`: the audit reports an interactive element under 0.35
         effective opacity, and opacity multiplies down the whole ancestor chain.
       -->
-      <template v-if="entries.length > 1" #controls>
-        <div class="flex items-center gap-3">
-          <UButton
-            size="sm"
-            color="neutral"
-            variant="subtle"
-            :icon="rotating ? 'i-lucide-pause' : 'i-lucide-play'"
-            :aria-label="rotating ? 'Pause the rotation' : 'Resume the rotation'"
-            @click="paused = !paused"
+      <div v-if="entries.length > 1" class="mt-6 flex items-center gap-3">
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="subtle"
+          :icon="rotating ? 'i-lucide-pause' : 'i-lucide-play'"
+          :aria-label="rotating ? 'Pause the rotation' : 'Resume the rotation'"
+          @click="paused = !paused"
+        />
+        <div class="flex items-center gap-2">
+          <button
+            v-for="(entry, index) in entries"
+            :key="entry.id"
+            type="button"
+            class="size-2.5 rounded-full transition-colors"
+            :class="index === active % entries.length
+              ? 'bg-(--ui-primary)'
+              : 'bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
+            :aria-label="`Show ${entry.title}`"
+            :aria-current="index === active % entries.length ? 'true' : undefined"
+            @click="show(index)"
           />
-          <div class="flex items-center gap-2">
-            <button
-              v-for="(entry, index) in entries"
-              :key="entry.id"
-              type="button"
-              class="size-2.5 rounded-full transition-colors"
-              :class="index === active % entries.length
-                ? 'bg-(--ui-primary)'
-                : 'bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
-              :aria-label="`Show ${entry.title}`"
-              :aria-current="index === active % entries.length ? 'true' : undefined"
-              @click="show(index)"
-            />
-          </div>
         </div>
-      </template>
+      </div>
     </HeroBackdrop>
 
     <div
