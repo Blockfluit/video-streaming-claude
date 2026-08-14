@@ -44,6 +44,8 @@ interface VideoDetail {
   trailerYoutubeId: string | null
   playbackKey: string | null
   storageKey: string
+  /** Set once the source has been reclaimed, so there is no longer one to delete. */
+  sourceDeletedAt: string | null
   introStartSec: number | null
   introEndSec: number | null
   outroStartSec: number | null
@@ -163,6 +165,62 @@ async function act(path: string, method: 'POST' | 'DELETE' = 'POST', label = 'Do
     void jobs.value?.refresh().catch(() => undefined)
   } catch (error) {
     toast.add({ title: apiMessage(error, 'That did not work'), color: 'error' })
+  }
+}
+
+/**
+ * Removing the video, which is the one action on this page with no undo.
+ *
+ * Two outcomes rather than one, because there are two things on disk. The entry
+ * and everything derived from it always go; the source file goes only if asked.
+ * Which of those is even offered depends on whether there is a source there —
+ * see `sourceOnDisk`.
+ */
+const confirmingDelete = ref(false)
+const deleting = ref(false)
+
+/**
+ * Whether a source file still exists to be destroyed.
+ *
+ * MISSING means the file is not where the row says it is, and `sourceDeletedAt`
+ * means it was reclaimed after a conversion. In both cases there is nothing to
+ * offer to delete — and, more usefully, nothing for the next scan to rebuild
+ * the row from, so removing the entry actually sticks.
+ */
+const sourceOnDisk = computed(
+  () => video.value?.state !== 'MISSING' && video.value?.sourceDeletedAt === null,
+)
+
+/**
+ * A reclaimed video's converted file is its only copy, so the API refuses to
+ * remove the entry without it. The dialog says so rather than offering a button
+ * that comes back as an error.
+ */
+const convertedIsOnlyCopy = computed(
+  () => video.value?.sourceDeletedAt !== null && video.value?.playbackKey !== null,
+)
+
+const sizeGb = computed(() => (Number(video.value?.sizeBytes ?? 0) / 1024 ** 3).toFixed(2))
+
+/**
+ * Deliberately not `act()`, which cannot carry a query parameter — the same
+ * reason `removeSeason` on the collection screen calls `api` directly.
+ */
+async function removeVideo(deleteFiles: boolean) {
+  deleting.value = true
+  try {
+    await api(`/videos/${id}${deleteFiles ? '?deleteFiles=true' : ''}`, { method: 'DELETE' })
+    confirmingDelete.value = false
+    toast.add({
+      title: deleteFiles ? 'Video and its file deleted' : 'Video removed from the library',
+      color: 'success',
+    })
+    // The record this page is about is gone, so staying here is a dead view.
+    await navigateTo('/admin/library')
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not remove that video'), color: 'error' })
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -565,8 +623,105 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
               :title="`${video.audioTracks} audio tracks — conversion keeps the first`"
             />
           </div>
+
+          <!--
+            Separated by a rule rather than mixed in with Re-probe and Convert:
+            this is the only control here that cannot be undone.
+
+            Neutral rather than error-coloured, despite what it does. Saturated
+            red *type* on a near-black surface measures well and reads badly at
+            this size — the reason the accent stopped setting type anywhere in
+            this app. The separation and the icon carry the warning here; the
+            red is spent on the confirm inside the dialog, which is the step
+            that actually destroys something.
+          -->
+          <div class="mt-4 border-t border-(--ui-border) pt-4">
+            <UButton
+              block
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-trash-2"
+              @click="confirmingDelete = true"
+            >
+              Remove this entry
+            </UButton>
+          </div>
         </UCard>
       </div>
     </div>
+
+    <!--
+      Names what goes and what comes back, rather than asking "are you sure?".
+      The re-ingest warning is the reason this screen exists: removing an entry
+      whose file is still on the drive does not stick, and finding that out a
+      scan later — with the curation gone — is how the entry became stale in the
+      first place.
+    -->
+    <UModal v-model:open="confirmingDelete" title="Remove this video from the library">
+      <template #body>
+        <div class="space-y-3 text-sm">
+          <p>
+            <strong>{{ video.title }}</strong> — {{ sizeGb }} GB
+          </p>
+          <p class="font-mono text-xs text-(--ui-text-muted)">{{ video.storageKey }}</p>
+
+          <p class="text-(--ui-text-muted)">
+            Its poster, banner, converted file and subtitle tracks go either way.
+            They are regenerated from the source, and nothing else ever clears
+            them up.
+          </p>
+
+          <template v-if="sourceOnDisk">
+            <p class="text-(--ui-text-muted)">
+              The video file itself stays on the drive unless you say otherwise —
+              and while it is there, the next scan of the media folder will find
+              it and recreate this video as an untitled draft. The title,
+              description, artwork, credits, skip markers, comments and watch
+              history do not come back with it.
+            </p>
+            <p class="text-(--ui-text-muted)">
+              Deleting the file cannot be undone.
+            </p>
+          </template>
+
+          <p v-else-if="convertedIsOnlyCopy" class="text-(--ui-text-muted)">
+            The source was reclaimed after this video was converted, so the
+            converted file is the only copy left. Removing the entry therefore
+            has to take it, and that cannot be undone.
+          </p>
+
+          <p v-else class="text-(--ui-text-muted)">
+            There is no file on the drive for this entry, so removing it sticks —
+            nothing will recreate it. Its comments and watch history go with it.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full gap-2">
+          <UButton color="neutral" variant="subtle" @click="confirmingDelete = false">
+            Cancel
+          </UButton>
+          <UButton
+            v-if="!convertedIsOnlyCopy"
+            class="ml-auto"
+            :color="sourceOnDisk ? 'neutral' : 'error'"
+            :variant="sourceOnDisk ? 'subtle' : 'solid'"
+            :loading="deleting"
+            @click="removeVideo(false)"
+          >
+            Remove the entry
+          </UButton>
+          <UButton
+            v-if="sourceOnDisk || convertedIsOnlyCopy"
+            :class="convertedIsOnlyCopy ? 'ml-auto' : ''"
+            color="error"
+            :loading="deleting"
+            @click="removeVideo(true)"
+          >
+            {{ convertedIsOnlyCopy ? 'Remove it and delete the converted file' : 'Remove it and delete the file' }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
