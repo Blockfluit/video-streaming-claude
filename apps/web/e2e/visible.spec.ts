@@ -1,4 +1,4 @@
-import { expect, test, visit } from './fixtures'
+import { expect, fillStable, test, visit } from './fixtures'
 
 /**
  * Two kinds of bug that every other test in this suite walks straight past.
@@ -284,6 +284,63 @@ test.describe('legibility', () => {
     expect(
       problems,
       `account menu:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+})
+
+/**
+ * The two pages the audit above can never reach.
+ *
+ * Everything in this suite runs as a signed-in admin, and `auth.global.ts`
+ * bounces a signed-in visitor off `/login` and `/setup` to the home page. So
+ * the first two screens anyone ever sees were the only real routes in the app
+ * whose contrast had never been measured — the audit was blind to them for
+ * exactly the reason they exist.
+ *
+ * Discarding the stored session is the whole fix. The fixture already tolerates
+ * a 401 from `/api/auth/me`, which is the ordinary answer out here.
+ */
+test.describe('legibility, signed out', () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  for (const path of ['/login', '/setup']) {
+    test(`${path} has no unreadable text or invisible controls`, async ({ page }) => {
+      await visit(page, path)
+
+      // Proves the session really was discarded. Signed in, the redirect would
+      // land on the home page and this would pass by measuring a page that is
+      // already covered above — green, and testing nothing.
+      await expect(page).toHaveURL(new RegExp(`${path}$`))
+
+      const problems = await page.evaluate(AUDIT)
+
+      expect(
+        problems,
+        `${path}:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+      ).toEqual([])
+    })
+  }
+
+  /**
+   * The checklist in the state nobody looks at twice.
+   *
+   * Its three states are three different treatments, and the two that only
+   * appear after a mistake are never on screen in the test above. Filling the
+   * form wrongly on purpose is the only way they get measured.
+   */
+  test('the signup checklist, once it has something to complain about', async ({ page }) => {
+    await visit(page, '/setup')
+
+    // By `name`: both boxes are `autocomplete="new-password"`, so that selector
+    // matches two elements and is a strict-mode violation to fill through.
+    await fillStable(page, 'input[name="password"]', 'short')
+    await fillStable(page, 'input[name="confirmPassword"]', 'different')
+    await expect(page.getByText('Passwords match')).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `signup checklist:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
     ).toEqual([])
   })
 })
