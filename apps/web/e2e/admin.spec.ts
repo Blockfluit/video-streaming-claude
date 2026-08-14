@@ -468,6 +468,37 @@ test.describe('admin', () => {
   })
 
   /**
+   * The player carries its own way into the editor.
+   *
+   * A wrong title or a misplaced marker is noticed with the video playing, and
+   * `/v/:slug` having the button is no help from `/watch/:slug`. Gated on
+   * `isAdmin`, which is a convenience rather than an authority — the editor is
+   * behind `middleware/admin.ts` and behind the API either way. This asserts
+   * the half a browser can see: the control is there, and it lands on the
+   * editor for *this* video rather than on the admin library.
+   */
+  test('the player page links to this video\'s editor', async ({ page }) => {
+    // Somewhere in the app first — a relative fetch has no base URL to resolve
+    // on about:blank.
+    await visit(page, '/browse')
+    const video = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      const first = body.items?.[0]
+      return first ? { id: first.id as string, slug: first.slug as string } : null
+    })
+    expect(video).not.toBeNull()
+
+    await visit(page, `/watch/${video!.slug}`)
+
+    const edit = page.getByRole('link', { name: 'Edit' })
+    await expect(edit).toHaveAttribute('href', `/admin/videos/${video!.id}`)
+
+    await edit.click()
+    await page.waitForURL(`/admin/videos/${video!.id}`)
+    await expect(page.getByRole('button', { name: 'Save details' })).toBeVisible()
+  })
+
+  /**
    * The moderation queue. Removal is the only power an admin has over someone
    * else's comment — the API refuses an edit even for them, because rewriting
    * someone's words and leaving their name on it is not moderation.

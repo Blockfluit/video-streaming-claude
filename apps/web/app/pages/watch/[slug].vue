@@ -75,6 +75,8 @@ const backTo = computed(() => (video.value ? videoPath(video.value) : '/browse')
 const player = ref<{ seek?: (s: number) => void } | null>(null)
 const currentTime = ref(0)
 
+const { isAdmin } = useSession()
+
 useHead(() => ({ title: video.value?.title ?? 'Watch' }))
 </script>
 
@@ -112,10 +114,32 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
         <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
           {{ video.state }}
         </UBadge>
-        <!-- Everything worth reading about this video is one click away. -->
-        <UButton :to="backTo" color="neutral" variant="subtle" icon="i-lucide-info" class="ml-auto">
-          Details
-        </UButton>
+        <!--
+          The pair is kept together in one `ml-auto` group rather than pushed
+          apart: with the margin on the first button, a second one lands beside
+          the title and the row reads as two unrelated halves.
+        -->
+        <div class="ml-auto flex items-center gap-2">
+          <!-- Everything worth reading about this video is one click away. -->
+          <UButton :to="backTo" color="neutral" variant="subtle" icon="i-lucide-info">
+            Details
+          </UButton>
+          <!--
+            A wrong title or a misplaced marker is noticed here, with the video
+            playing — not on the page you came from. Admins only: the API
+            refuses either way, but offering a button that 403s is not an
+            interface.
+          -->
+          <UButton
+            v-if="isAdmin"
+            :to="`/admin/videos/${video.id}`"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-pencil"
+          >
+            Edit
+          </UButton>
+        </div>
       </div>
 
       <USeparator />
