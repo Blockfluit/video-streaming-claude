@@ -324,6 +324,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   hardcoded above the third: the shelves every viewer sees first were the two an admin could not move.
 - Both list adds are idempotent by **catching the unique violation**, not by checking first: check-then-write
   is not atomic and a double-click lands inside the gap. The partial uniques are what enforce it.
+- Whether something is *on* the list rides on the **per-caller** read a screen already makes —
+  `inMyList` on `/videos/:id/stats` and `/collections/:slug/progress` (`common/watchlist.ts`), never on the
+  detail read that describes the record. The button is then right on the first paint with no extra request,
+  and a payload describing a video stays the same for everyone who asks. `GET /me/watchlist` is the list
+  itself and deliberately takes no id filter: asking it about one record would mean paging the lot.
+  `AddToListButton`'s `saved` prop went unpassed by every caller for months, so the button offered to add
+  things already saved — an optional prop nobody passes is dead code, exactly like `MediaCard`'s `shape`.
 - `nextEpisode` (pure) picks the first **unfinished** episode — which also covers resuming a half-watched
   one, and does not skip an episode because a later one was finished — and returns to the first once the
   whole thing is done. A null `orderIndex` sorts **last**: it means "ingest could not tell", and treating it
@@ -696,6 +703,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Card hover is a **border**, never an overlay. A centred play/info glyph covered the one thing a card
   exists to show, on the card being pointed at. Removing it has to delete the element, not hide it —
   `visible.spec.ts` fails a control that is `opacity: 0` and still focusable.
+- **Anything laid over a `.card-lift` needs a `z-index` above 1.** That hover rule scales the card *and*
+  raises it, and a control on top of it at `z-index: auto` is then covered by the one gesture that
+  reaches for it: nobody presses a button on a card without crossing the card. My List's remove button —
+  the only way to take something off that list — was plainly there at rest and gone the instant you went
+  for it, with the click landing on the card's link. Visible at rest is not the same as reachable.
 - A nav link to a route with no page is a broken app, not a placeholder — links land with their pages. The
   reverse is just as bad: `/admin/collections/[slug]` and `/admin/comments` are unreachable without their
   sidebar entries, and a page nobody can navigate to gets no use and no bug reports.
@@ -731,6 +743,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   **data** (fetch it) and wait for the DOM with `expect`, which retries.
 - `waitForLoadState('networkidle')` is not a substitute either — after a client-side navigation it can
   resolve *before* the route's data request has even started.
+- **A click cannot catch a control covered on hover.** Playwright jumps the mouse straight to its target,
+  so an element that a *neighbouring* `:hover` effect covers is uncovered again by the very act of
+  clicking it — the click passes while a person cannot press the thing at all. My List's remove button
+  shipped that way for months under a green test. Assert the **stacking** instead: hover the thing that
+  moves, then check `document.elementFromPoint` at the control's own centre still lands on the control.
 - `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
   clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
   ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
