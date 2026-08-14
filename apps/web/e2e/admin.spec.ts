@@ -85,6 +85,43 @@ test.describe('admin', () => {
     )
   })
 
+  /**
+   * The delete dialog, asserted up to the point of no return.
+   *
+   * Neither button is pressed. This suite runs against the real dev library, so
+   * the only thing there is to delete is a real film — and there is no cheap way
+   * to make a throwaway one, because a video row exists only where a file does.
+   * The API side is covered by `library.db-spec.ts`; what is worth proving here
+   * is that the warning a person reads before deciding is actually on screen.
+   */
+  test('removing a video names the file and warns that a scan brings it back', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.getByRole('link', { name: 'Edit' }).first().click()
+    await page.waitForURL(/\/admin\/videos\//)
+
+    // The storage key is on the page header, and the dialog must name the same
+    // file — that is the whole "say what goes" convention.
+    const storageKey = await page.locator('main').getByText(/\.(mp4|mkv|avi|mov|webm)$/).first().innerText()
+
+    await page.getByRole('button', { name: 'Remove this entry' }).click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('Remove this video from the library')).toBeVisible()
+    await expect(dialog.getByText(storageKey)).toBeVisible()
+    await expect(dialog.getByText(/GB/)).toBeVisible()
+    // The warning this feature exists for.
+    await expect(dialog.getByText(/recreate this video as an untitled draft/)).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /delete the file/ })).toBeVisible()
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+    // A closing overlay still swallows pointer events, so wait for it to go.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    // Cancelling navigated nowhere and deleted nothing.
+    await expect(page).toHaveURL(/\/admin\/videos\//)
+    await expect(page.getByRole('button', { name: 'Remove this entry' })).toBeVisible()
+  })
+
   test('the marker editor sets and clears a marker', async ({ page }) => {
     await visit(page, '/admin/library')
     await page.getByRole('link', { name: 'Edit' }).first().click()

@@ -10,9 +10,11 @@ import {
 import { whereEpisode, whereFilm } from '../common/films';
 import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
+import { StorageService } from '../common/storage.service';
 import { titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { derivedKeysToDelete, mediaKeysToDelete, subtitleDirectoryKey } from './deletion';
 import { validateMarkers, type Markers } from './markers';
 
 /**
@@ -91,6 +93,11 @@ const VIDEO_SELECT = {
   probedAt: true,
   probeError: true,
   missingSince: true,
+  // Whether the source was reclaimed, so a screen offering to delete the file
+  // can tell that there is no longer one to delete.
+  sourceDeletedAt: true,
+  posterKey: true,
+  posterSource: true,
   bannerKey: true,
   bannerSource: true,
   trailerYoutubeId: true,
@@ -104,7 +111,10 @@ const VIDEO_SELECT = {
 
 @Injectable()
 export class VideosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   /**
    * There is no `create` here on purpose. A video row exists because a file
@@ -231,16 +241,111 @@ export class VideosService {
   }
 
   /**
-   * Removes the row only. The file stays, so this is not a way to free disk
-   * space — and reconcile will recreate the row on the next scan unless the
-   * file is removed too. Reclaiming source files is `DELETE /videos/:id/source`
-   * in step 12, which is a different operation with different consequences.
+   * Removes the video, and its source file only when asked.
+   *
+   * Two different things are on disk and they are governed differently.
+   * Everything under `DERIVED_ROOT` — poster, banner, converted file, subtitle
+   * tracks — is regenerable output belonging to a row that is about to stop
+   * existing, so it **always** goes: nothing else sweeps it, and leaving it
+   * means a delete quietly leaks files nobody can ever reach again. The source
+   * under `MEDIA_ROOT` is the archival copy and goes **only** on request,
+   * because reconcile can rebuild the row from it and the default has to be the
+   * recoverable mistake rather than the other one.
+   *
+   * Which also means a plain delete does not stick while the source is there:
+   * the next scan finds the file, and creates a fresh draft with none of the
+   * curation the old row carried. That is the honest behaviour and the admin UI
+   * says so outright — it is not something to paper over here, because the
+   * alternative is destroying media by default.
+   *
+   * Every key is read **before** the delete. All of them live on this row or on
+   * a `Subtitle` row, both of which the cascade takes; afterwards there is
+   * nothing left to say what to clean up.
    */
-  async remove(id: string): Promise<void> {
-    const video = await this.prisma.video.findUnique({ where: { id }, select: { id: true } });
+  async remove(id: string, deleteFiles: boolean): Promise<void> {
+    const video = await this.prisma.video.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        storageKey: true,
+        playbackKey: true,
+        posterKey: true,
+        bannerKey: true,
+        sourceDeletedAt: true,
+        subtitles: { select: { storageKey: true, sourceKey: true } },
+      },
+    });
     if (!video) throw new NotFoundException('No such video');
 
+    /**
+     * A conversion in flight would be updating a row the cascade had taken.
+     *
+     * `MediaJob` is `onDelete: Cascade`, and `JobsService` holds its running
+     * job and its cancellation handles in memory. Deleting the video under one
+     * leaves ffmpeg writing to a path whose row is gone, and the job's own
+     * bookkeeping then fails against a row that no longer exists — including
+     * inside its `catch`, so the rejection escapes as an unhandled one rather
+     * than surfacing anywhere a person would see it.
+     *
+     * `QUEUED` counts as well as `RUNNING`: guarding only the latter leaves the
+     * window between the queue picking a job up and it being marked started.
+     */
+    const activeJob = await this.prisma.mediaJob.findFirst({
+      where: { videoId: id, status: { in: ['QUEUED', 'RUNNING'] } },
+      select: { id: true },
+    });
+    if (activeJob) {
+      throw new BadRequestException(
+        'A job is still running for this video. Cancel it before deleting.',
+      );
+    }
+
+    /**
+     * A reclaimed video's converted file is not derived output; it is the only
+     * copy left.
+     *
+     * Reclaiming the source is allowed *because* the converted file replaces
+     * it, which is why that operation refuses unless the replacement is really
+     * there. Sweeping it up here as regenerable would destroy the film through
+     * the button labelled as the safe one — so the safe one refuses instead,
+     * and the caller has to say they mean it.
+     */
+    const converted = video.playbackKey;
+    if (
+      !deleteFiles
+      && video.sourceDeletedAt !== null
+      && converted !== null
+      && (await this.storage.exists('derived', converted))
+    ) {
+      throw new BadRequestException(
+        'The converted file is the only copy of this video, because its source was reclaimed. '
+          + 'Delete it with its files to remove the entry.',
+      );
+    }
+
     await this.prisma.video.delete({ where: { id } });
+
+    for (const key of derivedKeysToDelete(video)) {
+      await this.storage.delete('derived', key);
+    }
+    await this.storage.delete('derived', subtitleDirectoryKey(id));
+
+    if (!deleteFiles) return;
+
+    for (const key of mediaKeysToDelete(video)) {
+      await this.storage.delete('media', key);
+    }
+
+    /*
+     * The folder the file sat in is deliberately left alone, unlike a season's.
+     *
+     * A season row is rebuilt from a *directory*, which is why an empty one has
+     * to go or the season comes back. A video row is rebuilt from a *file*, and
+     * that file is now gone, so the delete sticks either way and an empty
+     * folder is inert. Meanwhile a video's parent is very often a season folder
+     * with a live `Season` row pointing at it, and removing that out from under
+     * the row would be the same bug the other way round.
+     */
   }
 
   /**

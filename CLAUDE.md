@@ -64,6 +64,27 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   A directory that still holds something is left alone, so nobody destroys a film with the same button that
   tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
   files go rather than asking "are you sure?".
+- **Deleting a video always takes its derived output**, `deleteFiles` or not: poster, banner, converted file,
+  subtitle tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
+  belongs to a row that has stopped existing, nothing sweeps it, and it is regenerated from the source — so
+  keeping it only leaks files nobody can reach again. The **source** under `MEDIA_ROOT` still needs
+  `deleteFiles`, because reconcile can rebuild the row from it. Every key is collected **before**
+  `video.delete`: all of them live on the row or on a `Subtitle` row, and the cascade takes both, so
+  afterwards there is nothing left to say what to remove.
+- The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming a
+  source is allowed precisely *because* the converted file replaces it. Sweeping that up as derived output
+  would destroy a film through the button labelled as the recoverable one, so the recoverable one **refuses**
+  and the caller has to ask for the files. The admin UI offers only the destructive button there, rather than
+  one that returns an error.
+- A video's parent folder is deliberately **not** tidied, unlike a season's. A season row is rebuilt from a
+  *directory*, so an empty one has to go or the season returns; a video row is rebuilt from a *file*, which
+  is already gone, so an empty folder is inert. And a video's parent is very often a season folder with a
+  live `Season` row pointing at it — `rmdir`ing that would be the same bug the other way round.
+- Deleting a video **refuses while a job is `QUEUED` or `RUNNING`**. `MediaJob` is `onDelete: Cascade` and
+  `JobsService` holds its running job in memory, so the delete leaves ffmpeg writing to a path whose row is
+  gone and the job's bookkeeping then fails against a row that no longer exists — including inside its own
+  `catch`, where the rejection escapes unhandled. `QUEUED` counts too, or the window between the queue
+  picking a job up and marking it started is open.
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
@@ -137,7 +158,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 723 unit, 19 e2e and 572 db. The thin wrapper in
+  which is where every API test runs — 730 unit, 19 e2e and 590 db. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -246,6 +267,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   followed it to a new one. (This shipped as a bug and `ingest.db-spec.ts` caught it.)
 - `contentTag` is `sha256(first 1MB + last 1MB + size)` — a *move detector*, not a content hash. Files with
   identical ends and the same size collide by design. Never use it for deduplication or integrity.
+- **A stored `contentTag` must be refreshed wherever `sizeBytes` is.** The size is *in* the hash, so a row
+  whose file changed holds a tag those bytes can never produce again, and move detection for that one row is
+  then broken permanently. It fails silently and late: nothing looks wrong until the file is renamed months
+  later, and then it is not recognised as itself — a second video is created and the original is swept to
+  `MISSING`, stranding its title, artwork, markers, credits and watch history while the file sits in plain
+  sight under a new name. The re-read branch is where this bit, and the trigger is ordinary: a scan has no
+  `awaitWriteFinish`, so every file whose copy outlives one scan interval is tagged half-written and then
+  re-read. Recompute on *any* change, not just a change of size — the tag samples the first and last
+  megabyte, and those can be rewritten without the size moving. (Shipped as a bug; `ingest.db-spec.ts` now
+  pins both the symptom and the mechanism.)
 - A row is never deleted because its file vanished. `stateBeforeMissing` remembers what it was, so a file
   that comes back is restored rather than silently demoted to `DRAFT`.
 - `reconcile.run()` joins an in-flight pass rather than starting a second. A folder drop fires an event per
