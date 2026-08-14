@@ -143,7 +143,7 @@ export class LibraryService {
     const [collections, films] = await this.prisma.$transaction([
       this.prisma.collection.findMany({ where: whereVisible(role), select: { genres: true } }),
       this.prisma.video.findMany({
-        where: { ...whereFilm(role), ...whereVisible(role) },
+        where: { ...whereFilm(), ...whereVisible(role) },
         select: { genres: true },
       }),
     ]);
@@ -199,8 +199,8 @@ export class LibraryService {
        * answers `IN ()` without reading a row.
        */
       AND: [
-        ...whereFilm(role).AND,
-        ...(query.q ? [{ OR: this.filmSearch(query.q, role) }] : []),
+        ...whereFilm().AND,
+        ...(query.q ? [{ OR: this.filmSearch(query.q) }] : []),
         ...(query.kind === 'SHOW' ? [{ id: { in: [] as string[] } }] : []),
       ],
       ...narrowToVisibleStates(role, query.state),
@@ -219,40 +219,56 @@ export class LibraryService {
   }
 
   /**
-   * What a search matches on a shelf: its own words, and the people in it.
+   * What a search matches on a shelf: its own words, and the videos on it.
+   *
+   * The videos half is what keeps the film rule honest. A video a collection
+   * claims is not a card of its own (`common/films.ts`), so if a shelf could
+   * only be found by its own title, publishing a saga would put every film on it
+   * out of reach of search — the shelf is one card named something else and the
+   * films are no longer cards at all. That was a real report. Matching a shelf
+   * on its videos' titles is what makes "the shelf is how you reach them" true
+   * rather than merely stated.
+   *
+   * The **title** but not the description, deliberately: a shelf should surface
+   * because something on it is actually called that, not because a word turned
+   * up in one synopsis.
    *
    * The cast is searchable because every one of them is a `Person` row, created
-   * on import precisely so a name can be looked up. The nested read gets the
-   * visibility filter like any other — a draft episode's credit must not become
-   * a way to learn who is in something the caller cannot see.
+   * on import precisely so a name can be looked up. Both live in one `some` —
+   * one `EXISTS` rather than two — and the nested read gets the visibility
+   * filter like any other: a draft video's title or credit must not become a way
+   * to learn what is in something the caller cannot see. That `OR` is the only
+   * one inside the nested `video`, so it collides with nothing.
    */
   private collectionSearch(q: string, role: Role): object[] {
     return [
       ...textClauses(q),
       { credits: { some: personNamed(q) } },
-      { videos: { some: { video: { ...whereVisible(role), credits: { some: personNamed(q) } } } } },
+      {
+        videos: {
+          some: {
+            video: {
+              ...whereVisible(role),
+              OR: [{ title: insensitive(q) }, { credits: { some: personNamed(q) } }],
+            },
+          },
+        },
+      },
     ];
   }
 
   /**
-   * The same for a film, including the credits of any shelf it stands on.
+   * The same for a film: its own words and its own people.
    *
-   * That last clause is not over-reach: `credits/merge.ts` shows a video its
-   * collection's credits merged with its own, so a name credited on the shelf
-   * *is* one of this film's credits as far as anyone reading the page is
-   * concerned. Searching less than the panel displays would mean a cast member
-   * you can plainly see is one you cannot find.
+   * There was a third clause here — matching a film by the credits of a shelf it
+   * stands on, justified by `credits/merge.ts` showing a video its collection's
+   * credits merged with its own. It is gone because it can no longer fire: this
+   * is only ever ANDed with `whereFilm`, and a film is now a video no collection
+   * claims, so there is no shelf whose credits could match. The case it served
+   * is answered by `collectionSearch` returning the shelf instead.
    */
-  private filmSearch(q: string, role: Role): object[] {
-    return [
-      ...textClauses(q),
-      { credits: { some: personNamed(q) } },
-      {
-        collections: {
-          some: { collection: { ...whereVisible(role), credits: { some: personNamed(q) } } },
-        },
-      },
-    ];
+  private filmSearch(q: string): object[] {
+    return [...textClauses(q), { credits: { some: personNamed(q) } }];
   }
 }
 

@@ -220,52 +220,81 @@ watch(
     </div>
 
     <!--
-      Anything the page itself puts on the floor of the hero — the home page's
-      rotation dots and its pause button.
+      The floor of the hero: whatever the page puts there on the left — the home
+      page's rotation dots and its pause button — and the trailer's own controls
+      on the right.
 
-      Bottom-**left**, because the trailer's own controls are pinned bottom-right
-      and a carousel control placed in the default slot would either sit in the
-      middle of the text or land on top of them. Same z-index, opposite corner.
-    -->
-    <div v-if="$slots.controls" class="absolute bottom-6 left-4 z-1 sm:left-8">
-      <slot name="controls" />
-    </div>
+      One band rather than two opposite insets, so both halves align to the same
+      page column and share the one definition of the gutter. A carousel control
+      in the default slot would otherwise sit in the middle of the text, and a
+      second absolutely-positioned corner would drift away from the content on a
+      wide screen exactly as the trailer controls used to.
 
-    <!--
-      The trailer's controls, and the only way to start one when
+      The trailer's controls are also the only way to start one when
       `prefers-reduced-motion` has stopped it doing so itself. Real buttons with
       real labels, sitting above the scrim rather than over the artwork.
+
+      They align to the page column, not to the window, which is why this is a
+      full-width band around a `page-shell` rather than a `right-*` inset. The
+      gutter grows from 1rem to 5rem across the breakpoints and then the shell
+      starts centring inside `max-width: 110rem` — so a fixed inset matched the
+      content on a phone and hung 1.5–5rem outside it on every desktop, drifting
+      further the wider the screen got. Reusing the shell also keeps one
+      definition of the gutter rather than a second copy to keep in sync.
+
+      The band spans the hero, so it is `pointer-events-none` and each button
+      takes pointer events back: an invisible full-width strip lying over the
+      hero would otherwise swallow the clicks meant for Play underneath it,
+      exactly as the iframe above does.
     -->
-    <div v-if="trailerId" class="absolute right-4 bottom-6 z-1 flex items-center gap-2 sm:right-8">
-      <template v-if="playing">
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="subtle"
-          :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
-          :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
-          @click="toggleSound"
-        />
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="subtle"
-          icon="i-lucide-x"
-          aria-label="Stop the trailer"
-          @click="dismissTrailer"
-        />
-      </template>
-      <UButton
-        v-else
-        size="sm"
-        color="neutral"
-        variant="subtle"
-        icon="i-lucide-clapperboard"
-        aria-label="Play the trailer"
-        @click="startTrailer"
-      >
-        Trailer
-      </UButton>
+    <div
+      v-if="trailerId || $slots.controls"
+      class="pointer-events-none absolute inset-x-0 bottom-6 z-1"
+    >
+      <div class="page-shell flex w-full items-center justify-between gap-2">
+        <!--
+          Always rendered, even empty: `justify-between` needs something on the
+          left for the trailer's controls to sit against the right edge.
+        -->
+        <div class="pointer-events-auto flex items-center gap-2">
+          <slot name="controls" />
+        </div>
+
+        <div v-if="trailerId" class="flex items-center gap-2">
+          <template v-if="playing">
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="subtle"
+              class="pointer-events-auto"
+              :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+              :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
+              @click="toggleSound"
+            />
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="subtle"
+              class="pointer-events-auto"
+              icon="i-lucide-x"
+              aria-label="Stop the trailer"
+              @click="dismissTrailer"
+            />
+          </template>
+          <UButton
+            v-else
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            class="pointer-events-auto"
+            icon="i-lucide-clapperboard"
+            aria-label="Play the trailer"
+            @click="startTrailer"
+          >
+            Trailer
+          </UButton>
+        </div>
+      </div>
     </div>
   </section>
 </template>

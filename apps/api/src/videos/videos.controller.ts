@@ -21,10 +21,12 @@ import type { Request, Response } from 'express';
 import {
   MAX_THUMBNAIL_BYTES,
   captureThumbnailSchema,
+  deleteWithFilesSchema,
   listVideosSchema,
   updateMarkersSchema,
   updateVideoSchema,
   type CaptureThumbnailInput,
+  type DeleteWithFilesQuery,
   type ListVideosQuery,
   type UpdateMarkersInput,
   type UpdateVideoInput,
@@ -143,11 +145,21 @@ export class VideosController {
     return this.videos.update(id, dto);
   }
 
+  /**
+   * Removes a video, and its source file only when asked — the same bargain
+   * `DELETE /collections/:id` and `DELETE /seasons/:id` make.
+   *
+   * Distinct from `DELETE /videos/:id/source` below, which is the opposite
+   * trade: that one keeps the row and reclaims the disk space.
+   */
   @Delete(':id')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string): Promise<void> {
-    return this.videos.remove(id);
+  remove(
+    @Param('id') id: string,
+    @Query(validate(deleteWithFilesSchema)) query: DeleteWithFilesQuery,
+  ): Promise<void> {
+    return this.videos.remove(id, query.deleteFiles);
   }
 
   @Post(':id/publish')

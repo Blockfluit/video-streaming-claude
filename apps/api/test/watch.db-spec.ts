@@ -484,6 +484,33 @@ describe('Watch tracking (real database)', () => {
       expect(response.body.mine).toBeNull();
     });
 
+    /**
+     * The My List button on a video's page reads this.
+     *
+     * It is the only per-caller read that page makes, and without the flag the
+     * button has nothing to go on: it painted "add to my list" for a video
+     * already on the list, every time, because nothing in any response said
+     * otherwise.
+     */
+    it('says whether the video is on the caller’s list', async () => {
+      const before = await viewer.get(`/videos/${videoId}/stats`).expect(200);
+      expect(before.body.inMyList).toBe(false);
+
+      await viewer.post('/me/watchlist').send({ videoId }).expect(200);
+
+      const after = await viewer.get(`/videos/${videoId}/stats`).expect(200);
+      expect(after.body.inMyList).toBe(true);
+    });
+
+    /** One person's list is not another's, the same as their progress. */
+    it('is the caller’s own list, not the library’s', async () => {
+      await admin.post('/me/watchlist').send({ videoId }).expect(200);
+
+      const response = await viewer.get(`/videos/${videoId}/stats`).expect(200);
+
+      expect(response.body.inMyList).toBe(false);
+    });
+
     it('gives an admin the aggregate', async () => {
       await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }).expect(200);
       await beat(admin, { playSessionId: randomUUID(), positionSec: 300, deltaSec: 30 }).expect(200);

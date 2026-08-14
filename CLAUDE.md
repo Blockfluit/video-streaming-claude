@@ -64,6 +64,27 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   A directory that still holds something is left alone, so nobody destroys a film with the same button that
   tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
   files go rather than asking "are you sure?".
+- **Deleting a video always takes its derived output**, `deleteFiles` or not: poster, banner, converted file,
+  subtitle tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
+  belongs to a row that has stopped existing, nothing sweeps it, and it is regenerated from the source — so
+  keeping it only leaks files nobody can reach again. The **source** under `MEDIA_ROOT` still needs
+  `deleteFiles`, because reconcile can rebuild the row from it. Every key is collected **before**
+  `video.delete`: all of them live on the row or on a `Subtitle` row, and the cascade takes both, so
+  afterwards there is nothing left to say what to remove.
+- The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming a
+  source is allowed precisely *because* the converted file replaces it. Sweeping that up as derived output
+  would destroy a film through the button labelled as the recoverable one, so the recoverable one **refuses**
+  and the caller has to ask for the files. The admin UI offers only the destructive button there, rather than
+  one that returns an error.
+- A video's parent folder is deliberately **not** tidied, unlike a season's. A season row is rebuilt from a
+  *directory*, so an empty one has to go or the season returns; a video row is rebuilt from a *file*, which
+  is already gone, so an empty folder is inert. And a video's parent is very often a season folder with a
+  live `Season` row pointing at it — `rmdir`ing that would be the same bug the other way round.
+- Deleting a video **refuses while a job is `QUEUED` or `RUNNING`**. `MediaJob` is `onDelete: Cascade` and
+  `JobsService` holds its running job in memory, so the delete leaves ffmpeg writing to a path whose row is
+  gone and the job's bookkeeping then fails against a row that no longer exists — including inside its own
+  `catch`, where the rejection escapes unhandled. `QUEUED` counts too, or the window between the queue
+  picking a job up and marking it started is open.
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
@@ -159,7 +180,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
   abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
   `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 723 unit, 19 e2e and 576 db. The thin wrapper in
+  which is where every API test runs — 730 unit, 19 e2e and 605 db. The thin wrapper in
   `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
@@ -268,6 +289,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   followed it to a new one. (This shipped as a bug and `ingest.db-spec.ts` caught it.)
 - `contentTag` is `sha256(first 1MB + last 1MB + size)` — a *move detector*, not a content hash. Files with
   identical ends and the same size collide by design. Never use it for deduplication or integrity.
+- **A stored `contentTag` must be refreshed wherever `sizeBytes` is.** The size is *in* the hash, so a row
+  whose file changed holds a tag those bytes can never produce again, and move detection for that one row is
+  then broken permanently. It fails silently and late: nothing looks wrong until the file is renamed months
+  later, and then it is not recognised as itself — a second video is created and the original is swept to
+  `MISSING`, stranding its title, artwork, markers, credits and watch history while the file sits in plain
+  sight under a new name. The re-read branch is where this bit, and the trigger is ordinary: a scan has no
+  `awaitWriteFinish`, so every file whose copy outlives one scan interval is tagged half-written and then
+  re-read. Recompute on *any* change, not just a change of size — the tag samples the first and last
+  megabyte, and those can be rewritten without the size moving. (Shipped as a bug; `ingest.db-spec.ts` now
+  pins both the symptom and the mechanism.)
 - A row is never deleted because its file vanished. `stateBeforeMissing` remembers what it was, so a file
   that comes back is restored rather than silently demoted to `DRAFT`.
 - `reconcile.run()` joins an in-flight pass rather than starting a second. A folder drop fires an event per
@@ -346,6 +377,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   hardcoded above the third: the shelves every viewer sees first were the two an admin could not move.
 - Both list adds are idempotent by **catching the unique violation**, not by checking first: check-then-write
   is not atomic and a double-click lands inside the gap. The partial uniques are what enforce it.
+- Whether something is *on* the list rides on the **per-caller** read a screen already makes —
+  `inMyList` on `/videos/:id/stats` and `/collections/:slug/progress` (`common/watchlist.ts`), never on the
+  detail read that describes the record. The button is then right on the first paint with no extra request,
+  and a payload describing a video stays the same for everyone who asks. `GET /me/watchlist` is the list
+  itself and deliberately takes no id filter: asking it about one record would mean paging the lot.
+  `AddToListButton`'s `saved` prop went unpassed by every caller for months, so the button offered to add
+  things already saved — an optional prop nobody passes is dead code, exactly like `MediaCard`'s `shape`.
 - `nextEpisode` (pure) picks the first **unfinished** episode — which also covers resuming a half-watched
   one, and does not skip an episode because a later one was finished — and returns to the first once the
   whole thing is done. A null `orderIndex` sorts **last**: it means "ingest could not tell", and treating it
@@ -735,6 +773,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Card hover is a **border**, never an overlay. A centred play/info glyph covered the one thing a card
   exists to show, on the card being pointed at. Removing it has to delete the element, not hide it —
   `visible.spec.ts` fails a control that is `opacity: 0` and still focusable.
+- **Anything laid over a `.card-lift` needs a `z-index` above 1.** That hover rule scales the card *and*
+  raises it, and a control on top of it at `z-index: auto` is then covered by the one gesture that
+  reaches for it: nobody presses a button on a card without crossing the card. My List's remove button —
+  the only way to take something off that list — was plainly there at rest and gone the instant you went
+  for it, with the click landing on the card's link. Visible at rest is not the same as reachable.
 - A nav link to a route with no page is a broken app, not a placeholder — links land with their pages. The
   reverse is just as bad: `/admin/collections/[slug]` and `/admin/comments` are unreachable without their
   sidebar entries, and a page nobody can navigate to gets no use and no bug reports.
@@ -770,6 +813,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   **data** (fetch it) and wait for the DOM with `expect`, which retries.
 - `waitForLoadState('networkidle')` is not a substitute either — after a client-side navigation it can
   resolve *before* the route's data request has even started.
+- **A click cannot catch a control covered on hover.** Playwright jumps the mouse straight to its target,
+  so an element that a *neighbouring* `:hover` effect covers is uncovered again by the very act of
+  clicking it — the click passes while a person cannot press the thing at all. My List's remove button
+  shipped that way for months under a green test. Assert the **stacking** instead: hover the thing that
+  moves, then check `document.elementFromPoint` at the control's own centre still lands on the control.
 - `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
   clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
   ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is

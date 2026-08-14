@@ -176,9 +176,34 @@ export class ReconcileService {
           || existing.fileMtime.getTime() !== file.mtime.getTime();
 
         if (changed) {
+          /**
+           * The fingerprint is part of "what was read off it".
+           *
+           * `contentTag` hashes both ends of the file *and* its size, so a row
+           * whose file has changed holds a tag those bytes can no longer
+           * produce. Leaving it behind broke move detection for that row
+           * permanently, and silently: nothing goes wrong until the file is
+           * renamed much later, and then it is not recognised as itself. A
+           * second video appears and the original is swept to MISSING, with its
+           * title, artwork, markers, credits and watch history stranded on it
+           * while the file stands in plain sight under a new name.
+           *
+           * Recomputed on any change rather than only a change of size: the tag
+           * samples the first and last megabyte, and those can be rewritten
+           * without the size moving at all.
+           */
+          const refreshedTag = await computeContentTag(
+            this.storage.resolvePath('media', file.relPath),
+            file.size,
+          );
+
           await this.prisma.video.update({
             where: { id: existing.id },
-            data: { sizeBytes: BigInt(file.size), fileMtime: file.mtime },
+            data: {
+              sizeBytes: BigInt(file.size),
+              fileMtime: file.mtime,
+              contentTag: refreshedTag,
+            },
           });
           // Duration, dimensions and the conversion verdict all came off the
           // old bytes, and the poster was taken from them.
@@ -189,6 +214,10 @@ export class ReconcileService {
         if (existing.state === 'MISSING') {
           // It came back. Restore what it was, rather than quietly demoting a
           // published video to draft because a disk was unplugged for a day.
+          //
+          // No `contentTag` of its own: `changed` is exactly "size or mtime
+          // differs", so a file that came back as something else has already
+          // been through the branch above and had its tag refreshed there.
           await this.prisma.video.update({
             where: { id: existing.id },
             data: {
