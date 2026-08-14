@@ -1145,21 +1145,21 @@ describe('Library (real database)', () => {
     /**
      * The filter a catalogue listing needs.
      *
-     * Browse shows collections, so the films on one have nowhere to appear:
-     * the shelf is a single card and they are all on it. A film is therefore a
-     * video that **no season-holding collection claims** — each of the eight
-     * films in one folder is findable, while episode 3 of season 2 is reached
-     * through its show rather than listed beside them.
+     * Browse shows collections, so a video on one has nowhere to appear: the
+     * shelf is a single card and the video is on it. A film is therefore a video
+     * that **no collection claims** — anything on a shelf is reached through the
+     * shelf, whether that shelf holds seasons or is a folder of eight films.
      *
-     * Only the join, and the seasons behind it, can answer that. There is no
-     * column saying so, which is the whole point of memberships.
+     * Only the join can answer that. There is no column saying so, which is the
+     * whole point of memberships.
      */
-    it('lists the films: the videos no season-holding collection claims', async () => {
+    it('lists the films: the videos no collection claims', async () => {
       const show = await createCollection('South Park');
       const season = await addSeason(show.id, 1);
       await seedVideo(show.id, 'Cartman', {}, { seasonId: season.id });
 
-      // A shelf with no seasons is a shelf of films, and each of them is one.
+      // A shelf with no seasons is still a shelf: the films on it are reached
+      // through it, and searching one of their titles returns it.
       const saga = await createCollection('Harry Potter');
       await seedVideo(saga.id, 'Chamber of Secrets');
       await seedVideo(saga.id, 'Philosophers Stone');
@@ -1168,17 +1168,17 @@ describe('Library (real database)', () => {
 
       const films = await admin.get('/videos?film=true').expect(200);
       expect(films.body.items.map((video: { title: string }) => video.title)).toEqual([
-        'Chamber of Secrets',
         'Chinatown',
-        'Philosophers Stone',
       ]);
-      expect(films.body.total).toBe(3);
+      expect(films.body.total).toBe(1);
 
       // The opposite has to mean the opposite. `z.coerce.boolean()` would read
       // "false" as true and hand back the films as well.
       const episodes = await admin.get('/videos?film=false').expect(200);
       expect(episodes.body.items.map((video: { title: string }) => video.title)).toEqual([
         'Cartman',
+        'Chamber of Secrets',
+        'Philosophers Stone',
       ]);
 
       // Omitted is not the same as false: it means "do not filter".
@@ -1187,9 +1187,10 @@ describe('Library (real database)', () => {
     });
 
     /**
-     * The case that fails if the rule is written as "the membership has no
+     * The case that fails if the rule is ever written as "the membership has no
      * `seasonId`". A null season says only that nobody filed it — an extra
      * sitting beside three seasons of a show is part of that show, not a film.
+     * The current rule never looks at `seasonId`; this holds it to that.
      */
     it('keeps a special filed straight under a show out of the films', async () => {
       const show = await createCollection('South Park');
@@ -1218,15 +1219,15 @@ describe('Library (real database)', () => {
     });
 
     /**
-     * The video's own state is not the whole answer.
+     * A video on a hidden shelf is withheld, and now for a simpler reason.
      *
-     * A published film whose only shelf is a draft is not a film this caller
-     * may see standing on its own — it is an instalment of something hidden
-     * from them, and offering it as though it stood alone is the leak the
-     * visibility rule exists to prevent. A video on *no* shelf is the
-     * different, ordinary case and is kept.
+     * It used to need a clause of its own: a published film whose only shelf was
+     * a draft had to be withheld as an instalment of something hidden, while a
+     * film on a *visible* shelf stood as one. Membership alone answers both now,
+     * so the leak that clause guarded is closed by the rule itself — and it is
+     * closed for the admin too, who simply reaches it through the shelf.
      */
-    it('withholds a film whose only shelf is one the viewer cannot see', async () => {
+    it('withholds a video whose only shelf is one the viewer cannot see', async () => {
       const unreleased = await createCollection('Unreleased Saga');
       const film = await seedVideo(unreleased.id, 'Secret Film', publishable);
       await admin.post(`/videos/${film.id}/publish`).expect(200);
@@ -1236,15 +1237,13 @@ describe('Library (real database)', () => {
       expect(theirs.body.items).toEqual([]);
       expect(theirs.body.total).toBe(0);
 
-      // The admin can see the shelf, so the film on it stands as one.
+      // The admin can see the shelf — which is exactly how they reach the video.
       const mine = await admin.get('/videos?film=true').expect(200);
-      expect(mine.body.items.map((video: { title: string }) => video.title)).toEqual([
-        'Secret Film',
-      ]);
+      expect(mine.body.items).toEqual([]);
     });
 
-    /** The other half of that rule: a published shelf hides nothing. */
-    it('shows a film whose shelf the viewer can see', async () => {
+    /** The other half: a shelf the viewer *can* see is still the way in. */
+    it('keeps a video on a visible shelf out of the films too', async () => {
       const saga = await createCollection('Harry Potter');
       const film = await seedVideo(saga.id, 'Goblet of Fire', publishable);
       await admin.post(`/videos/${film.id}/publish`).expect(200);
@@ -1252,7 +1251,12 @@ describe('Library (real database)', () => {
 
       const user = await asUser();
       const films = await user.get('/videos?film=true').expect(200);
-      expect(films.body.items.map((video: { title: string }) => video.title)).toEqual([
+      expect(films.body.items).toEqual([]);
+
+      // Not hidden — reached through the shelf. `film=false` is the other half
+      // of the partition and is where it turns up.
+      const onShelves = await user.get('/videos?film=false').expect(200);
+      expect(onShelves.body.items.map((video: { title: string }) => video.title)).toEqual([
         'Goblet of Fire',
       ]);
     });

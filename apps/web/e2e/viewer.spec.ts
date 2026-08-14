@@ -201,6 +201,44 @@ test.describe('viewer', () => {
     }
   })
 
+  /**
+   * The half that makes hiding a shelf's videos survivable.
+   *
+   * A video on a shelf is no longer a card of its own, so if searching its title
+   * found nothing it would be unfindable — which is the bug the old, wider film
+   * rule existed to fix. Searching one has to answer with the shelf.
+   *
+   * Both the shelf and the video are chosen from the **data**, never from
+   * `locator.count()`: a count guard runs before the client-side route has
+   * rendered and is therefore always true, which is how a skip reports green for
+   * months. The video is asserted by its own slug rather than by `a[href^="/v/"]`
+   * — an unrelated film whose title happens to contain the same word is a
+   * perfectly good result and must not fail this.
+   */
+  test('searching a video on a shelf returns the shelf, not the video', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const found = await page.evaluate(async () => {
+      const shelves = await (await fetch('/api/collections?limit=20')).json()
+      for (const shelf of shelves.items ?? []) {
+        const held = await (await fetch(`/api/videos?collectionId=${shelf.id}&limit=1`)).json()
+        const video = (held.items ?? [])[0]
+        if (video) return { shelf: shelf.slug as string, title: video.title as string, video: video.slug as string }
+      }
+      return null
+    })
+    test.skip(found === null, 'no collection in this library holds a video')
+
+    await expectsRequest(page, /\/api\/library\?.*q=/, 'GET', async () => {
+      await fillStable(page, SEARCH, found!.title)
+    })
+
+    // The shelf is the answer to a title on it...
+    await expect(page.locator(`main a[href="/c/${found!.shelf}"]`)).toBeVisible()
+    // ...and the video itself is not a second one beside it.
+    await expect(page.locator(`main a[href="/v/${found!.video}"]`)).toHaveCount(0)
+  })
+
   test('history renders what has been watched', async ({ page }) => {
     await visit(page, '/history')
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()

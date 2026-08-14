@@ -5,11 +5,15 @@ import type { GenreFacet, LibraryCard, Page } from '@video/shared'
  * Everything in the library, narrowable.
  *
  * "Everything" is two things, not one: a collection is a shelf, and a **film**
- * is a video no season-holding shelf claims. A saga and the films on it both
- * match one search, on purpose — they are two different right answers to
- * "Harry Potter", and the count chip on the shelf is what tells them apart.
- * Episodes stay out: they are reachable through their show, and listing them
- * would bury four films under forty instalments of one of them.
+ * is a video no shelf claims. Anything on a shelf stays out — an episode, and
+ * equally one of the eight films in a saga folder — because the shelf is one
+ * card and the way in. Listing both would show a saga nine times over and bury
+ * four films under forty instalments of one show.
+ *
+ * Searching is what keeps that honest: a shelf matches on the titles of the
+ * videos on it, so "Prisoner of Azkaban" answers "Harry Potter" rather than
+ * nothing. Without that half, hiding a shelf's videos would make them
+ * unfindable — see `apps/api/src/common/films.ts`, which has the scar.
  *
  * Both used to be fetched separately and stitched together here, from two
  * requests capped at 100 each. That cannot page and cannot sort: the order was
