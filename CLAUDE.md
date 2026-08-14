@@ -246,6 +246,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   followed it to a new one. (This shipped as a bug and `ingest.db-spec.ts` caught it.)
 - `contentTag` is `sha256(first 1MB + last 1MB + size)` — a *move detector*, not a content hash. Files with
   identical ends and the same size collide by design. Never use it for deduplication or integrity.
+- **A stored `contentTag` must be refreshed wherever `sizeBytes` is.** The size is *in* the hash, so a row
+  whose file changed holds a tag those bytes can never produce again, and move detection for that one row is
+  then broken permanently. It fails silently and late: nothing looks wrong until the file is renamed months
+  later, and then it is not recognised as itself — a second video is created and the original is swept to
+  `MISSING`, stranding its title, artwork, markers, credits and watch history while the file sits in plain
+  sight under a new name. The re-read branch is where this bit, and the trigger is ordinary: a scan has no
+  `awaitWriteFinish`, so every file whose copy outlives one scan interval is tagged half-written and then
+  re-read. Recompute on *any* change, not just a change of size — the tag samples the first and last
+  megabyte, and those can be rewritten without the size moving. (Shipped as a bug; `ingest.db-spec.ts` now
+  pins both the symptom and the mechanism.)
 - A row is never deleted because its file vanished. `stateBeforeMissing` remembers what it was, so a file
   that comes back is restored rather than silently demoted to `DRAFT`.
 - `reconcile.run()` joins an in-flight pass rather than starting a second. A folder drop fires an event per

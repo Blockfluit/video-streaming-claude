@@ -186,6 +186,23 @@ describe('Ingest (real database)', () => {
       expect(Number(after.sizeBytes)).toBeGreaterThan(Number(before.sizeBytes));
     });
 
+    /**
+     * The mechanism behind 'still follows a file that changed before it moved',
+     * asserted directly so that a refactor which keeps move detection working
+     * by some other accident still fails honestly here.
+     */
+    it('refreshes the fingerprint it will later have to recognise the file by', async () => {
+      await put('disk1/Film/film.mp4', 'the first eight bytes');
+      await reconcile.run();
+      const [before] = await videos();
+
+      await put('disk1/Film/film.mp4', 'the first eight bytes, and then a great deal more');
+      await reconcile.run();
+
+      const [after] = await videos();
+      expect(after.contentTag).not.toBe(before.contentTag);
+    });
+
     it('leaves a file that has not changed alone', async () => {
       await put('disk1/Film/film.mp4');
       await reconcile.run();
@@ -298,6 +315,40 @@ describe('Ingest (real database)', () => {
       const summary = await reconcile.run();
 
       expect(summary).toMatchObject({ moved: 0, created: 1, markedMissing: 1 });
+    });
+
+    /**
+     * The fingerprint has to be refreshed wherever the size is.
+     *
+     * `contentTag` hashes the size along with both ends of the file, so a row
+     * whose file has grown since it was written holds a tag those bytes can
+     * never produce again. Re-reading a changed file without refreshing it
+     * disabled move detection for that row *permanently* — and silently, since
+     * nothing goes wrong until someone renames the file much later. Then this
+     * is what happens instead of a move: a second video appears and the
+     * original is swept to MISSING, stranding its title, artwork, markers,
+     * credits and watch history on a row whose file is standing right there.
+     *
+     * The growing file is not a contrived setup. It is exactly what the re-read
+     * branch exists for: a scan has no `awaitWriteFinish`, so it reads files
+     * that are still being copied.
+     */
+    it('still follows a file that changed before it moved', async () => {
+      await put('disk1/Inception/Inception.mp4', 'the-first-bytes');
+      await reconcile.run();
+      const [before] = await videos();
+
+      await put('disk1/Inception/Inception.mp4', 'the-first-bytes, and a great deal more of them');
+      await reconcile.run();
+
+      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception (2010).mp4');
+      const summary = await reconcile.run();
+
+      const all = await videos();
+      expect(summary).toMatchObject({ moved: 1, created: 0, markedMissing: 0 });
+      expect(all).toHaveLength(1);
+      expect(all[0].id).toBe(before.id);
+      expect(all[0].state).not.toBe('MISSING');
     });
   });
 
