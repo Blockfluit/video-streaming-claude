@@ -18,8 +18,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * about. The endpoint answers over two tables and merges the results, so the
  * question that matters most is whether a page of the union is *actually* a
  * page: no row repeated between pages, none skipped, and a total that counts
- * both halves. The rest is the visibility rules holding across a join —
- * `whereFilm`'s orphan clause, a draft episode's credits, a `?state=` a USER
+ * both halves. The rest is the visibility rules holding across a join — a video
+ * on a shelf never standing as a card of its own, a draft video's title or
+ * credits never pulling its shelf into a viewer's results, a `?state=` a USER
  * has no business honouring.
  */
 describe('Catalogue (real database)', () => {
@@ -158,8 +159,10 @@ describe('Catalogue (real database)', () => {
 
   describe('the two halves together', () => {
     it('lists shelves and films in one order, not one after the other', async () => {
-      const alien = await shelf('Alien');
-      await video('Alien', { collectionId: alien.id });
+      // The shelf and the film share a title but are unrelated — a film on the
+      // shelf would not be a card at all, and this is about the merge.
+      await shelf('Alien');
+      await video('Alien');
       await video('Brazil');
       await video('Dune');
 
@@ -168,8 +171,8 @@ describe('Catalogue (real database)', () => {
     });
 
     it('counts both halves in the total', async () => {
-      const alien = await shelf('Alien');
-      await video('Alien', { collectionId: alien.id });
+      await shelf('Alien');
+      await video('Alien');
       await video('Brazil');
 
       const response = await admin.get('/library').expect(200);
@@ -208,12 +211,12 @@ describe('Catalogue (real database)', () => {
      * drops another — which offset paging over a non-total order does silently.
      */
     it('walks the whole library once, with no repeat and no gap', async () => {
-      const shelfA = await shelf('Alpha');
-      const shelfB = await shelf('Charlie');
-      await video('Alpha', { collectionId: shelfA.id });
+      await shelf('Alpha');
+      await shelf('Charlie');
+      await video('Alpha');
       await video('Bravo');
       await video('Delta');
-      await video('Echo', { collectionId: shelfB.id });
+      await video('Echo');
 
       const walked = [
         ...(await titles(admin, '?sort=title&limit=2&offset=0')),
@@ -226,8 +229,8 @@ describe('Catalogue (real database)', () => {
     });
 
     it('reports hasMore from the combined total', async () => {
-      const one = await shelf('Alpha');
-      await video('Bravo', { collectionId: one.id });
+      await shelf('Alpha');
+      await video('Bravo');
       await video('Charlie');
 
       const first = await admin.get('/library?limit=2&offset=0').expect(200);
@@ -264,8 +267,8 @@ describe('Catalogue (real database)', () => {
     it('sorts a shelf and a film with the same title deterministically', async () => {
       // Two right answers to one search. The order between them has to be
       // stable, or a card moves between pages on identical requests.
-      const dune = await shelf('Dune');
-      await video('Dune', { collectionId: dune.id });
+      await shelf('Dune');
+      await video('Dune');
 
       const first = await admin.get('/library?sort=title').expect(200);
       const again = await admin.get('/library?sort=title').expect(200);
@@ -292,8 +295,10 @@ describe('Catalogue (real database)', () => {
       const shows = await titles(admin, '?kind=SHOW&sort=title');
       const everything = await titles(admin, '?sort=title');
 
-      // A saga of films is films — its chip already says "1 film".
-      expect(films).toEqual(['Alien', 'Alien Saga', 'Brazil']);
+      // A saga of films is films — its chip already says "1 film". `Alien` is
+      // not among them: it is on that saga, and a video on a shelf is reached
+      // through the shelf rather than listed beside it.
+      expect(films).toEqual(['Alien Saga', 'Brazil']);
       expect(shows).toEqual(['Breaking Bad']);
       // Nothing falls between the two, which is what makes the filter safe to
       // offer: an entry cannot become unreachable by turning it on.
@@ -307,6 +312,21 @@ describe('Catalogue (real database)', () => {
 
       expect(await titles(admin, '?kind=FILM')).not.toContain('Pilot');
       expect(await titles(admin)).not.toContain('Pilot');
+    });
+
+    /**
+     * The same for a shelf holding no seasons at all.
+     *
+     * This is the saga shape, and it is the case the rule used to let through:
+     * eight films on one shelf were listed as eight cards beside it. Seasons
+     * are no longer any part of the answer — a membership is.
+     */
+    it('keeps a video on a season-less shelf out of both as well', async () => {
+      const saga = await shelf('Alien Saga');
+      await video('Alien', { collectionId: saga.id });
+
+      expect(await titles(admin, '?kind=FILM')).toEqual(['Alien Saga']);
+      expect(await titles(admin)).toEqual(['Alien Saga']);
     });
   });
 
@@ -384,18 +404,60 @@ describe('Catalogue (real database)', () => {
       expect(await titles(admin, '?q=rickman')).toEqual(['Harry Potter']);
     });
 
-    it('finds a film by an actor credited on the shelf it stands on', async () => {
-      // The credits panel merges a collection's credits onto the video, so a
-      // name you can plainly read on the page must not be one you cannot find.
+    it('answers a name credited on a shelf with the shelf alone', async () => {
+      // The video on it is not a separate answer: it is on that shelf, and the
+      // shelf is how it is reached. Its own credits still pull the shelf in —
+      // see the next case — so nothing on it becomes unfindable.
       const rickman = await person('Alan Rickman');
       const potter = await shelf('Harry Potter');
       await video('Philosophers Stone', { collectionId: potter.id });
       await creditCollection(potter.id, rickman);
 
-      expect((await titles(admin, '?q=rickman')).sort()).toEqual([
-        'Harry Potter',
-        'Philosophers Stone',
-      ]);
+      expect(await titles(admin, '?q=rickman')).toEqual(['Harry Potter']);
+    });
+
+    it('finds a shelf by an actor credited on one of its videos', async () => {
+      const rickman = await person('Alan Rickman');
+      const potter = await shelf('Harry Potter');
+      const stone = await video('Philosophers Stone', { collectionId: potter.id });
+      await creditVideo(stone.id, rickman);
+
+      expect(await titles(admin, '?q=rickman')).toEqual(['Harry Potter']);
+    });
+
+    /**
+     * The half that makes hiding a shelf's videos safe.
+     *
+     * Without it, publishing a saga puts every film on it out of reach of
+     * search: the shelf is one card named something else, and the films are no
+     * longer cards at all. That was a real report — "browse does not show my
+     * films" — and this is what stops it recurring.
+     */
+    it('finds a shelf by the title of a video on it', async () => {
+      const potter = await shelf('Harry Potter');
+      await video('Prisoner of Azkaban', { collectionId: potter.id });
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=azkaban')).toEqual(['Harry Potter']);
+    });
+
+    it('answers with the shelf alone, never the shelf and the video', async () => {
+      const potter = await shelf('Harry Potter');
+      await video('Prisoner of Azkaban', { collectionId: potter.id });
+
+      // Searching does not re-admit what the unsearched grid leaves out.
+      expect(await titles(admin, '?q=azkaban')).toEqual(['Harry Potter']);
+      expect(await titles(admin, '?q=azkaban')).not.toContain('Prisoner of Azkaban');
+    });
+
+    it('does not reach a viewer through a draft video’s title', async () => {
+      // The sibling of the credits rule below: a title is just as much a way to
+      // learn that something unpublished exists.
+      const potter = await shelf('Harry Potter');
+      await video('Unreleased Sequel', { collectionId: potter.id, state: 'DRAFT' });
+
+      expect(await titles(await asUser(), '?q=unreleased')).toEqual([]);
+      expect(await titles(admin, '?q=unreleased')).toEqual(['Harry Potter']);
     });
 
     it('does not reach a viewer through a draft episode’s credits', async () => {
@@ -406,10 +468,15 @@ describe('Catalogue (real database)', () => {
       await creditVideo(secret.id, rickman);
 
       expect(await titles(await asUser(), '?q=rickman')).toEqual([]);
-      // The admin sees both: the shelf, and the draft itself as a film in its
-      // own right — the shelf holds no seasons, so nothing claims it as an
-      // instalment. That is the same rule, seen by someone allowed to.
-      expect((await titles(admin, '?q=rickman')).sort()).toEqual(['Harry Potter', 'Unreleased']);
+      // The admin sees the shelf — the draft is on it, so it is not a card of
+      // its own for anybody. That is the same rule, seen by someone allowed to.
+      expect(await titles(admin, '?q=rickman')).toEqual(['Harry Potter']);
+    });
+
+    it('still finds a film standing on no shelf by its own title', async () => {
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=brazil')).toEqual(['Brazil']);
     });
   });
 
@@ -429,20 +496,27 @@ describe('Catalogue (real database)', () => {
       expect(await titles(admin, '?state=DRAFT')).toEqual(['Hidden']);
     });
 
-    it('does not offer an episode of an invisible show as a film', async () => {
-      // `whereFilm`'s orphan clause: a video whose every collection is hidden
-      // is an instalment of something the caller cannot see, not a film.
+    it('does not offer a video on an invisible shelf as a film', async () => {
+      // It is an instalment of something the caller cannot see. Now covered by
+      // the rule itself rather than by a clause of its own: a membership
+      // disqualifies a video whether or not the caller can see what holds it.
       const draftShow = await shelf('Secret Show', { state: 'DRAFT' });
       await video('Episode One', { collectionId: draftShow.id });
 
       expect(await titles(await asUser())).toEqual([]);
     });
 
-    it('still shows a film on a shelf the viewer can see', async () => {
+    it('shows a viewer the shelf, not the video standing on it', async () => {
       const saga = await shelf('Alien Saga');
       await video('Alien', { collectionId: saga.id });
 
-      expect((await titles(await asUser())).sort()).toEqual(['Alien', 'Alien Saga']);
+      expect(await titles(await asUser())).toEqual(['Alien Saga']);
+    });
+
+    it('still shows a viewer a film on no shelf at all', async () => {
+      await video('Brazil');
+
+      expect(await titles(await asUser())).toEqual(['Brazil']);
     });
   });
 });

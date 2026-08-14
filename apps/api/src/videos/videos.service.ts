@@ -23,13 +23,13 @@ import { validateMarkers, type Markers } from './markers';
  * dropped the collection and answered about the season alone. Building the
  * clause once is what makes that impossible rather than merely unlikely.
  *
- * `film` is the odd one: it is a fact about the *seasons behind* the join —
- * see `common/films.ts` — so it is `none`/`some` across two relations and
- * cannot be folded into the membership object below. Omitted means "do not
- * filter"; `false` asks for the episodes.
+ * `film` is the odd one: it asks whether the join exists *at all* rather than
+ * what it points at — see `common/films.ts` — so it is `none`/`some` over the
+ * whole relation and cannot be folded into the membership object below.
+ * Omitted means "do not filter"; `false` asks for the videos a shelf claims.
  */
-function membershipFilter(query: ListVideosQuery, role: Role) {
-  if (query.film === true) return whereFilm(role);
+function membershipFilter(query: ListVideosQuery) {
+  if (query.film === true) return whereFilm();
   if (query.film === false) return whereEpisode();
 
   const membership = {
@@ -113,7 +113,7 @@ export class VideosService {
    */
   async list(query: ListVideosQuery, role: Role): Promise<Page<unknown>> {
     const where = {
-      ...membershipFilter(query, role),
+      ...membershipFilter(query),
       ...(query.tag ? { tags: { has: query.tag } } : {}),
       ...(query.q
         ? {
