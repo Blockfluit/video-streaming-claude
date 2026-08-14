@@ -1374,4 +1374,210 @@ describe('Library (real database)', () => {
       expect(survivor).not.toBeNull();
     });
   });
+
+  describe('DELETE /videos/:id', () => {
+    /**
+     * A video with every kind of file it can own, actually written to disk.
+     *
+     * Seeding the row alone would let a service that deletes nothing pass every
+     * assertion below, since `storage.delete` forces and an absent file is a
+     * success.
+     */
+    async function seedVideoWithFiles(overrides: Record<string, unknown> = {}) {
+      const video = await seedStandaloneVideo('Arrival', {
+        posterKey: 'posters/arrival.jpg',
+        bannerKey: 'banners/arrival.jpg',
+        playbackKey: 'converted/arrival.mp4',
+        ...overrides,
+      });
+
+      const row = await prisma.video.findUniqueOrThrow({
+        where: { id: video.id },
+        select: { storageKey: true, posterKey: true, bannerKey: true, playbackKey: true },
+      });
+
+      await prisma.subtitle.create({
+        data: {
+          videoId: video.id,
+          language: 'en',
+          label: 'English',
+          storageKey: `subtitles/${video.id}/en.vtt`,
+          sourceKey: 'loose/arrival.en.srt',
+          sourceFormat: 'srt',
+        },
+      });
+
+      await storage.save('media', row.storageKey, Buffer.from('source'));
+      await storage.save('media', 'loose/arrival.en.srt', Buffer.from('sidecar'));
+      await storage.save('derived', 'posters/arrival.jpg', Buffer.from('poster'));
+      await storage.save('derived', 'banners/arrival.jpg', Buffer.from('banner'));
+      await storage.save('derived', 'converted/arrival.mp4', Buffer.from('mp4'));
+      await storage.save('derived', `subtitles/${video.id}/en.vtt`, Buffer.from('WEBVTT'));
+
+      return { ...video, storageKey: row.storageKey };
+    }
+
+    it('keeps the source file unless asked', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+
+      await expect(storage.exists('media', video.storageKey)).resolves.toBe(true);
+      await expect(prisma.video.count()).resolves.toBe(0);
+    });
+
+    it('takes the source file, and its sidecars, when asked explicitly', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}?deleteFiles=true`).expect(204);
+
+      await expect(storage.exists('media', video.storageKey)).resolves.toBe(false);
+      // Leaving this behind is how the next scan raises an orphaned-subtitle
+      // issue for a video nobody can look at.
+      await expect(storage.exists('media', 'loose/arrival.en.srt')).resolves.toBe(false);
+    });
+
+    /**
+     * The half with no precedent anywhere else, and the one most likely to rot.
+     *
+     * Derived output belongs to a row that no longer exists. Nothing sweeps it,
+     * so leaving it means every delete leaks files nobody can reach again.
+     */
+    it('always removes derived output, asked or not', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+
+      await expect(storage.exists('derived', 'posters/arrival.jpg')).resolves.toBe(false);
+      await expect(storage.exists('derived', 'banners/arrival.jpg')).resolves.toBe(false);
+      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(false);
+      await expect(storage.exists('derived', `subtitles/${video.id}/en.vtt`)).resolves.toBe(false);
+      // The directory too — nothing has ever cleaned it up.
+      await expect(storage.exists('derived', `subtitles/${video.id}`)).resolves.toBe(false);
+    });
+
+    /**
+     * Every key lives on the row or on a `Subtitle` row, and the cascade takes
+     * both. Reading them after the delete finds nothing, and this is the test
+     * that says so: reorder the service and the tracks survive their video.
+     */
+    it('collects the subtitle keys before the cascade takes them', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+
+      await expect(prisma.subtitle.count()).resolves.toBe(0);
+      await expect(storage.exists('derived', `subtitles/${video.id}/en.vtt`)).resolves.toBe(false);
+    });
+
+    /**
+     * Deleting the row under a live job leaves ffmpeg writing to a path whose
+     * row is gone, and the job's own bookkeeping then fails against a row that
+     * no longer exists.
+     */
+    it.each(['QUEUED', 'RUNNING'] as const)('refuses while a %s job exists', async (status) => {
+      const video = await seedVideoWithFiles();
+      await prisma.mediaJob.create({ data: { videoId: video.id, type: 'TRANSCODE', status } });
+
+      await admin.delete(`/videos/${video.id}`).expect(400);
+
+      await expect(prisma.video.count()).resolves.toBe(1);
+      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(true);
+    });
+
+    it.each(['SUCCEEDED', 'FAILED', 'CANCELLED'] as const)(
+      'is not blocked by a %s job',
+      async (status) => {
+        const video = await seedVideoWithFiles();
+        await prisma.mediaJob.create({ data: { videoId: video.id, type: 'TRANSCODE', status } });
+
+        await admin.delete(`/videos/${video.id}`).expect(204);
+      },
+    );
+
+    /**
+     * Reclaiming a source is allowed *because* the converted file replaces it.
+     * Sweeping that up as derived output would destroy the only copy of a film
+     * through the branch labelled as the recoverable one.
+     */
+    it('refuses the recoverable delete when the converted file is the only copy', async () => {
+      const video = await seedVideoWithFiles({ sourceDeletedAt: new Date() });
+
+      await admin.delete(`/videos/${video.id}`).expect(400);
+
+      await expect(prisma.video.count()).resolves.toBe(1);
+      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(true);
+    });
+
+    it('deletes a reclaimed video when the caller means it', async () => {
+      const video = await seedVideoWithFiles({ sourceDeletedAt: new Date() });
+      // A reclaimed source is already gone; the delete must not trip over it.
+      await storage.delete('media', video.storageKey);
+
+      await admin.delete(`/videos/${video.id}?deleteFiles=true`).expect(204);
+
+      await expect(prisma.video.count()).resolves.toBe(0);
+      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(false);
+    });
+
+    /** Nothing to lose, so nothing to refuse — a reclaim that never converted. */
+    it('deletes a reclaimed video with no converted file at all', async () => {
+      const video = await seedVideoWithFiles({ sourceDeletedAt: new Date(), playbackKey: null });
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+    });
+
+    /**
+     * Everything hanging off a video goes with it — which is a real cost, not a
+     * detail, and is why the admin screen names it before doing it.
+     *
+     * `Person` is deliberately not truncated between cases in this file, so the
+     * name is made unique the same way `seedVideo` makes storage keys unique.
+     */
+    it('takes the watch history, comments and credits with it', async () => {
+      const video = await seedVideoWithFiles();
+      const person = await prisma.person.create({
+        data: {
+          name: `Denis Villeneuve ${Math.round(performance.now() * 1000)}`,
+          slug: `denis-${Math.round(performance.now() * 1000)}`,
+        },
+      });
+      await prisma.credit.create({
+        data: { videoId: video.id, personId: person.id, role: 'DIRECTOR' },
+      });
+      await admin
+        .post(`/videos/${video.id}/comments`)
+        .send({ body: 'The one about the heptapods.' })
+        .expect(201);
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+
+      await expect(prisma.comment.count()).resolves.toBe(0);
+      await expect(prisma.credit.count({ where: { personId: person.id } })).resolves.toBe(0);
+    });
+
+    it('is 404 for an id that never existed', async () => {
+      await admin.delete('/videos/nope').expect(404);
+    });
+
+    /** A query flag must never be a way round the role gate. */
+    it('is 403 for a USER, flag or no flag', async () => {
+      const video = await seedVideoWithFiles();
+      const user = await asUser();
+
+      await user.delete(`/videos/${video.id}`).expect(403);
+      await user.delete(`/videos/${video.id}?deleteFiles=true`).expect(403);
+
+      await expect(prisma.video.count()).resolves.toBe(1);
+      await expect(storage.exists('media', video.storageKey)).resolves.toBe(true);
+    });
+
+    it('rejects a deleteFiles value that is not a boolean', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}?deleteFiles=maybe`).expect(400);
+
+      await expect(prisma.video.count()).resolves.toBe(1);
+    });
+  });
 });
