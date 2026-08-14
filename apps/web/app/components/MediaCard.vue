@@ -18,6 +18,17 @@ const props = defineProps<{
   height?: number | null
   badge?: string | null
   /**
+   * What sort of thing the tile is — "3 seasons", "8 films", or nothing at all
+   * for a video.
+   *
+   * Deliberately separate from `badge`, which is a publish *state*: the two
+   * side by side in one corner read as two facts of the same kind. Absence is
+   * meaningful here, which is why a film passes nothing rather than a word —
+   * most of the library is films, so a chip on every card would distinguish
+   * nothing, and it is the chip beside the bare card that teaches the rule.
+   */
+  kind?: string | null
+  /**
    * `poster` is the 2:3 artwork every card shows. `still` is 16:9, for the few
    * places a wide frame is the point.
    *
@@ -73,6 +84,31 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
         </UBadge>
         <QualityBadge :width="width" :height="height" />
       </div>
+
+      <!--
+        Bottom-left, which is the corner nothing else wanted.
+
+        The top-right carries the publish state and the quality — both answering
+        "what condition is this in" — and a third chip beside them reads as
+        another condition; this one says what the tile *is*. The top-left is
+        My List's remove button, the only way to take something off that list,
+        and a chip that displaced it would trade an accessibility decision for a
+        decoration. Down here it also lands on the gradient already drawn for
+        exactly this, and above the resume bar rather than across it.
+
+        Same markup as the state badge, `text-white` included. Text only: the
+        legibility audit scores **leaf** text, so an icon inside the chip would
+        quietly stop it being checked at all.
+      -->
+      <UBadge
+        v-if="kind"
+        color="neutral"
+        variant="solid"
+        size="sm"
+        class="absolute bottom-2 left-2 bg-black/70 text-white"
+      >
+        {{ kind }}
+      </UBadge>
 
       <!-- The resume bar. Absent at zero rather than drawn empty. -->
       <div v-if="progress" class="absolute inset-x-0 bottom-0 h-[3px] bg-white/25">

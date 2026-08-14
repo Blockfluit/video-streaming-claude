@@ -8,9 +8,9 @@ import type { Page } from '@video/shared'
  * problems: scrolling a flat list stops being usable long before a library gets
  * large, and the API caps a page at 100, so collection 101 was not merely hard
  * to reach — it was unreachable. Searching server-side fixes both, and it is the
- * same pairing `browse.vue` searches: collections **and standalone videos**, the
- * two things the library is made of. A film could not be put on a hand-picked
- * row at all before this, though `ListItem` has always had a column for it.
+ * same pairing `browse.vue` searches: collections **and films**, the two things
+ * the library is made of. A film could not be put on a hand-picked row at all
+ * before this, though `ListItem` has always had a column for it.
  *
  * Deliberately **not** a `USelectMenu` with its search term bound to a refetch.
  * `CreditsEditor` tried that and records what happened: replacing the options
@@ -23,6 +23,9 @@ interface Found {
   title: string
   year?: number | null
   state: string
+  /** Collections only: what the shelf holds, which is what its chip says. */
+  seasonsHere?: number | null
+  videosHere?: number | null
 }
 
 const props = defineProps<{
@@ -73,12 +76,12 @@ async function run(): Promise<void> {
   failed.value = false
 
   try {
-    // Both, because "the library" is both. Standalone only for videos: an
-    // episode is reachable through its show, and listing episodes would bury
-    // one show under forty of its own instalments.
+    // Both, because "the library" is both. Films only for videos: an episode is
+    // reachable through its show, and listing episodes would bury one show
+    // under forty of its own instalments.
     const [collections, videos] = await Promise.all([
       api<Page<Found>>(`/collections?limit=${LIMIT}${query}`),
-      api<Page<Found>>(`/videos?standalone=true&limit=${LIMIT}${query}`),
+      api<Page<Found>>(`/videos?film=true&limit=${LIMIT}${query}`),
     ])
 
     if (mine !== latest) return
@@ -139,11 +142,14 @@ function add(found: { kind: 'collection' | 'video', entry: Found }): void {
         <span class="grow truncate">{{ found.entry.title }}</span>
         <span v-if="found.entry.year" class="text-(--ui-text-dimmed)">{{ found.entry.year }}</span>
         <!--
-          Which of the two it is, because a show and a film of the same name are
-          different entries and the title alone does not say which is which.
+          Which of the two it is, because a shelf and a film of the same name
+          are different entries and the title alone does not say which. It says
+          what the shelf holds rather than "show": a saga of eight films is a
+          collection and not a show, and calling it one was wrong the moment a
+          season-less shelf could appear in these results.
         -->
         <UBadge color="neutral" variant="subtle" size="sm">
-          {{ found.kind === 'collection' ? 'show' : 'film' }}
+          {{ found.kind === 'collection' ? collectionChip(found.entry) : 'film' }}
         </UBadge>
         <!-- A draft is addable on purpose; the row filters it out per viewer. -->
         <UBadge v-if="found.entry.state !== 'PUBLISHED'" color="neutral" variant="subtle" size="sm">

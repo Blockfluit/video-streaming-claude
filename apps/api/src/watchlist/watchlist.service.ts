@@ -1,20 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { toPage, type ListWatchlistQuery, type Page, type WatchlistRefInput } from '@video/shared';
 
+import { withNestedCountsHere } from '../common/films';
 import { isUniqueViolation } from '../common/prisma-errors';
 import { whereVisible } from '../common/publishing';
+import { COLLECTION_CARD_SELECT } from '../lists/sources/computed';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { nextEpisode, type EpisodeProgress } from './next-episode';
 
-const COLLECTION_SELECT = {
-  id: true,
-  slug: true,
-  title: true,
-  year: true,
-  posterKey: true,
-  state: true,
-} as const;
+/**
+ * The shared card shape rather than a third copy of it. A saved collection and
+ * a shelved one render the same card, so a field added for one and missed by
+ * the other is a chip that appears on the home page and not on My List.
+ */
+const COLLECTION_SELECT = COLLECTION_CARD_SELECT;
 
 const VIDEO_SELECT = {
   id: true,
@@ -75,7 +75,11 @@ export class WatchlistService {
       this.prisma.watchlistItem.count({ where }),
     ]);
 
-    return toPage(await this.withNextEpisodes(items, userId, role), total, query);
+    return toPage(
+      await this.withNextEpisodes(items.map(withNestedCountsHere), userId, role),
+      total,
+      query,
+    );
   }
 
   /**

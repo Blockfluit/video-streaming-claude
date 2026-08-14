@@ -157,15 +157,22 @@ export const listVideosSchema = pageQuerySchema.extend({
   collectionId: idSchema.optional(),
   seasonId: idSchema.optional(),
   /**
-   * "In no collection at all" — a standalone film, which is what a folder
-   * holding one video becomes.
+   * The films: the videos **no season-holding collection claims**.
    *
-   * A catalogue listing shows collections, so without this a standalone video
-   * has nowhere to appear: it is not in one, and there is no column that says
-   * so. Only the membership join can answer it. Omitted means "do not filter";
-   * `false` is the genuine opposite and asks for the videos that *are* in one.
+   * A catalogue listing shows collections, so without this the eight films on
+   * a "Harry Potter" shelf have nowhere to appear — the shelf is one card and
+   * they are all on it. Seasons are the whole of the rule: an instalment of
+   * something with seasons stays out, and is reached through its show.
+   *
+   * This was `standalone`, which asked for the videos in *no* collection and
+   * therefore answered "nowhere" for exactly the films this exists to find.
+   * The word still means that other, still-true thing in `ingest/structure.ts`,
+   * which is why this one is not called it.
+   *
+   * Omitted means "do not filter"; `false` asks for the other half — the
+   * episodes — rather than for the complement of the visibility rule.
    */
-  standalone: booleanParam.optional(),
+  film: booleanParam.optional(),
   q: z.string().trim().max(200).optional(),
   tag: z.string().trim().max(50).optional(),
 });

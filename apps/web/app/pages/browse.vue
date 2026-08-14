@@ -4,14 +4,19 @@ import type { Page } from '@video/shared'
 /**
  * Everything in the library, searchable.
  *
- * "Everything" is two things, not one. A collection is a shelf; a **standalone
- * video** — a film in a folder of its own — belongs to no shelf, so a page that
- * listed only collections could never show it however often it was published.
- * That is the bug this page had: the whole point of the model is that a video
- * stands on its own, and the one screen for finding things did not agree.
+ * "Everything" is two things, not one: a collection is a shelf, and a **film**
+ * is a video no season-holding shelf claims. Listing only the shelves meant the
+ * eight films on one were findable nowhere — the shelf was a single card and
+ * they were all on it — so searching one by name returned nothing. That was the
+ * bug: the model says a video stands on its own, and the one screen for finding
+ * things disagreed.
  *
- * Episodes deliberately stay out. They are reachable through their collection,
- * and listing them here would bury four films under forty episodes of one show.
+ * A saga and the films on it therefore **both** match one search, on purpose.
+ * They are two different right answers to "Harry Potter", and the count chip on
+ * the collection card is what tells them apart.
+ *
+ * Episodes deliberately stay out. They are reachable through their show, and
+ * listing them would bury four films under forty episodes of one of them.
  *
  * The API pages and filters by role, so a viewer simply never sees a draft —
  * there is nothing to hide here.
@@ -25,6 +30,9 @@ interface CollectionCard {
   state: string
   /** Null means there is none, so the card does not ask for it. */
   posterKey: string | null
+  /** What it holds, which is what the chip says. Never TMDB's `seasonCount`. */
+  seasonsHere: number
+  videosHere: number
 }
 
 interface VideoCard {
@@ -44,7 +52,10 @@ interface Card {
   title: string
   subtitle: string | null
   imageUrl: string | null
+  /** The publish state, for the drafts only an admin sees. */
   badge: string | null
+  /** What it holds, or nothing at all for a film. */
+  kind: string | null
 }
 
 const route = useRoute()
@@ -68,13 +79,13 @@ const { data, status } = await useApiData<Page<CollectionCard>>(
   { watch: [q, tag] },
 )
 
-const { data: loose, status: looseStatus } = await useApiData<Page<VideoCard>>(
-  'browse-standalone',
+const { data: films, status: filmStatus } = await useApiData<Page<VideoCard>>(
+  'browse-films',
   () => {
     const params = search()
-    // The videos in no collection at all. Without this they are unreachable
-    // from here, since they are not on any shelf to be listed under.
-    params.set('standalone', 'true')
+    // The videos no season-holding shelf claims. Without this the eight films
+    // on one are unreachable from here: the shelf is a card and they are on it.
+    params.set('film', 'true')
     return `/videos?${params.toString()}`
   },
   { watch: [q, tag] },
@@ -103,21 +114,25 @@ const cards = computed<Card[]>(() => {
     subtitle: collection.year ? String(collection.year) : null,
     imageUrl: collectionPoster(collection),
     badge: collection.state === 'PUBLISHED' ? null : collection.state,
+    kind: collectionChip(collection),
   }))
 
-  const videos: Card[] = (loose.value?.items ?? []).map(video => ({
+  const videos: Card[] = (films.value?.items ?? []).map(video => ({
     key: `v:${video.id}`,
     to: videoPath(video),
     title: video.title,
     subtitle: runtime(video.durationSec),
     imageUrl: videoPoster(video),
     badge: video.state === 'PUBLISHED' ? null : video.state,
+    // Nothing. A film is the ordinary case and most of this grid, so it is the
+    // absence of a chip that says so.
+    kind: null,
   }))
 
   return [...collections, ...videos].sort((a, b) => a.title.localeCompare(b.title))
 })
 
-const pending = computed(() => status.value === 'pending' || looseStatus.value === 'pending')
+const pending = computed(() => status.value === 'pending' || filmStatus.value === 'pending')
 
 useHead({ title: 'Browse' })
 </script>
@@ -150,6 +165,7 @@ useHead({ title: 'Browse' })
         :subtitle="card.subtitle"
         :image-url="card.imageUrl"
         :badge="card.badge"
+        :kind="card.kind"
       />
     </div>
 

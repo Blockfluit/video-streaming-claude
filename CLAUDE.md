@@ -342,12 +342,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - A computed row applies `whereVisible(role)` **while scoring, before the limit**. A manual row can filter
   afterwards because its pool is small and admin-chosen; a computed one cannot, or asking for ten returns
   three because the other seven were drafts — which reads as an empty library rather than as a filter.
-- A video whose every collection is hidden from the caller is **dropped**, not shown. It is not standalone,
-  it is an episode of a show they cannot see, and offering it as though it were a film is the leak the
-  visibility rule exists to prevent. A video with **no** memberships is the different, ordinary case: that
-  is what a film is here, and `AUTO` shows it.
-- `AUTO` is the pairing `browse.vue` already shows — collections *and* standalone videos in one shelf. There
-  is no film/show flag to consult, so inventing a second rule for it would put two answers in the codebase.
+- A video whose every collection is hidden from the caller is **dropped**, not shown. It is not a film, it
+  is an instalment of something they cannot see, and offering it as though it stood alone is the leak the
+  visibility rule exists to prevent. A video with **no** memberships is the different, ordinary case and is
+  kept. `whereNotOrphaned(role)` in `common/films.ts` is that rule; `isOrphaned` here is the same rule in
+  memory, applied after the pool limit rather than in SQL.
+- `AUTO` shows collections **and films with no shelf at all** in one shelf, and that is deliberately *not*
+  the pairing `browse.vue` now searches. Browse lists a saga *and* the films on it, because both are true
+  answers to one search; a ranked shelf rolls those films up into the saga instead, or one saga fills a
+  ten-item row with nine of its own entries. One definition of *film* (`whereFilm`), two decisions about
+  what a **shelf** should contain — the second is composition, not a second answer to the first.
 - An episode's score counts towards **every** collection it is in. `CollectionVideo` is many-to-many on
   purpose, and there is no honest rule for picking one parent.
 - Scores **total** for views and take the **max** for recency. Summing timestamps would rank a long-running
@@ -364,7 +368,7 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Items cannot be added to or reordered on a computed row — there is no items table behind one, so both
   would appear to succeed while doing nothing.
 - A hand-picked row is filled from `RowEntryPicker`, which **searches the server** over collections *and*
-  standalone videos — the same pairing `browse.vue` searches, and the same one `AUTO` means. It replaced a
+  films — the same pairing `browse.vue` searches. It replaced a
   `USelect` over `/collections?limit=100`, which could not reach entry 101 at all and offered no films
   whatever, though `ListItem` has always had a column for one. It is deliberately **not** a `USelectMenu`
   with its search term bound to a refetch: `CreditsEditor` records what that does — replacing the options
@@ -549,9 +553,26 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Every "which collection" filter on `GET /videos` is built as **one** clause (`membershipFilter`). They all
   constrain the same relation, so spread separately they overwrite each other rather than combining —
   `?collectionId=X&seasonId=Y` silently dropped the collection and answered about the season alone.
-  `?standalone=true` is the odd one: it asks for the videos in **no** collection, which is `none` over the
-  join and cannot be written as a `some` at all. There is no column saying a video is standalone, and there
-  must not be — "on no shelf" is a fact about the join, and a column would be a second answer to drift.
+  `?film=true` is the odd one: it is a fact about the *seasons behind* the join, so it is `none`/`some`
+  across two relations and cannot be folded into that membership object at all. There is no column saying a
+  video is a film, and there must not be — it is a fact about the join, and a column would be a second
+  answer to drift. It is returned under **`AND`**, not as bare keys: the clause contains an `OR`, `?q=`
+  builds another, and two `OR` keys spread into one object leave only the last.
+- **A film is a video that no season-holding collection claims** (`common/films.ts`). Seasons are the only
+  thing in the model that says "instalment of something": ingest turns season folders into a collection
+  *with* seasons and a folder of eight films into a collection with none. It used to mean "a video in no
+  collection at all", which made every film on a shelf unfindable — the shelf was one card and the films
+  were on it, so they were nowhere. Deliberately **not** "the membership has no `seasonId`": a special filed
+  straight under a show is an extra of that show, and a null season says only that nobody filed it. The
+  season half is **role-blind** — a video that is an episode of a show one caller cannot see and an item on
+  a shelf they can is not a film for anybody, and narrowing that half per role could only ever leak.
+  `?film=false` is the rule's opposite (the episodes), **not** `whereFilm`'s complement, which would make it
+  a way to enumerate the episodes of shows the caller cannot see.
+- The word `standalone` survives in `ingest/structure.ts`, `uploads.service.ts` and `admin/media.vue`, where
+  it still means the true, different thing: a folder holding one video becomes no collection. Leave it.
+- `Collection.seasonCount` is **TMDB's** count of the whole show; `seasonsHere`/`videosHere` on the API
+  response count our own rows. Two numbers is what makes "3 of 5 seasons here" a sentence, and it is the
+  second that decides whether a shelf is a series or a saga of films.
 - `GET /collections/:slug/resolve` checks **season slugs before video slugs**, and the literal `:slug/resolve`
   route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
@@ -578,13 +599,19 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   curated rows describe**, because there the question is still what to watch. `videoPath` was called
   `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
   that; every bug here is "which of the two did I call", so the names have to point at their own routes.
-- **`browse.vue` lists collections *and* standalone videos**, merged into one grid. It listed only
-  collections, so a standalone film — the thing a folder holding one video becomes — could never appear
-  there however often it was published: it is on no shelf to be listed under. Reported as "I published it
-  and browse does not show it", which is what the whole model looks like when one screen disagrees with it.
-  Episodes stay out deliberately: they are reachable through their collection, and listing them would bury
-  four films under forty episodes of one show. `q` and `tag` are passed to **both** requests, or searching
+- **`browse.vue` lists collections *and* films** (`?film=true`), merged into one grid. It listed only
+  collections, so a film could never appear there however often it was published — a folder of eight films
+  is one shelf, and the films are *on* it rather than on none. Reported twice: "I published it and browse
+  does not show it", then "browse does not return individual movies when they are part of a collection".
+  Episodes stay out deliberately: they are reachable through their show, and listing them would bury four
+  films under forty episodes of one of them. `q` and `tag` are passed to **both** requests, or searching
   quietly stops finding half the library.
+- A saga and the films on it **both** match one search, on purpose — two different right answers — and the
+  count chip is what separates them. `collectionChip` (`app/utils/kinds.ts`) says what a shelf holds
+  ("1 season", "8 films", "Collection" when empty); a film carries **no** chip, because most of the library
+  is films and a chip on every card distinguishes nothing. It renders **bottom-left** of the poster: the
+  top-right is the publish state and quality, and the top-left is My List's remove button — the only way
+  off that list, and not worth displacing for a chip.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 
 **Frontend** (`apps/web`, in addition to the notes above)

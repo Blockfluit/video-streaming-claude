@@ -8,6 +8,7 @@ import {
   type UpdateCollectionInput,
 } from '@video/shared';
 
+import { COUNTS_HERE_SELECT, withCountsHere } from '../common/films';
 import {
   collectionMissingFields,
   narrowToVisibleStates,
@@ -65,6 +66,10 @@ const COLLECTION_SUMMARY = {
   folderKey: true,
   createdAt: true,
   updatedAt: true,
+  // What we hold, which is not what TMDB says the whole show has. The seasons
+  // half is also the fact `whereFilm` reads from the other side: a shelf with
+  // one is a series, a shelf without one is a shelf of films.
+  ...COUNTS_HERE_SELECT,
 } as const;
 
 @Injectable()
@@ -102,7 +107,7 @@ export class CollectionsService {
       this.prisma.collection.count({ where }),
     ]);
 
-    return toPage(collections, total, query);
+    return toPage(collections.map(withCountsHere), total, query);
   }
 
   /**
@@ -148,7 +153,7 @@ export class CollectionsService {
 
     return this.withChecklist(
       {
-        ...collection,
+        ...withCountsHere(collection),
         videos: videosTruncated ? members.slice(0, MAX_EMBEDDED_VIDEOS) : members,
         // Says so out loud rather than quietly returning a partial list: the UI
         // can point at `GET /videos?collectionId=…` for the rest.
@@ -266,7 +271,7 @@ export class CollectionsService {
     // nowhere for an upload or an ingest to land.
     await this.storage.ensureDirectory('media', folderKey);
 
-    return this.prisma.collection.create({
+    const created = await this.prisma.collection.create({
       data: {
         slug,
         ...titleData(dto.title),
@@ -278,6 +283,8 @@ export class CollectionsService {
       },
       select: COLLECTION_SUMMARY,
     });
+
+    return withCountsHere(created);
   }
 
   async update(id: string, dto: UpdateCollectionInput) {
@@ -291,7 +298,7 @@ export class CollectionsService {
       ? await this.freeCollectionSlug(slugify(dto.title ?? existing.title), id)
       : undefined;
 
-    return this.prisma.collection.update({
+    const updated = await this.prisma.collection.update({
       where: { id },
       data: {
         ...titleUpdate(dto.title),
@@ -317,6 +324,8 @@ export class CollectionsService {
       },
       select: COLLECTION_SUMMARY,
     });
+
+    return withCountsHere(updated);
   }
 
   /**
@@ -399,11 +408,13 @@ export class CollectionsService {
         });
       }
 
-      return tx.collection.update({
+      const published = await tx.collection.update({
         where: { id },
         data: { state: 'PUBLISHED' },
         select: COLLECTION_SUMMARY,
       });
+
+      return withCountsHere(published);
     });
   }
 
@@ -414,11 +425,13 @@ export class CollectionsService {
   async archive(id: string) {
     await this.mustExist(id);
 
-    return this.prisma.collection.update({
+    const archived = await this.prisma.collection.update({
       where: { id },
       data: { state: 'ARCHIVED' },
       select: COLLECTION_SUMMARY,
     });
+
+    return withCountsHere(archived);
   }
 
   /**

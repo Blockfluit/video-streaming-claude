@@ -17,6 +17,7 @@ import {
   type UpdateCuratedListInput,
 } from '@video/shared';
 
+import { withNestedCountsHere } from '../common/films';
 import { isUniqueViolation } from '../common/prisma-errors';
 import { whereVisible } from '../common/publishing';
 import { slugify, uniqueSlug } from '../common/slug';
@@ -25,7 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WatchService } from '../watch/watch.service';
 import { WatchlistService } from '../watchlist/watchlist.service';
 
-import { computedItems } from './sources/computed';
+import { computedItems, COLLECTION_CARD_SELECT } from './sources/computed';
 
 const LIST_SELECT = {
   id: true,
@@ -46,9 +47,10 @@ const LIST_SELECT = {
 const ITEM_SELECT = {
   id: true,
   position: true,
-  collection: {
-    select: { id: true, slug: true, title: true, year: true, posterKey: true, state: true },
-  },
+  // The shared shape, not a copy of it: a card on a hand-picked row and a card
+  // on a computed one are the same card, and two literals is how one of them
+  // silently stops carrying a field the other gained.
+  collection: { select: COLLECTION_CARD_SELECT },
   video: {
     select: {
       id: true,
@@ -305,17 +307,21 @@ export class ListsService {
     }
 
     try {
-      return await this.prisma.listItem.create({
+      const created = await this.prisma.listItem.create({
         data: { listId, ...target, position: await this.nextItemPosition(listId) },
         select: ITEM_SELECT,
       });
+
+      return withNestedCountsHere(created);
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
 
-      return this.prisma.listItem.findFirstOrThrow({
+      const existing = await this.prisma.listItem.findFirstOrThrow({
         where: { listId, ...target },
         select: ITEM_SELECT,
       });
+
+      return withNestedCountsHere(existing);
     }
   }
 
@@ -374,7 +380,7 @@ export class ListsService {
    * thing stopping a home-page shelf from advertising a draft.
    */
   private async itemsOf(listId: string, role: Role) {
-    return this.prisma.listItem.findMany({
+    const items = await this.prisma.listItem.findMany({
       where: {
         listId,
         OR: [
@@ -386,6 +392,8 @@ export class ListsService {
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
       take: MAX_ITEMS_PER_LIST,
     });
+
+    return items.map(withNestedCountsHere);
   }
 
   private async requireTarget(

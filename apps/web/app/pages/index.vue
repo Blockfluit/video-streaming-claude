@@ -30,6 +30,9 @@ interface CardCollection {
   title: string
   year: number | null
   posterKey?: string | null
+  /** What it holds, which is what its chip says. Never TMDB's `seasonCount`. */
+  seasonsHere?: number | null
+  videosHere?: number | null
 }
 
 /**
@@ -139,6 +142,8 @@ function card(entry: RowItem) {
       width: entry.next?.video.width ?? null,
       height: entry.next?.video.height ?? null,
       progress: 0,
+      // A shelf you open, not a video you play. Films pass nothing.
+      kind: collectionChip(entry.collection),
     }
   }
 
@@ -153,6 +158,7 @@ function card(entry: RowItem) {
     width: video.width ?? null,
     height: video.height ?? null,
     progress: progressPercent(entry.progress?.lastPositionSec ?? 0, video.durationSec),
+    kind: null,
   }
 }
 
