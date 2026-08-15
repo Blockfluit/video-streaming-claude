@@ -24,7 +24,17 @@ interface HistoryItem {
   }
 }
 
-const { data } = await useApiData<Page<HistoryItem>>('history', '/me/history?limit=100')
+/*
+ * `lazy` so the page paints the moment it is navigated to, rather than leaving
+ * the previous screen frozen until this resolves. It costs nothing on a hard
+ * load: `useAsyncData` registers `onServerPrefetch` regardless of `lazy`, so the
+ * server still waits and still ships the rows in the HTML.
+ */
+const { data, status } = await useApiData<Page<HistoryItem>>(
+  'history',
+  '/me/history?limit=100',
+  { lazy: true },
+)
 const items = computed(() => data.value?.items ?? [])
 
 useHead({ title: 'History' })
@@ -61,6 +71,23 @@ useHead({ title: 'History' })
         </span>
       </li>
     </ul>
+
+    <!--
+      Ordered after the rows and before the empty state, and tested on
+      `status` rather than on `items`.
+
+      After the rows, so a refetch keeps the ones already on screen instead of
+      collapsing the list back to placeholders. Before "Nothing watched yet", so
+      a page that has not answered yet does not claim an empty history — the
+      loading case of the rule the error branches elsewhere exist for.
+
+      `!== 'success'` rather than `=== 'pending'`: the status is `idle` until the
+      request actually starts, and `pending` would render nothing at all for
+      that first frame.
+    -->
+    <div v-else-if="status !== 'success'" role="status" aria-label="Loading history">
+      <SkeletonList />
+    </div>
 
     <p v-else class="py-20 text-center text-(--ui-text-muted)">Nothing watched yet.</p>
   </div>

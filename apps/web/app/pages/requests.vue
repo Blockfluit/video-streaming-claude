@@ -55,10 +55,12 @@ const query = computed(() => {
   return params.toString()
 })
 
-const { data, refresh } = await useApiData<Page<RequestView>>(
+const { data, refresh, status } = await useApiData<Page<RequestView>>(
   'requests',
   () => `/requests?${query.value}`,
-  { watch: [query] },
+  // `lazy` so the form above is usable the instant the page opens rather than
+  // after the list behind it has answered.
+  { watch: [query], lazy: true },
 )
 
 const requests = computed(() => data.value?.items ?? [])
@@ -290,6 +292,15 @@ useHead({ title: 'Requests' })
             {{ request.adminNote }}
           </p>
         </article>
+      </div>
+
+      <!--
+        After the list, so switching the status filter keeps the entries already
+        shown rather than blanking them; before the empty state, so an
+        unanswered request is not reported as "nothing has been requested".
+      -->
+      <div v-else-if="status !== 'success'" role="status" aria-label="Loading requests">
+        <SkeletonPanel />
       </div>
 
       <p v-else class="py-16 text-center text-(--ui-text-muted)">
