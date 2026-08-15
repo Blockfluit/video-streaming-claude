@@ -163,39 +163,23 @@ body {
   }
 }
 
-/**
- * The wide variant, for a page that is nothing but a grid of posters.
+/*
+ * There is deliberately **no wide variant** of the above.
  *
- * 1920 is the width the shell above is tuned to, and the arithmetic is exact:
- * a 5rem gutter either side of 1920px leaves 1760px, which *is* the 110rem cap.
- * The cap therefore does nothing at 1080p and everything above it — which is
- * why a 4K monitor showed nine columns in the middle and a thousand pixels of
- * background either side.
+ * `/browse` had one for a while, on the reasoning that a wall of posters wants
+ * width in a way a synopsis does not: it dropped the cap and grew the gutter
+ * past 1920, which on a 4K screen meant sixteen columns starting 310px from the
+ * edge instead of nine starting at 1115px.
  *
- * So the gutter grows with the viewport instead, from the width the rest of the
- * page is already tuned to: 5rem at 1920 — identical to what it replaces, so
- * nothing moves at 1080p — and a further 12% of every pixel beyond that, which
- * is 157px at 2560 and 310px at 3840.
+ * It was removed because it was the only thing in the app doing that. Every
+ * other page, and the header above them all, sits on the cap — so the one page
+ * that did not was not "using the space", it was the page that did not line up,
+ * and moving between it and the home page shifted everything sideways. One page
+ * width for the whole app is worth more than the extra columns were.
  *
- * Faster than proportional, deliberately. A flat percentage keeps the *ratio*
- * of a 1080p screen, and at 4K that lands at 160px — measured against the ~1040px
- * the old cap produced, it reads as no margin at all. The margin should become a
- * larger share of the page as the page grows, not a constant one, so the wall
- * has somewhere to stop. The `max()` keeps the fixed 5rem below 1920, where the
- * expression would otherwise be meaner than the value it came from.
- *
- * Deliberately opt-in, not a change to `.page-shell`. A synopsis or an admin
- * form has a comfortable measure and stops wanting more width long before a
- * wall of artwork does.
+ * If this comes back, it belongs to *every* full-width surface at once —
+ * header included — and not to one route.
  */
-.page-shell-wide {
-  max-width: none;
-}
-@media (min-width: 1280px) {
-  .page-shell-wide {
-    padding-inline: max(5rem, calc(5rem + (100vw - 1920px) * 0.12));
-  }
-}
 
 /**
  * The poster wall, in one place.

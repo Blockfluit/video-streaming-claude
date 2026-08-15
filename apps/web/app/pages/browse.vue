@@ -357,12 +357,13 @@ useHead({ title: 'Browse' })
 
 <template>
   <!--
-    The wide shell, because this page is a wall of artwork rather than something
-    to read. `.page-shell` alone caps at 110rem, which is exactly the width a
-    1920 screen already gives it — so above that the grid stopped growing and a
-    4K monitor showed the same nine columns in the middle of a lot of nothing.
+    The ordinary shell, the same one every other page and the header use. This
+    page briefly had a wider one — it is a wall of artwork rather than something
+    to read, and the cap leaves a 4K screen showing nine columns in the middle of
+    a lot of nothing. But it was the only page doing that, so it did not read as
+    making use of the space; it read as the one page that would not line up.
   -->
-  <div class="page-shell page-shell-wide space-y-6 pt-24 pb-16">
+  <div class="page-shell space-y-6 pt-24 pb-16">
     <div class="flex items-center gap-4 flex-wrap">
       <h1 class="text-2xl font-semibold grow">Browse</h1>
       <UInput
