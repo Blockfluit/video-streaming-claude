@@ -953,7 +953,12 @@ test.describe('viewer', () => {
     })
     expect(slug, 'the library holds no video').not.toBeNull()
 
-    await visit(page, `/watch/${slug}`)
+    // `visitPlayer`, not `visit`: the player starts playing on arrival now, and
+    // a page that is streaming never reaches `networkidle` — the ordinary helper
+    // waits here until the test dies. This test was written before playback
+    // started on its own, and the two changes landed on separate branches, so
+    // nothing ran the combination until they were both on main.
+    await visitPlayer(page, `/watch/${slug}`)
 
     // The page itself rendered — otherwise this passes for having found nothing.
     await expect(page.getByRole('link', { name: 'Details' })).toBeVisible()
