@@ -810,13 +810,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
   identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
   stretches a three-result search into three enormous posters.
+- **A poster tile is `11rem` at every viewport width.** Letting it grow on large screens was tried — a
+  `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
+  and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
+  enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
 - **1920 is the width `.page-shell` is tuned to**, and the arithmetic is exact: a `5rem` gutter either side of
   1920px leaves 1760px, which *is* the `110rem` cap. So the cap does nothing at 1080p and everything above
-  it — a 4K screen got nine columns in the middle and ~1000px of dead background either side. `.page-shell-wide`
-  (browse and my-list, the two pages that are only a grid) drops the cap and makes the gutter the proportion
-  instead: `max(5rem, 4.167vw)` is 80px at 1920, so nothing moves at 1080p, and 160px at 3840. Measured:
-  9 columns × 180px at 1920 before and after, 14 × 236px at 3840. Prose pages keep the cap — a synopsis stops
-  wanting width long before a wall of artwork does.
+  it — a 4K screen got nine columns in the middle and ~1000px of dead background either side.
+  `.page-shell-wide` (browse and my-list, the two pages that are only a grid) drops the cap and grows the
+  gutter from that tuned width: `max(5rem, calc(5rem + (100vw - 1920px) * 0.12))`. Measured — 1920: 80px
+  gutter, 9 × 180px, unchanged either side of the change; 2560: 157px, 11 columns; 3840: 310px, 16 columns.
+  **Faster than proportional, deliberately.** A flat percentage (4.167vw, which is the same ratio 1080p has)
+  was the first attempt and reads as no margin at all at 4K — 160px against the ~1040px the cap used to
+  give. The margin has to become a larger *share* as the page grows, or the wall has nowhere to stop. Prose
+  pages keep the cap: a synopsis stops wanting width long before a wall of artwork does.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.

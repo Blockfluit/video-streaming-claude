@@ -172,11 +172,17 @@ body {
  * why a 4K monitor showed nine columns in the middle and a thousand pixels of
  * background either side.
  *
- * So the gutter becomes the proportion rather than the pixel count: 4.167vw is
- * 80px at 1920 — identical to what it replaces, so nothing moves at 1080p — and
- * 160px at 3840, where it reads as the same margin rather than as a frame. The
- * `max()` keeps the fixed 5rem on anything narrower, where a percentage would
- * be meaner than the value it came from.
+ * So the gutter grows with the viewport instead, from the width the rest of the
+ * page is already tuned to: 5rem at 1920 — identical to what it replaces, so
+ * nothing moves at 1080p — and a further 12% of every pixel beyond that, which
+ * is 157px at 2560 and 310px at 3840.
+ *
+ * Faster than proportional, deliberately. A flat percentage keeps the *ratio*
+ * of a 1080p screen, and at 4K that lands at 160px — measured against the ~1040px
+ * the old cap produced, it reads as no margin at all. The margin should become a
+ * larger share of the page as the page grows, not a constant one, so the wall
+ * has somewhere to stop. The `max()` keeps the fixed 5rem below 1920, where the
+ * expression would otherwise be meaner than the value it came from.
  *
  * Deliberately opt-in, not a change to `.page-shell`. A synopsis or an admin
  * form has a comfortable measure and stops wanting more width long before a
@@ -187,7 +193,7 @@ body {
 }
 @media (min-width: 1280px) {
   .page-shell-wide {
-    padding-inline: max(5rem, 4.167vw);
+    padding-inline: max(5rem, calc(5rem + (100vw - 1920px) * 0.12));
   }
 }
 
@@ -202,16 +208,18 @@ body {
  * free — but `auto-fit` collapses the empty tracks, so a search matching three
  * titles stretches them across the whole width as three enormous posters.
  *
- * The tile floor grows with the viewport, and more slowly than it: 6vw is under
- * 11rem below ~2930px, so every screen up to 1080p keeps exactly the tile it
- * has today, and a wider one spends its extra width mostly on more columns and
- * a little on larger ones. Growing it in step with the viewport instead would
- * hold the column count fixed and only ever magnify the same nine posters.
+ * The tile floor is a fixed 11rem at every width, so a bigger screen buys more
+ * posters and never larger ones. It briefly grew with the viewport — a clamp
+ * that let a card reach 14rem past ~2930px — on the theory that a 4K screen
+ * wants a bigger picture as well as more of them. On a real 4K screen it just
+ * read as everything being too big: the wall is made of the same cards the rest
+ * of the app draws, and enlarging them only there makes the page look zoomed.
+ * Extra width goes into the column count and into the margins.
  */
 .poster-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(clamp(11rem, 6vw, 14rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
 }
 
 /* Shelves scroll horizontally; the scrollbar is noise between the rows. */
