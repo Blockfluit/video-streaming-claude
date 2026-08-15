@@ -115,7 +115,16 @@ onMounted(() => {
       >
         {{ collection.title }}
       </NuxtLink>
-      <span class="shrink-0 text-xs text-(--ui-text-muted) tabular-nums">
+      <!--
+        Named for a screen reader, because a bare numeral beside a heading is
+        only a count to somebody who can see the list under it. Left as a
+        numeral on screen: "episodes" would be wrong on a collection of films,
+        and the rail serves both.
+      -->
+      <span
+        class="shrink-0 text-xs text-(--ui-text-muted) tabular-nums"
+        :aria-label="`${total} in this collection`"
+      >
         {{ total }}
       </span>
     </div>
