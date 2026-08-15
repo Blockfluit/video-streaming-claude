@@ -224,11 +224,22 @@ const heading = computed(() => {
   if (!props.season) return props.collection.title
   return props.season.title || (props.season.number === null ? props.season.slug : `Season ${props.season.number}`)
 })
+
+/**
+ * Shared between the button that opens the trailer and the hero behind it, which
+ * is playing the same video silently — see `TrailerModal`.
+ */
+const trailerOpen = ref(false)
 </script>
 
 <template>
   <div>
-    <HeroBackdrop :image="backdrop" size="tall" :trailer-id="collection.trailerYoutubeId">
+    <HeroBackdrop
+      :image="backdrop"
+      size="tall"
+      :trailer-id="collection.trailerYoutubeId"
+      :paused="trailerOpen"
+    >
       <div class="rise flex flex-col gap-6 sm:flex-row sm:items-end">
         <!--
           Always drawn now, because there is always something to draw.
@@ -329,6 +340,15 @@ const heading = computed(() => {
                 :collection-id="collection.id"
                 :saved="progress?.inMyList"
                 label
+              />
+              <!--
+                Renders nothing when there is no trailer, so the row closes up
+                rather than offering a button that opens an empty dialog.
+              -->
+              <TrailerModal
+                v-model:open="trailerOpen"
+                :trailer-id="collection.trailerYoutubeId"
+                :title="collection.title"
               />
               <!--
                 The same shortcut a video's page has. Without it, fixing a

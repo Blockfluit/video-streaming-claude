@@ -26,11 +26,38 @@ test.describe('the home hero', () => {
    * pattern also matched Vite's own module requests during a dev run — the page
    * came back as a 500 with "failed to fetch dynamically imported module", which
    * reads as a broken component and is really an over-eager stub.
+   *
+   * The stub *answers*, and that is the point of it rather than an incidental
+   * detail. The hero no longer reveals a trailer because a timer expired — it
+   * waits for the player to say it is playing, over `postMessage`. An inert page
+   * would therefore never be revealed, and a test asserting the iframe merely
+   * exists would pass while every viewer saw nothing but the banner.
+   *
+   * `silent: true` is the other half: a page that loads and then says nothing,
+   * which is what an unembeddable or deleted video looks like from out here.
    */
-  test.beforeEach(async ({ page }) => {
+  async function stubYoutube(
+    page: import('@playwright/test').Page,
+    { silent = false } = {},
+  ): Promise<void> {
+    const answer = silent
+      ? ''
+      : `<script>
+           addEventListener('message', () => parent.postMessage(
+             JSON.stringify({ event: 'onStateChange', info: 1 }), '*'))
+         </script>`
+
     await page.route(/youtube(-nocookie)?\.com/, route =>
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title>' }),
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `<!doctype html><title>stub</title>${answer}`,
+      }),
     )
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await stubYoutube(page)
   })
 
   interface Featured {
@@ -133,8 +160,6 @@ test.describe('the home hero', () => {
       await visit(page, '/')
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(entry!.title)
 
-      // Mounted only once it starts, two seconds in, so nothing is requested
-      // from YouTube on a page someone passes through.
       const trailer = page.locator('iframe[src*="youtube"]')
       await expect(trailer).toHaveCount(1, { timeout: 15_000 })
 
@@ -142,9 +167,52 @@ test.describe('the home hero', () => {
       // nobody asked for, and it fails silently — the iframe loads and sits there.
       await expect(trailer).toHaveAttribute('src', /mute=1/)
 
-      // The controls that let a person turn it off, which is the other half of
-      // starting something on its own.
-      await expect(page.getByRole('button', { name: 'Stop the trailer' })).toBeVisible()
+      /**
+       * Revealed, not merely present. The iframe is mounted at `opacity-0` and
+       * only crossfades once the player has confirmed it is playing, so its
+       * existence proves nothing a viewer could see — which is exactly the state
+       * the fallback below leaves behind.
+       */
+      await expect(trailer.locator('..')).toHaveCSS('opacity', '1')
+    }
+    finally {
+      await setTrailer(page, entry!, '')
+    }
+  })
+
+  /**
+   * The other half, and the reason the hero waits to be told rather than reveal
+   * on a timer.
+   *
+   * When a video will not play — its owner disabled embedding, it was taken
+   * down, autoplay was refused — YouTube renders its own grey "Video
+   * unavailable" card, and fading *that* over the artwork is what the old
+   * timer-based reveal did. The banner was always meant to be the fallback;
+   * nothing checked whether it was needed.
+   *
+   * The stub here loads perfectly and then says nothing, which is what all of
+   * those look like from the page's side.
+   */
+  test('stays on the banner when the trailer never starts', async ({ page }) => {
+    await visit(page, '/')
+
+    const entry = await featured(page)
+    test.skip(entry === null, 'the library is empty')
+
+    await setTrailer(page, entry!, 'dQw4w9WgXcQ')
+
+    try {
+      await stubYoutube(page, { silent: true })
+      await visit(page, '/')
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(entry!.title)
+
+      // Longer than the hero's own deadline, so a slow machine is not a failure.
+      // Gone rather than hidden: an invisible iframe still holds a connection to
+      // a third party for a video this page has given up on.
+      await expect(page.locator('iframe[src*="youtube"]')).toHaveCount(0, { timeout: 15_000 })
+
+      // And the thing a viewer is left looking at is the artwork, not a gap.
+      await expect(page.locator('section img').first()).toBeVisible()
     }
     finally {
       await setTrailer(page, entry!, '')
