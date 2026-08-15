@@ -176,6 +176,77 @@ test.describe('viewer', () => {
   })
 
   /**
+   * Browse loads as you reach the end of it rather than paging.
+   *
+   * Both halves are asserted, because either alone passes on a broken page: the
+   * request proves the scroll reached the API, and the growing card count proves
+   * the answer was actually put on screen. `expect.poll` retries — a bare
+   * `count()` is a single sample and would race the append.
+   *
+   * The skip comes from the **data**, never from `locator.count()`, which does
+   * not retry and is therefore always true before the route has rendered; a
+   * guard written that way reports green without ever running. A library holding
+   * one page has nothing to scroll to and is not a failure.
+   */
+  test('browse loads more as you reach the bottom, with no pager', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const total = await page.evaluate(async () => {
+      const response = await fetch('/api/library?limit=1')
+      return response.ok ? ((await response.json()).total ?? 0) : 0
+    })
+    test.skip(total <= 50, 'this library fits on one page, so there is nothing to scroll for')
+
+    const cards = page.locator('main a[href^="/v/"], main a[href^="/c/"]')
+    await expect(cards.first()).toBeVisible()
+    const before = await cards.count()
+
+    await expectsRequest(page, /\/api\/library\?.*offset=/, 'GET', async () => {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    })
+
+    await expect.poll(() => cards.count(), { timeout: 15_000 }).toBeGreaterThan(before)
+
+    // The control it replaced is gone rather than hidden — an invisible one that
+    // still takes focus is exactly what `visible.spec.ts` exists to catch.
+    await expect(page.getByRole('navigation', { name: /pagination/i })).toHaveCount(0)
+  })
+
+  /**
+   * A wide screen must not be left with empty space below one page of cards.
+   *
+   * Fifty cards is under three rows on a 4K grid, so the first page never
+   * reaches the fold and nothing would ever ask for a second — the page keeps
+   * loading until the end of the list is off screen. Asserted at a viewport this
+   * suite does not otherwise use, because at 1280 one page already overflows and
+   * the bug is invisible.
+   */
+  test('a wide viewport fills with cards rather than stopping at one page', async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 })
+    await visit(page, '/browse')
+
+    const total = await page.evaluate(async () => {
+      const response = await fetch('/api/library?limit=1')
+      return response.ok ? ((await response.json()).total ?? 0) : 0
+    })
+    test.skip(total <= 50, 'this library fits on one page, so there is nothing to fill with')
+
+    const cards = page.locator('main a[href^="/v/"], main a[href^="/c/"]')
+    await expect(cards.first()).toBeVisible()
+
+    // The grid has to end below the fold, or there is a hole where cards should be.
+    await expect
+      .poll(
+        () => page.evaluate(() => {
+          const grid = document.querySelector('.poster-grid')
+          return grid ? grid.getBoundingClientRect().bottom - window.innerHeight : 0
+        }),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0)
+  })
+
+  /**
    * Browse lists a shelf and the films on it side by side, so a card has to say
    * which it is. The chip is the whole of that answer.
    *

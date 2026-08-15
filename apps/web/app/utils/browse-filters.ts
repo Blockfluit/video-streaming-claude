@@ -31,7 +31,14 @@ export type BrowseKind = (typeof BROWSE_KINDS)[number] | typeof ANY
 
 export const BROWSE_STATES = ['DRAFT', 'PUBLISHED', 'ARCHIVED', 'MISSING'] as const
 
-/** How many cards a page holds. The API's own default, and its cap is 100. */
+/**
+ * How many cards the first page holds. The API's own default, and its cap is 100.
+ *
+ * Only the first: it is the one rendered on the server and the one a person
+ * waits for, so it stays small. Everything the scroll asks for afterwards comes
+ * in hundreds — see `browse-paging.ts` — because by then the cost is a request
+ * nobody is watching rather than a page nobody has yet.
+ */
 export const BROWSE_PAGE_SIZE = 50
 
 export interface BrowseFilters {
@@ -44,7 +51,6 @@ export interface BrowseFilters {
   /** A lifecycle filter only an admin can act on; the API refuses it for anyone else. */
   state: string
   sort: BrowseSort
-  offset: number
 }
 
 export const DEFAULT_BROWSE_FILTERS: BrowseFilters = {
@@ -54,7 +60,6 @@ export const DEFAULT_BROWSE_FILTERS: BrowseFilters = {
   kind: ANY,
   state: ANY,
   sort: 'title',
-  offset: 0,
 }
 
 /** A parameter as the router hands it over: absent, one value, or several. */
@@ -101,8 +106,6 @@ export function asState(value: string): string {
 }
 
 export function parseBrowseFilters(query: LocationQuery): BrowseFilters {
-  const offset = Number.parseInt(one(query.offset), 10)
-
   return {
     q: one(query.q),
     genres: many(query.genre),
@@ -110,7 +113,6 @@ export function parseBrowseFilters(query: LocationQuery): BrowseFilters {
     kind: oneOf(query.kind, BROWSE_KINDS, ANY),
     state: oneOf(query.state, BROWSE_STATES, ANY),
     sort: oneOf(query.sort, BROWSE_SORTS, 'title'),
-    offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
   }
 }
 
@@ -118,8 +120,14 @@ export function parseBrowseFilters(query: LocationQuery): BrowseFilters {
  * The URL for a set of filters, with everything left at its default omitted.
  *
  * `/browse` is what you get when you have narrowed nothing, rather than
- * `/browse?sort=title&kind=ANY&offset=0` — which says the same thing and reads
- * like a bug.
+ * `/browse?sort=title&kind=ANY` — which says the same thing and reads like a
+ * bug.
+ *
+ * How far down the list you are is deliberately absent. It used to live here as
+ * an `offset`, because a page number is part of what you were looking at; a
+ * scroll position is not the same thing, and putting one in a link would open
+ * it a thousand cards down for whoever you sent it to. Coming back to your own
+ * place is handled where it belongs, in `browse-paging.ts`.
  */
 export function browseFiltersToQuery(filters: BrowseFilters): LocationQuery {
   return {
@@ -129,7 +137,6 @@ export function browseFiltersToQuery(filters: BrowseFilters): LocationQuery {
     ...(filters.kind !== ANY ? { kind: filters.kind } : {}),
     ...(filters.state !== ANY ? { state: filters.state } : {}),
     ...(filters.sort !== 'title' ? { sort: filters.sort } : {}),
-    ...(filters.offset > 0 ? { offset: String(filters.offset) } : {}),
   }
 }
 
@@ -139,9 +146,19 @@ export function browseFiltersToQuery(filters: BrowseFilters): LocationQuery {
  * Deliberately not the same as the URL's: the API has no value meaning "any",
  * so a sentinel is an omission rather than a parameter, and `sort` is always
  * sent because the endpoint's default is not this page's business to assume.
+ *
+ * The window is an argument rather than part of the filters, and the filters
+ * alone produce the first page. That is what lets the string double as the
+ * identity of a list — two windows onto the same filters differ only in the
+ * arguments, so the no-argument form is a stable key for "which list is this",
+ * which is how the scroll position finds its way back to the right one.
  */
-export function browseSearchParams(filters: BrowseFilters): string {
-  const params = new URLSearchParams({ limit: String(BROWSE_PAGE_SIZE) })
+export function browseSearchParams(
+  filters: BrowseFilters,
+  offset = 0,
+  limit = BROWSE_PAGE_SIZE,
+): string {
+  const params = new URLSearchParams({ limit: String(limit) })
 
   if (filters.q) params.set('q', filters.q)
   // Repeated, which is how the endpoint reads a list.
@@ -150,7 +167,7 @@ export function browseSearchParams(filters: BrowseFilters): string {
   if (filters.kind !== ANY) params.set('kind', filters.kind)
   if (filters.state !== ANY) params.set('state', filters.state)
   params.set('sort', filters.sort)
-  if (filters.offset > 0) params.set('offset', String(filters.offset))
+  if (offset > 0) params.set('offset', String(offset))
 
   return params.toString()
 }

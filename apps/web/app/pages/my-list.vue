@@ -66,13 +66,11 @@ useHead({ title: 'My List' })
 </script>
 
 <template>
-  <div class="page-shell space-y-6 pt-24 pb-16">
+  <!-- A grid of posters and nothing else, so it gets the same wide shell as /browse. -->
+  <div class="page-shell page-shell-wide space-y-6 pt-24 pb-16">
     <h1 class="text-2xl font-semibold">My list</h1>
 
-    <div
-      v-if="items.length"
-      class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4"
-    >
+    <div v-if="items.length" class="poster-grid">
       <div v-for="item in items" :key="item.id" class="relative group/item">
         <MediaCard
           class="w-full"

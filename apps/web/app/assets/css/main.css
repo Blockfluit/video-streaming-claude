@@ -54,11 +54,15 @@ html {
   /*
    * Reserve the scrollbar track whether or not the page needs it.
    *
-   * The home page is tall enough to scroll and /browse is not, so moving
-   * between them added and removed a ~15px scrollbar, changed the viewport
-   * width, and shifted every centred thing on the page sideways — the header,
-   * the shelves, all of it. Reserving the gutter costs a strip of background
-   * and makes the width constant.
+   * Some pages are tall enough to scroll and some are not, so moving between
+   * them added and removed a ~15px scrollbar, changed the viewport width, and
+   * shifted every centred thing on the page sideways — the header, the shelves,
+   * all of it. Reserving the gutter costs a strip of background and makes the
+   * width constant.
+   *
+   * /browse used to be the short one this was written against. It scrolls now,
+   * but the rule is not about any particular page: a filter narrowing it to
+   * four results makes it short again.
    *
    * Not visible in headless Chromium, which uses overlay scrollbars of width 0.
    */
@@ -157,6 +161,57 @@ body {
   .page-shell {
     padding-inline: 5rem;
   }
+}
+
+/**
+ * The wide variant, for a page that is nothing but a grid of posters.
+ *
+ * 1920 is the width the shell above is tuned to, and the arithmetic is exact:
+ * a 5rem gutter either side of 1920px leaves 1760px, which *is* the 110rem cap.
+ * The cap therefore does nothing at 1080p and everything above it — which is
+ * why a 4K monitor showed nine columns in the middle and a thousand pixels of
+ * background either side.
+ *
+ * So the gutter becomes the proportion rather than the pixel count: 4.167vw is
+ * 80px at 1920 — identical to what it replaces, so nothing moves at 1080p — and
+ * 160px at 3840, where it reads as the same margin rather than as a frame. The
+ * `max()` keeps the fixed 5rem on anything narrower, where a percentage would
+ * be meaner than the value it came from.
+ *
+ * Deliberately opt-in, not a change to `.page-shell`. A synopsis or an admin
+ * form has a comfortable measure and stops wanting more width long before a
+ * wall of artwork does.
+ */
+.page-shell-wide {
+  max-width: none;
+}
+@media (min-width: 1280px) {
+  .page-shell-wide {
+    padding-inline: max(5rem, 4.167vw);
+  }
+}
+
+/**
+ * The poster wall, in one place.
+ *
+ * Three screens drew this same grid from three copies of one arbitrary-value
+ * class, so a change to any of them was a change to one third of the app.
+ *
+ * `auto-fill`, never `auto-fit`. With `1fr` tracks the two behave identically
+ * whenever there are enough cards to fill a row, which makes the swap look
+ * free — but `auto-fit` collapses the empty tracks, so a search matching three
+ * titles stretches them across the whole width as three enormous posters.
+ *
+ * The tile floor grows with the viewport, and more slowly than it: 6vw is under
+ * 11rem below ~2930px, so every screen up to 1080p keeps exactly the tile it
+ * has today, and a wider one spends its extra width mostly on more columns and
+ * a little on larger ones. Growing it in step with the viewport instead would
+ * hold the column count fixed and only ever magnify the same nine posters.
+ */
+.poster-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(11rem, 6vw, 14rem), 1fr));
 }
 
 /* Shelves scroll horizontally; the scrollbar is noise between the rows. */

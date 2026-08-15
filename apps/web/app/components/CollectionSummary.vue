@@ -395,11 +395,16 @@ const heading = computed(() => {
         </ul>
 
         <!--
-          A shelf of films, so posters — the same tiles browse and the home
-          shelves use. Narrower columns than the 16:9 grid this replaced, because
-          a 2:3 tile is taller and four across is a wall of them otherwise.
+          A shelf of films, so posters — literally the same grid browse draws,
+          which is why it is one class in `main.css` rather than three copies of
+          an arbitrary value. Narrower columns than the 16:9 grid this replaced,
+          because a 2:3 tile is taller and four across is a wall of them
+          otherwise.
+
+          The page around it keeps the ordinary shell: this one has a synopsis
+          and a credits panel on it, and prose does not want a 4K measure.
         -->
-        <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4">
+        <div v-else class="poster-grid">
           <MediaCard
             v-for="entry in listed"
             :key="entry.id"

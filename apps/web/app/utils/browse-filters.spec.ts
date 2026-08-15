@@ -40,10 +40,11 @@ describe('parseBrowseFilters', () => {
     expect(parseBrowseFilters({ state: 'DRAFT' }).state).toBe('DRAFT')
   })
 
-  it('treats an unreadable offset as the first page', () => {
-    expect(parseBrowseFilters({ offset: 'banana' }).offset).toBe(0)
-    expect(parseBrowseFilters({ offset: '-5' }).offset).toBe(0)
-    expect(parseBrowseFilters({ offset: '50' }).offset).toBe(50)
+  it('ignores a leftover offset rather than reading it as a filter', () => {
+    // The page used to keep its position in the URL. A link written back then
+    // still opens, and opens at the top — where a scroll position that meant
+    // something on somebody else's screen belongs.
+    expect(parseBrowseFilters({ offset: '50' })).toEqual(DEFAULT_BROWSE_FILTERS)
   })
 
   it('keeps the tag the collection pages link with', () => {
@@ -71,7 +72,6 @@ describe('browseFiltersToQuery', () => {
       kind: 'FILM' as const,
       state: 'DRAFT',
       sort: 'year' as const,
-      offset: 50,
     }
 
     expect(parseBrowseFilters(browseFiltersToQuery(filters))).toEqual(filters)
@@ -110,7 +110,26 @@ describe('browseSearchParams', () => {
 
   it('omits the offset on the first page and sends it afterwards', () => {
     expect(browseSearchParams(DEFAULT_BROWSE_FILTERS)).not.toContain('offset')
-    expect(browseSearchParams({ ...DEFAULT_BROWSE_FILTERS, offset: 50 })).toContain('offset=50')
+    expect(browseSearchParams(DEFAULT_BROWSE_FILTERS, 50)).toContain('offset=50')
+  })
+
+  it('asks for a bigger window when the scroll asks for one', () => {
+    expect(browseSearchParams(DEFAULT_BROWSE_FILTERS, 50, 100)).toBe(
+      'limit=100&sort=title&offset=50',
+    )
+  })
+
+  /*
+   * The filters alone are the identity of a list, which is what the saved
+   * scroll position is keyed on. If a window ever leaked into that string, one
+   * list would have a different key at every depth and coming back would never
+   * find a place.
+   */
+  it('describes the same list the same way at any depth', () => {
+    const filters = { ...DEFAULT_BROWSE_FILTERS, genres: ['Drama'] }
+
+    expect(browseSearchParams(filters)).toBe(browseSearchParams(filters))
+    expect(browseSearchParams(filters, 200, 100)).toContain('genre=Drama')
   })
 })
 
