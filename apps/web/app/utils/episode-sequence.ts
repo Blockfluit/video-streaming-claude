@@ -14,6 +14,22 @@
  * listing has no single running order to offer. Reading a sequence off it is how
  * "next episode" came to mean "the alphabetically next title".
  *
+ * **This is not a second `nextEpisode`.** The API has one definition of "next"
+ * on purpose — `watchlist/next-episode.ts`, used by `GET /collections/:slug/
+ * progress` and by the watchlist — and reimplementing it is exactly how the home
+ * page and the title page start disagreeing. The two answer different questions
+ * and both are needed:
+ *
+ * - `nextEpisode` is **where to resume**: the first episode you have not
+ *   finished. It is what the Play/Resume button on a collection offers, and it
+ *   is deliberately not adjacent to anything.
+ * - This is **what physically follows**, which is the only thing a Previous and
+ *   a Next button can mean. Pressing Next and then Previous has to return you
+ *   where you were, and a resume point has no mirror.
+ *
+ * Keep it that way. If a surface wants "carry on watching this show", it wants
+ * the API's answer, not this one.
+ *
  * Pure, and unit-tested before it was written. Ordering is the one thing here
  * that can be quietly wrong for months — it renders perfectly either way.
  */

@@ -112,7 +112,14 @@ const progressByVideo = computed(
  */
 const next = computed(() => progress.value?.next ?? null)
 
-const playTarget = computed(() => (next.value ? playPath({ slug: next.value.slug }) : null))
+/**
+ * The collection travels with the link, so the player can offer the episode
+ * either side of this one. It cannot be worked out at the far end: the same
+ * episode may sit in several collections, each with its own running order.
+ */
+const playTarget = computed(() =>
+  next.value ? playPath({ slug: next.value.slug }, props.collection.slug) : null,
+)
 
 /**
  * The button says what it does; the line under it says what will play.
@@ -381,7 +388,7 @@ const heading = computed(() => {
         <ul v-if="asEpisodes" class="divide-y divide-(--ui-border)">
           <li v-for="(entry, index) in listed" :key="entry.id">
             <EpisodeRow
-              :to="playPath(entry)"
+              :to="playPath(entry, collection.slug)"
               :title="entry.title"
               :number="index + 1"
               :image-url="videoBanner(entry)"
@@ -409,7 +416,7 @@ const heading = computed(() => {
             v-for="entry in listed"
             :key="entry.id"
             class="w-full"
-            :to="playPath(entry)"
+            :to="playPath(entry, collection.slug)"
             :title="entry.title"
             :subtitle="runtime(entry.durationSec)"
             :image-url="videoPoster(entry)"
