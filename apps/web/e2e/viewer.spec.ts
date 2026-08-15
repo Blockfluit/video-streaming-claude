@@ -617,7 +617,10 @@ test.describe('viewer', () => {
 
       const href = await card.getAttribute('href')
       await card.click()
-      await page.waitForURL(url => url.pathname === href)
+      // Path *and* query: a link built inside a collection now carries `?from=`,
+      // and comparing the path alone would both fail to match and stop noticing
+      // if the collection were dropped from the link.
+      await page.waitForURL(url => url.pathname + url.search === href)
 
       /*
        * Straight into playback, not onto another page of description. The shelf
@@ -689,8 +692,114 @@ test.describe('viewer', () => {
 
     const href = await entry.getAttribute('href')
     await entry.click()
-    await page.waitForURL(url => url.pathname === href)
+    // Path and query, because every link on a collection page now names the
+    // collection it came from — see the shelf test above.
+    await page.waitForURL(url => url.pathname + url.search === href)
     await expect(page.locator('video')).toBeVisible()
+  })
+
+  /**
+   * Stepping through a show from the player.
+   *
+   * The collection is picked from the **data** rather than from
+   * `locator.count()`, which does not retry: a guard written with it runs
+   * before the list has rendered and skips on every run, which is how a test in
+   * this suite reported green for weeks while asserting nothing.
+   *
+   * At most one season is part of the condition, not a convenience. The
+   * collection page orders its list by `orderIndex` alone while the player
+   * orders by season first, so within a single season the two provably agree
+   * and the first row really is the start of the sequence. Across seasons they
+   * need not, and the test would be asserting the page's ordering rather than
+   * the player's.
+   */
+  test('the player steps to the next episode and back again', async ({ page }) => {
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        if ((detail.seasons ?? []).length <= 1 && (detail.videos ?? []).length > 1) {
+          return collection.slug as string
+        }
+      }
+      return null
+    })
+    test.skip(slug === null, 'no collection here holds two videos in one season')
+
+    await visit(page, `/c/${slug}`)
+
+    // Scoped past the hero, whose Play button is also a `/watch/` link — an
+    // unscoped `.first()` would click that and never touch an episode row.
+    const entry = page.locator('main section ~ div a[href^="/watch/"]').first()
+    await expect(entry).toBeVisible()
+    await entry.click()
+    await page.waitForURL(/\/watch\//)
+
+    const start = page.url()
+    expect(
+      new URL(start).searchParams.get('from'),
+      'the collection has to travel with the link, or the player cannot know which order to step through',
+    ).toBe(slug)
+
+    /*
+     * Nothing precedes the first episode, and the control says so from where it
+     * already is. Removing it would move everything beside it, so the button
+     * somebody was aiming at shifts under the pointer at exactly the moment
+     * they reach the end of a show.
+     */
+    await expect(page.getByRole('button', { name: 'Previous episode' })).toBeDisabled()
+
+    const next = page.getByRole('link', { name: 'Next episode' })
+    await expect(next).toBeVisible()
+
+    const nextHref = await next.getAttribute('href')
+    expect(
+      new URL(nextHref!, start).searchParams.get('from'),
+      'one step must not drop the collection, or the stepper vanishes underneath whoever is using it',
+    ).toBe(slug)
+
+    await next.click()
+    await page.waitForURL(url => url.pathname + url.search === nextHref)
+    await expect(page.locator('video')).toBeVisible()
+
+    /*
+     * And back. The two are mirrors — forward then back is how somebody checks
+     * they pressed the right one, and it has to land exactly where they were.
+     */
+    const back = page.getByRole('link', { name: 'Previous episode' })
+    await expect(back).toBeVisible()
+    await back.click()
+    await page.waitForURL(url => url.href === start)
+  })
+
+  /**
+   * The stepper is scoped by the URL, and this is what that costs.
+   *
+   * A video belongs to any number of collections, and where it sits is a fact
+   * about one membership — the same episode can be episode 3 of a show and item
+   * 1 of a best-of row. So a player reached without a collection named has no
+   * running order it could honestly pick, and offers none. Asserted rather than
+   * assumed, because the tempting fix is to reach for `collections[0]` and be
+   * wrong about half the time.
+   */
+  test('a player reached without a collection offers no stepper', async ({ page }) => {
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    expect(slug, 'the library holds no video').not.toBeNull()
+
+    await visit(page, `/watch/${slug}`)
+
+    // The page itself rendered — otherwise this passes for having found nothing.
+    await expect(page.getByRole('link', { name: 'Details' })).toBeVisible()
+
+    await expect(page.getByRole('link', { name: 'Next episode' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Previous episode' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Previous episode' })).toHaveCount(0)
   })
 
   /**
