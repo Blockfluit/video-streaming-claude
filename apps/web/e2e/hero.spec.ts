@@ -27,24 +27,31 @@ test.describe('the home hero', () => {
    * came back as a 500 with "failed to fetch dynamically imported module", which
    * reads as a broken component and is really an over-eager stub.
    *
-   * The stub *answers*, and that is the point of it rather than an incidental
-   * detail. The hero no longer reveals a trailer because a timer expired — it
-   * waits for the player to say it is playing, over `postMessage`. An inert page
-   * would therefore never be revealed, and a test asserting the iframe merely
-   * exists would pass while every viewer saw nothing but the banner.
+   * Three behaviours, and the differences between them are the whole point.
    *
-   * `silent: true` is the other half: a page that loads and then says nothing,
-   * which is what an unembeddable or deleted video looks like from out here.
+   * - **`answers`** (the default) posts `onStateChange / info: 1`, like a player
+   *   that is up and running.
+   * - **`silent`** loads and then says nothing at all. This is the important one:
+   *   it is what real YouTube does here, and an earlier version of the hero
+   *   treated it as failure and withheld the trailer from everybody. A stub that
+   *   only ever answered is exactly why that shipped green.
+   * - **`failing`** posts `onError`, which a pulled or unembeddable video does,
+   *   and is the *only* thing that should send the hero back to its banner.
    */
   async function stubYoutube(
     page: import('@playwright/test').Page,
-    { silent = false } = {},
+    { behaviour = 'answers' }: { behaviour?: 'answers' | 'silent' | 'failing' } = {},
   ): Promise<void> {
-    const answer = silent
+    const reply = {
+      answers: JSON.stringify({ event: 'onStateChange', info: 1 }),
+      failing: JSON.stringify({ event: 'onError', info: 150 }),
+      silent: null,
+    }[behaviour]
+
+    const answer = reply === null
       ? ''
       : `<script>
-           addEventListener('message', () => parent.postMessage(
-             JSON.stringify({ event: 'onStateChange', info: 1 }), '*'))
+           addEventListener('message', () => parent.postMessage(${JSON.stringify(reply)}, '*'))
          </script>`
 
     await page.route(/youtube(-nocookie)?\.com/, route =>
@@ -169,9 +176,8 @@ test.describe('the home hero', () => {
 
       /**
        * Revealed, not merely present. The iframe is mounted at `opacity-0` and
-       * only crossfades once the player has confirmed it is playing, so its
-       * existence proves nothing a viewer could see — which is exactly the state
-       * the fallback below leaves behind.
+       * crossfades in a moment later, so its existence alone proves nothing a
+       * viewer could see.
        */
       await expect(trailer.locator('..')).toHaveCSS('opacity', '1')
     }
@@ -181,19 +187,18 @@ test.describe('the home hero', () => {
   })
 
   /**
-   * The other half, and the reason the hero waits to be told rather than reveal
-   * on a timer.
+   * The regression this file exists to prevent from returning.
    *
-   * When a video will not play — its owner disabled embedding, it was taken
-   * down, autoplay was refused — YouTube renders its own grey "Video
-   * unavailable" card, and fading *that* over the artwork is what the old
-   * timer-based reveal did. The banner was always meant to be the fallback;
-   * nothing checked whether it was needed.
+   * The hero once withheld the trailer until the player confirmed over
+   * `postMessage` that it was playing, and unmounted the iframe if no
+   * confirmation came. Real YouTube does not reliably answer, so every viewer
+   * got the banner and nothing else on every title — and the suite stayed green,
+   * because the only stub it had answered every time.
    *
-   * The stub here loads perfectly and then says nothing, which is what all of
-   * those look like from the page's side.
+   * So: an embed that loads and says nothing must still play. Silence is not
+   * failure, and this is the test that says so.
    */
-  test('stays on the banner when the trailer never starts', async ({ page }) => {
+  test('plays even when the embed never says anything', async ({ page }) => {
     await visit(page, '/')
 
     const entry = await featured(page)
@@ -202,11 +207,40 @@ test.describe('the home hero', () => {
     await setTrailer(page, entry!, 'dQw4w9WgXcQ')
 
     try {
-      await stubYoutube(page, { silent: true })
+      await stubYoutube(page, { behaviour: 'silent' })
       await visit(page, '/')
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(entry!.title)
 
-      // Longer than the hero's own deadline, so a slow machine is not a failure.
+      const trailer = page.locator('iframe[src*="youtube"]')
+      await expect(trailer).toHaveCount(1, { timeout: 15_000 })
+      await expect(trailer.locator('..')).toHaveCSS('opacity', '1')
+    }
+    finally {
+      await setTrailer(page, entry!, '')
+    }
+  })
+
+  /**
+   * The one thing that does send it back to the banner.
+   *
+   * A video whose owner disabled embedding, or that has been taken down, makes
+   * YouTube paint its own grey "Video unavailable" card — and fading that across
+   * the artwork is worse than the banner the page already has. Unlike silence,
+   * this the player does report, so it is worth acting on.
+   */
+  test('falls back to the banner when the embed reports an error', async ({ page }) => {
+    await visit(page, '/')
+
+    const entry = await featured(page)
+    test.skip(entry === null, 'the library is empty')
+
+    await setTrailer(page, entry!, 'dQw4w9WgXcQ')
+
+    try {
+      await stubYoutube(page, { behaviour: 'failing' })
+      await visit(page, '/')
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(entry!.title)
+
       // Gone rather than hidden: an invisible iframe still holds a connection to
       // a third party for a video this page has given up on.
       await expect(page.locator('iframe[src*="youtube"]')).toHaveCount(0, { timeout: 15_000 })
