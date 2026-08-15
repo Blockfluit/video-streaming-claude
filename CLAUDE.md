@@ -792,7 +792,38 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   landmark to skip the nav to, and `main a[…]` (which every viewer-side test uses) matched nothing there.
 - `refDebounced` is VueUse and **not a dependency**. Debounce with a `setTimeout` cleared in `watch`, the way
   `browse.vue` does; without one, every keystroke is a request and the answers can land out of order, so the
-  list settles on whatever the *slowest* one returned.
+  list settles on whatever the *slowest* one returned. VueUse *resolves* — it is a transitive of `@nuxt/ui` —
+  so `useInfiniteScroll` and friends import cleanly and are still a phantom dependency.
+- `/browse` loads on scroll, and the loop that fills the viewport measures `getBoundingClientRect()` rather
+  than reading the `IntersectionObserver`'s own flag. An observer reports *changes*, delivered at the end of
+  a frame, so after appending cards it has not necessarily fired again and a loop waiting on it stalls with
+  the sentinel still on screen. That is the ordinary case on a wide monitor, not a corner: one page of fifty
+  is under three rows at 4K, so the first load never reaches the fold and the observer, having already said
+  "visible", has nothing to add. The observer is the cheap trigger; the rectangle is the answer.
+- The scroll loader **must** stop at `MAX_LIBRARY_OFFSET` (10 000). `listLibrarySchema` refuses a deeper
+  offset with a **400 rather than clamping**, and `e2e/fixtures.ts` fails every test on the page for any
+  response ≥ 400 — so a loader that keeps going does not degrade, it takes the whole suite down with it.
+  `nextBrowsePage` in `browse-paging.ts` is the one place that decides, and it is specced.
+- Appending offset pages is only sound because `apps/api/src/library/merge.ts` sorts on a **total** order
+  ending in `id`. Break that and the same card arrives twice under one `:key`.
+- The poster wall is `.poster-grid` in `main.css`, used by browse, my-list and the collection page — it was
+  three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
+  identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
+  stretches a three-result search into three enormous posters.
+- **A poster tile is `11rem` at every viewport width.** Letting it grow on large screens was tried — a
+  `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
+  and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
+  enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
+- **1920 is the width `.page-shell` is tuned to**, and the arithmetic is exact: a `5rem` gutter either side of
+  1920px leaves 1760px, which *is* the `110rem` cap. So the cap does nothing at 1080p and everything above
+  it — a 4K screen got nine columns in the middle and ~1000px of dead background either side.
+  `.page-shell-wide` (browse and my-list, the two pages that are only a grid) drops the cap and grows the
+  gutter from that tuned width: `max(5rem, calc(5rem + (100vw - 1920px) * 0.12))`. Measured — 1920: 80px
+  gutter, 9 × 180px, unchanged either side of the change; 2560: 157px, 11 columns; 3840: 310px, 16 columns.
+  **Faster than proportional, deliberately.** A flat percentage (4.167vw, which is the same ratio 1080p has)
+  was the first attempt and reads as no margin at all at 4K — 160px against the ~1040px the cap used to
+  give. The margin has to become a larger *share* as the page grows, or the wall has nowhere to stop. Prose
+  pages keep the cap: a synopsis stops wanting width long before a wall of artwork does.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.
