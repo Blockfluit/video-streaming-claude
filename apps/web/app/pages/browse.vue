@@ -169,11 +169,17 @@ const hasMore = computed(() => nextBrowsePage(cards.value.length, total.value) !
  * and the count was already on screen — so it answers both while there is more
  * to come, and goes back to being a plain total once there is not.
  */
-const countLabel = computed(() =>
-  hasMore.value
+const countLabel = computed(() => {
+  // Nothing until there is something to count. `total` is 0 before the first
+  // answer, so this read "0 titles" over a grid of placeholders — the same
+  // claim the empty state is kept from making, in the one corner of the page
+  // that was still free to make it.
+  if (status.value !== 'success' && cards.value.length === 0) return ''
+
+  return hasMore.value
     ? `${cards.value.length} of ${total.value} titles`
-    : `${total.value} ${total.value === 1 ? 'title' : 'titles'}`,
-)
+    : `${total.value} ${total.value === 1 ? 'title' : 'titles'}`
+})
 
 // A different list entirely: drop everything the last one had loaded.
 watch(query, () => {
