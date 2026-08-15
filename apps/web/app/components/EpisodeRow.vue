@@ -56,9 +56,23 @@ const broken = ref(false)
 const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
 
 const rowClass = computed(() => (props.dense ? 'gap-3 p-2' : 'gap-4 p-3'))
-const numberClass = computed(() =>
+
+/**
+ * The number lifts a tier on the row that is playing.
+ *
+ * `--ui-text-dimmed` is the floor, and its 4.9:1 is measured against the page.
+ * The current row is not on the page — it is on `--ui-bg-accented`, which is
+ * lighter — and the same colour measures **4.4:1** there, under AA. Caught by
+ * `visible.spec.ts` rather than reasoned about, which is the only way this is
+ * ever caught: it is a legible-looking grey either way.
+ *
+ * Lifted only when current, so the ordinary rows on a collection page keep the
+ * weighting they were designed with.
+ */
+const numberClass = computed(() => [
   props.dense ? 'w-4 pt-3 text-sm' : 'w-6 pt-6 text-lg',
-)
+  props.current ? 'text-(--ui-text-muted)' : 'text-(--ui-text-dimmed)',
+])
 /** Fixed rather than responsive: the rail is one width at every breakpoint. */
 const stillClass = computed(() =>
   props.dense ? 'w-28' : 'w-40 sm:w-48 lg:w-64',
@@ -74,7 +88,7 @@ const titleClass = computed(() => (props.dense ? 'text-sm' : ''))
     :aria-current="current ? 'true' : undefined"
   >
     <span
-      class="shrink-0 text-right font-semibold tabular-nums text-(--ui-text-dimmed)"
+      class="shrink-0 text-right font-semibold tabular-nums"
       :class="numberClass"
       aria-hidden="true"
     >{{ number ?? '' }}</span>
