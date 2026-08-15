@@ -66,8 +66,7 @@ useHead({ title: 'My List' })
 </script>
 
 <template>
-  <!-- A grid of posters and nothing else, so it gets the same wide shell as /browse. -->
-  <div class="page-shell page-shell-wide space-y-6 pt-24 pb-16">
+  <div class="page-shell space-y-6 pt-24 pb-16">
     <h1 class="text-2xl font-semibold">My list</h1>
 
     <div v-if="items.length" class="poster-grid">

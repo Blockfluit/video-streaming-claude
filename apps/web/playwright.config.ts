@@ -57,7 +57,25 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/state.json' },
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'e2e/.auth/state.json',
+        /*
+         * A browser that trusts this origin, which is the one the player is for.
+         *
+         * Chrome allows an unmuted `play()` it saw no click for only once the
+         * origin has earned an engagement score, and a fresh profile — which is
+         * what every run gets — has none. Playwright does not pass this switch
+         * itself (checked against its own list, 1.62), so without it the player
+         * is refused here and only here, and a test asserting that playback
+         * starts fails against code that is working.
+         *
+         * The refusal path is not lost by setting it: it is `play()` rejecting,
+         * which the player already handles by leaving the poster and the
+         * controls exactly where they were.
+         */
+        launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+      },
       dependencies: ['setup'],
     },
   ],

@@ -145,16 +145,22 @@ const hero = computed(() =>
  *
  * `hovering` covers a pointer resting on the hero and keyboard focus inside it.
  * `paused` is the explicit control — auto-updating content needs a way to stop
- * it, and "wait, what was that" is the commonest reason to want one. `dismissed`
- * is separate and permanent for the visit: somebody who closed the trailer is
- * not asking to be shown the next one ten seconds later.
+ * it, and "wait, what was that" is the commonest reason to want one.
+ * `trailerOpen` is the third and is not a preference at all: the hero cannot
+ * move on to the next title while somebody is watching this one's trailer in a
+ * dialog on top of it.
+ *
+ * There used to be a fourth, `dismissed`, set by a ✕ on the hero's own trailer
+ * controls and permanent for the visit. Those controls are gone — they steered
+ * something nobody was watching — and the trailer is now a dialog, which is a
+ * thing you close rather than dismiss.
  */
 const paused = ref(false)
 const hovering = ref(false)
-const dismissed = ref(false)
+const trailerOpen = ref(false)
 
 const rotating = computed(() =>
-  entries.value.length > 1 && !paused.value && !hovering.value && !dismissed.value,
+  entries.value.length > 1 && !paused.value && !hovering.value && !trailerOpen.value,
 )
 
 /**
@@ -166,8 +172,12 @@ const rotating = computed(() =>
  * reached for it and could not change while you were there. This says only
  * whether the viewer has stopped it, so pressing it flips the label under their
  * hand.
+ *
+ * `trailerOpen` is left out for the same reason `hovering` is: it is not the
+ * viewer's answer to this control, and the control is behind a modal dialog and
+ * unreachable while it is true anyway.
  */
-const stopped = computed(() => paused.value || dismissed.value)
+const stopped = computed(() => paused.value)
 
 /**
  * Whether the hero may move on its own at all.
@@ -241,22 +251,16 @@ function show(index: number): void {
 }
 
 /**
- * The active bullet is also the stop control, which is why it does not simply
- * flip `paused`.
+ * The active bullet is also the stop control.
  *
- * `dismissed` stops the rotation just as firmly and is set from a different
- * button — the trailer's ✕ — so leaving it alone here would offer "Resume the
- * rotation" on something that then refused to resume. Asking for it back out
- * loud outranks having closed a trailer earlier.
+ * It used to clear a second flag as well — `dismissed`, set by the ✕ on the
+ * hero's old trailer controls — because leaving that one alone would have
+ * offered "Resume the rotation" on something that then refused to resume. Those
+ * controls are gone and `paused` is the only thing this answers to now, which is
+ * exactly what a control that says "Pause" should be.
  */
 function togglePause(): void {
-  if (stopped.value) {
-    paused.value = false
-    dismissed.value = false
-    return
-  }
-
-  paused.value = true
+  paused.value = !paused.value
 }
 
 const isEmpty = computed(() => shelves.value.length === 0 && entries.value.length === 0)
@@ -319,7 +323,7 @@ useHead({ title: 'Home' })
       v-if="hero"
       :image="hero.image"
       :trailer-id="hero.trailerId"
-      @dismiss="dismissed = true"
+      :paused="trailerOpen"
       @pointerenter="hovering = true"
       @pointerleave="hovering = false"
       @focusin="hovering = true"
@@ -354,6 +358,23 @@ useHead({ title: 'Home' })
           <UButton :to="hero.to" size="lg" icon="i-lucide-info" class="font-semibold">
             More info
           </UButton>
+          <!--
+            Beside "More info" rather than in a corner of the hero, which is
+            where the old play/mute/✕ band lived. A trailer is one of the two
+            things you can do with a title you are still deciding about, so it
+            belongs next to the other one — and the title pages put it in exactly
+            the same place, beside My List.
+
+            Inside the keyed column, so it is rebuilt with the entry it belongs
+            to. Safe only because an open dialog stops the rotation: without
+            that, the hero could turn over underneath it and take the dialog —
+            and `trailerOpen`, stuck true — with it.
+          -->
+          <TrailerModal
+            v-model:open="trailerOpen"
+            :trailer-id="hero.trailerId"
+            :title="hero.title"
+          />
         </div>
       </div>
 

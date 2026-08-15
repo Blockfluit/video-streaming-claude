@@ -9,6 +9,7 @@ import {
   toast,
   USERNAME,
   visit,
+  visitPlayer,
 } from './fixtures'
 
 /** The management screens: every control that changes something. */
@@ -603,7 +604,9 @@ test.describe('admin', () => {
     })
     expect(video).not.toBeNull()
 
-    await visit(page, `/watch/${video!.slug}`)
+    // The player starts on arrival and a streaming page never goes quiet, so
+    // `visit`'s `networkidle` would wait here until the test times out.
+    await visitPlayer(page, `/watch/${video!.slug}`)
 
     const edit = page.getByRole('link', { name: 'Edit' })
     await expect(edit).toHaveAttribute('href', `/admin/videos/${video!.id}`)

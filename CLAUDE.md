@@ -778,6 +778,21 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   top-right is the publish state and quality, and the top-left is My List's remove button — the only way
   off that list, and not worth displacing for a chip.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
+- **The player starts itself from `onLoadedMetadata`, after the resume seek — never with the `autoplay`
+  attribute.** The `<video>` and its `<source>` are server-rendered, so the attribute has the browser open
+  at 0:00 while Vue is still hydrating and only then be seeked to the resume point: a second of the wrong
+  scene, out loud, on every resume. `play()` is attempted once per load, and a browser that refuses an
+  unmuted play it saw no click for rejects it — which is left alone, because the poster and the controls
+  are already on screen and muting instead would start a film silently. Playwright does **not** pass
+  `--autoplay-policy=no-user-gesture-required`, so `playwright.config.ts` does; without it a fresh headless
+  profile refuses, and the test asserting playback fails against working code. Tests about *where a seek
+  lands* call `freeze()` (`e2e/viewer.spec.ts`), which pauses **and** re-pauses on `play`, since the
+  autoplay attempt can settle after a bare `pause()`.
+- **`/watch/:slug` never reaches `networkidle`, so `visit()` cannot open it.** A playing video keeps issuing
+  range requests, so the wait inside `visit` runs until the *test* times out — a hang with no failing
+  assertion to point at the cause. `visitPlayer()` (`e2e/fixtures.ts`) waits for `readyState >= 1` instead,
+  which is what the `networkidle` was standing in for. Any reload of the player page needs the same
+  treatment. (Found by running the suite: the arrival test passed and the hard-load test hung.)
 
 **Frontend** (`apps/web`, in addition to the notes above)
 - **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
@@ -838,16 +853,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
   and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
   enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
-- **1920 is the width `.page-shell` is tuned to**, and the arithmetic is exact: a `5rem` gutter either side of
-  1920px leaves 1760px, which *is* the `110rem` cap. So the cap does nothing at 1080p and everything above
-  it — a 4K screen got nine columns in the middle and ~1000px of dead background either side.
-  `.page-shell-wide` (browse and my-list, the two pages that are only a grid) drops the cap and grows the
-  gutter from that tuned width: `max(5rem, calc(5rem + (100vw - 1920px) * 0.12))`. Measured — 1920: 80px
-  gutter, 9 × 180px, unchanged either side of the change; 2560: 157px, 11 columns; 3840: 310px, 16 columns.
-  **Faster than proportional, deliberately.** A flat percentage (4.167vw, which is the same ratio 1080p has)
-  was the first attempt and reads as no margin at all at 4K — 160px against the ~1040px the cap used to
-  give. The margin has to become a larger *share* as the page grows, or the wall has nowhere to stop. Prose
-  pages keep the cap: a synopsis stops wanting width long before a wall of artwork does.
+- **Every page is `.page-shell` and nothing else.** One width, one gutter scale, the header included — so
+  moving between two routes never shifts the content sideways. `/browse` and `/my-list` were briefly given a
+  wider variant, on the reasoning that a wall of posters wants width in a way a synopsis does not: at 4K it
+  put sixteen columns 310px from the edge where every other page starts at 1115px. It was **removed on
+  sight** — the one page that does not line up does not read as using the space, it reads as broken, and
+  `/browse` is a click away from `/`. A wide treatment, if it ever returns, belongs to every full-width
+  surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
+  middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
+  page.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.

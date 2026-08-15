@@ -1,4 +1,4 @@
-import { expect, expectsRequest, fillStable, test, visit } from './fixtures'
+import { expect, expectsRequest, fillStable, test, visit, visitPlayer } from './fixtures'
 import type { Page } from '@playwright/test'
 
 
@@ -9,6 +9,26 @@ async function withMetadata(page: Page) {
     .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState), { timeout: 20_000 })
     .toBeGreaterThanOrEqual(1)
   return video
+}
+
+/**
+ * Holds the playhead still.
+ *
+ * The player starts on its own, so a test about *where a seek lands* is
+ * otherwise racing playback: by the time an assertion reads `currentTime`, the
+ * film has moved on and the number says as much about the machine's speed as
+ * about the button that was pressed.
+ *
+ * The listener matters as much as the `pause()`. Playing is attempted from
+ * `loadedmetadata`, and that attempt is a promise that can settle *after* this
+ * call — a bare `pause()` would then be undone a moment later, which is the
+ * flake this exists to remove rather than a fix for it.
+ */
+async function freeze(page: Page): Promise<void> {
+  await page.locator('video').evaluate((el: HTMLVideoElement) => {
+    el.addEventListener('play', () => el.pause())
+    el.pause()
+  })
 }
 
 /**
@@ -35,6 +55,62 @@ async function aVideoPage(page: Page): Promise<string> {
   })
   expect(slug, 'the library holds no video').not.toBeNull()
   return `/v/${slug}`
+}
+
+interface Membership {
+  seasonId: string | null
+  collection: { slug: string }
+}
+
+interface Candidate {
+  slug: string
+  collections?: Membership[] | null
+}
+
+/**
+ * The library's videos with their memberships.
+ *
+ * `/api/videos` already carries `collections`, so the kind of a video is one
+ * request away — which is what lets a test pick the kind it is about instead of
+ * whatever sorts first.
+ *
+ * Asked through `page.request`, which carries the context's session cookie, so
+ * no page has to be loaded to ask a question about the data. Routing it through
+ * a `/browse` visit and an in-page `fetch` is what the older helper does, and it
+ * makes every such lookup wait on `networkidle` for a page the test does not
+ * care about — a shelf that keeps loading as it scrolls may never go idle.
+ */
+async function libraryVideos(page: Page): Promise<Candidate[]> {
+  const response = await page.request.get('/api/videos?limit=100')
+  expect(response.ok(), 'the library did not answer').toBeTruthy()
+  return ((await response.json()).items ?? []) as Candidate[]
+}
+
+/** The membership that makes a video an episode, or null for everything else. */
+function episodeOf(video: Candidate): Membership | null {
+  return video.collections?.find(membership => membership.seasonId) ?? null
+}
+
+/**
+ * A video that is **not** an episode.
+ *
+ * Details leads somewhere different for the two now, so a test about either has
+ * to say which one it means. Taking whatever sorted first would leave this test
+ * passing or failing on the seed data, and failing on *correct* behaviour the
+ * day a series happens to sort to the front.
+ */
+async function aFilmPage(page: Page): Promise<string | null> {
+  const film = (await libraryVideos(page)).find(video => !episodeOf(video))
+  return film ? `/v/${film.slug}` : null
+}
+
+/** An episode, with the series its Details button must reach. */
+async function anEpisode(page: Page): Promise<{ path: string, series: string } | null> {
+  for (const video of await libraryVideos(page)) {
+    const membership = episodeOf(video)
+    if (membership) return { path: `/v/${video.slug}`, series: `/c/${membership.collection.slug}` }
+  }
+  return null
 }
 
 /** A video page, then Play — playback is a deliberate second press now. */
@@ -90,9 +166,19 @@ test.describe('viewer', () => {
     await expect(page.locator('video')).toBeVisible()
   })
 
-  test('the player links back to the page it came from', async ({ page }) => {
-    const videoPage = await aVideoPage(page)
-    await visit(page, videoPage)
+  /**
+   * A film's own page holds its synopsis, cast and certification, and no
+   * collection page repeats any of it — so Details keeps leading there. The
+   * video is chosen for *not* being an episode: those go somewhere else now,
+   * and a test taking whatever sorted first would assert the wrong half of the
+   * rule at the seed data's discretion.
+   */
+  test('the player links back to the film it came from', async ({ page }) => {
+    const videoPage = await aFilmPage(page)
+    // Decided from the data, not from a locator: a count that has not rendered
+    // yet is zero, and a skip that always runs reports green forever.
+    test.skip(videoPage === null, 'the library holds no video outside a season')
+    await visit(page, videoPage!)
 
     await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
     await page.waitForURL(/\/watch\//)
@@ -101,6 +187,63 @@ test.describe('viewer', () => {
     await page.waitForURL(url => url.pathname === videoPage)
     await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
     await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * The change this exists for. Halfway through an episode, the page worth
+   * reaching is the **show** — its seasons and the rest of its episodes — not a
+   * page describing the episode already on screen.
+   */
+  test('the player sends an episode to its series', async ({ page }) => {
+    const episode = await anEpisode(page)
+    test.skip(episode === null, 'the library holds no episode in a season')
+
+    await visit(page, episode!.path)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
+
+    await page.getByRole('link', { name: 'Details' }).click()
+    await page.waitForURL(url => url.pathname === episode!.series)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * Arriving at the player is the press that starts it.
+   *
+   * `paused` alone would pass against a player that is stalled rather than
+   * playing — the flag says what was *asked for*, not what is happening — so
+   * the position has to move as well. Both, or this passes while the picture
+   * sits still.
+   */
+  test('the player starts playing on arrival', async ({ page }) => {
+    await startPlaying(page)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
+
+    const at = () => video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    const opened = await at()
+    await expect.poll(at).toBeGreaterThan(opened)
+  })
+
+  /**
+   * And on a hard load, which is a different path and where the *resume* was
+   * once silently skipped: the `<video>` arrives in the server-rendered markup
+   * and the browser starts fetching before Vue hydrates, so `loadedmetadata`
+   * can fire into nothing. Playing is started from that same handler, so it can
+   * be lost the same way and only a real page load can tell.
+   */
+  test('the player starts playing on a hard load of its URL', async ({ page }) => {
+    await startPlaying(page)
+    const url = new URL(page.url()).pathname
+
+    // `visitPlayer`, not `visit`: a page that is streaming never reaches
+    // `networkidle`, so the ordinary helper waits here until the test dies.
+    await visitPlayer(page, url)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
   })
 
   const SEARCH = 'input[placeholder="Search titles, genres and cast"]'
@@ -213,16 +356,17 @@ test.describe('viewer', () => {
   })
 
   /**
-   * A wide screen must not be left with empty space below one page of cards.
+   * A tall screen must not be left with empty space below one page of cards.
    *
-   * Fifty cards is under three rows on a 4K grid, so the first page never
-   * reaches the fold and nothing would ever ask for a second — the page keeps
-   * loading until the end of the list is off screen. Asserted at a viewport this
-   * suite does not otherwise use, because at 1280 one page already overflows and
-   * the bug is invisible.
+   * The page keeps loading until the end of the list is off screen, rather than
+   * fetching once and stopping. Proving that needs a viewport one page does
+   * *not* already fill — at this suite's usual 1280×720, fifty cards overflow
+   * several times over and a loader that never fired again would still look
+   * perfect. Hence the tall viewport: fifty cards is about six rows, so a 2400px
+   * screen shows the end of them and must ask for more without being scrolled.
    */
-  test('a wide viewport fills with cards rather than stopping at one page', async ({ page }) => {
-    await page.setViewportSize({ width: 2560, height: 1440 })
+  test('a tall viewport fills with cards rather than stopping at one page', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 2400 })
     await visit(page, '/browse')
 
     const total = await page.evaluate(async () => {
@@ -234,16 +378,16 @@ test.describe('viewer', () => {
     const cards = page.locator('main a[href^="/v/"], main a[href^="/c/"]')
     await expect(cards.first()).toBeVisible()
 
-    // The grid has to end below the fold, or there is a hole where cards should be.
-    await expect
-      .poll(
-        () => page.evaluate(() => {
-          const grid = document.querySelector('.poster-grid')
-          return grid ? grid.getBoundingClientRect().bottom - window.innerHeight : 0
-        }),
-        { timeout: 15_000 },
-      )
-      .toBeGreaterThan(0)
+    // Past one page, with no scrolling — that is the fill loop and nothing else.
+    await expect.poll(() => cards.count(), { timeout: 15_000 }).toBeGreaterThan(50)
+
+    // And the grid ends below the fold, so there is no band of empty background
+    // under it while there are still titles to show.
+    const overflow = await page.evaluate(() => {
+      const grid = document.querySelector('.poster-grid')
+      return grid ? grid.getBoundingClientRect().bottom - window.innerHeight : 0
+    })
+    expect(overflow).toBeGreaterThan(0)
   })
 
   /**
@@ -372,6 +516,10 @@ test.describe('viewer', () => {
       await page.getByRole('link', { name: /^Resume from/ }).click()
       await page.waitForURL(/\/watch\//)
       await withMetadata(page)
+      // This test is about where playback *opens*, not about it running. Left
+      // running, the closing assertion below — that starting over went back to
+      // the beginning — would be measuring how fast this machine plays.
+      await freeze(page)
 
       const currentTime = () =>
         page.locator('video').evaluate((el: HTMLVideoElement) => el.currentTime)
@@ -394,6 +542,7 @@ test.describe('viewer', () => {
        */
       await page.reload()
       await withMetadata(page)
+      await freeze(page)
       await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
 
       /*
@@ -438,6 +587,14 @@ test.describe('viewer', () => {
       // agreeing, which they stop doing the moment the library changes.
       const target = await currentVideoId(page)
       const video = await withMetadata(page)
+      /*
+       * Before the position is read, and this is load-bearing twice over: the
+       * player runs on its own now, so an anchor read from a moving playhead is
+       * stale by the time the marker reaches the API — and the reload below
+       * would then open at whatever the beats had since written, which can be
+       * past the very intro this test is about to define.
+       */
+      await freeze(page)
       const duration = await video.evaluate((el: HTMLVideoElement) => el.duration)
 
       /*
@@ -458,7 +615,12 @@ test.describe('viewer', () => {
         })
       }, { id: target, end: introEnd })
       await page.reload()
-      await page.waitForLoadState('networkidle')
+      // Metadata rather than `networkidle`: this page is streaming, so the
+      // network never falls quiet and waiting for it to would hang until the
+      // test times out. Frozen again on the far side too, or the overlay is a
+      // five-second window that playback closes while the click is being aimed.
+      await withMetadata(page)
+      await freeze(page)
 
       const skip = page.getByRole('button', { name: 'Skip intro' })
       await expect(skip).toBeVisible()
@@ -791,7 +953,12 @@ test.describe('viewer', () => {
     })
     expect(slug, 'the library holds no video').not.toBeNull()
 
-    await visit(page, `/watch/${slug}`)
+    // `visitPlayer`, not `visit`: the player starts playing on arrival now, and
+    // a page that is streaming never reaches `networkidle` — the ordinary helper
+    // waits here until the test dies. This test was written before playback
+    // started on its own, and the two changes landed on separate branches, so
+    // nothing ran the combination until they were both on main.
+    await visitPlayer(page, `/watch/${slug}`)
 
     // The page itself rendered — otherwise this passes for having found nothing.
     await expect(page.getByRole('link', { name: 'Details' })).toBeVisible()

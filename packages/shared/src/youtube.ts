@@ -94,27 +94,51 @@ function idOrNull(candidate: string | undefined): string | null {
  * `mute=1` is not a preference. Browsers refuse to start an unmuted video that
  * nobody asked for, and the failure is silent — the iframe simply sits there —
  * so the sound toggle has to be ours and start from muted.
+ *
+ * `controls` separates the two players this app has. The hero's trailer is
+ * decoration behind a page's own heading and buttons, so YouTube's chrome is off
+ * and so is `showinfo` — both would draw over the title. The trailer dialog is
+ * the opposite: nothing is layered over it, somebody opened it deliberately, and
+ * a video player without a scrubber is a worse player.
  */
 export function youtubeEmbedUrl(
   id: string,
-  options: { muted?: boolean; autoplay?: boolean } = {},
+  options: {
+    muted?: boolean;
+    autoplay?: boolean;
+    controls?: boolean;
+    /**
+     * The embedding page's own origin. YouTube documents this as required
+     * alongside `enablejsapi`, and the player is entitled to ignore the
+     * `postMessage` handshake without it — which here means a hero that waits
+     * for a confirmation that never arrives and stays on its banner forever.
+     *
+     * Passed in rather than read here: this file is shared with the API, where
+     * there is no `window` to read it from.
+     */
+    origin?: string;
+  } = {},
 ): string {
-  const { muted = true, autoplay = true } = options;
+  const { muted = true, autoplay = true, controls = false, origin } = options;
 
   const params = new URLSearchParams({
     autoplay: autoplay ? '1' : '0',
     mute: muted ? '1' : '0',
-    controls: '0',
+    controls: controls ? '1' : '0',
     modestbranding: '1',
     rel: '0',
     playsinline: '1',
-    // Without this the player draws its own title and share buttons over the
-    // top of the hero's text.
-    showinfo: '0',
-    // Lets the page hear `onStateChange`, which is how the hero knows to fade
-    // back to the banner instead of leaving a black frame.
+    // Lets the page hear `onStateChange`, which is how the hero knows whether
+    // the trailer actually started — and therefore whether to reveal it at all
+    // or leave the banner where it is.
     enablejsapi: '1',
   });
+
+  // Suppresses the player's own title and share buttons, which would otherwise
+  // sit on top of the hero's text. Meaningless — and unwanted — in the dialog,
+  // where the player is the content rather than a layer under it.
+  if (!controls) params.set('showinfo', '0');
+  if (origin) params.set('origin', origin);
 
   return `https://www.youtube-nocookie.com/embed/${id}?${params.toString()}`;
 }

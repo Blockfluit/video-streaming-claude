@@ -28,17 +28,18 @@ const props = defineProps<{
    */
   size?: 'wide' | 'tall' | 'full'
   /**
-   * A YouTube id. The banner shows first and the trailer fades in over it after
-   * a moment, the way a title page on a streaming service does.
+   * A YouTube id. Decoration: it starts itself, silently, and the page's own
+   * `TrailerModal` is where anybody actually watches the thing.
    */
   trailerId?: string | null
+  /**
+   * Raised while the page is showing the trailer somewhere else — the modal.
+   * Two copies of the same video playing at once is the obvious problem; the
+   * quieter one is that the ambient copy keeps running behind a dialog nobody
+   * can see it through, for as long as the dialog is open.
+   */
+  paused?: boolean
 }>()
-
-/**
- * Only the deliberate one. A page that swaps `trailerId` on a timer needs to
- * know when the viewer has said no, so it can stop swapping.
- */
-const emit = defineEmits<{ dismiss: [] }>()
 
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
@@ -46,85 +47,114 @@ const showImage = computed(() => Boolean(props.image) && !broken.value)
 /* ---------------------------------------------------------------- trailer -- */
 
 /**
- * The trailer starts itself, but only on terms the browser and the viewer both
- * allow.
+ * The trailer starts at once, and only reveals itself once it is actually
+ * playing.
  *
- * - **Muted.** Not a preference: a browser refuses to start an unmuted video
- *   nobody asked for, and it fails *silently* — the iframe loads and sits there.
- *   So the sound toggle is ours, and it starts from muted.
+ * It used to wait two seconds and then fade in regardless, which is wrong in the
+ * one case that matters. When the video will not play — autoplay refused,
+ * embedding disabled by its owner, the video pulled — YouTube paints its own
+ * grey "Video unavailable" card, and *that* is what got faded across the
+ * artwork. The banner underneath was always the intended fallback; nothing was
+ * checking whether it was needed.
+ *
+ * So the iframe is mounted immediately but held at `opacity-0`, and the banner
+ * stays up until the player says it is playing. If it never says so, the iframe
+ * is taken away again and nobody sees anything but the banner. See
+ * `utils/youtube-embed.ts` for how that conversation works.
+ *
+ * The other two rules are unchanged and still not preferences:
+ *
+ * - **Muted.** A browser refuses to start an unmuted video nobody asked for, and
+ *   it fails *silently* — the iframe loads and sits there. Sound belongs to the
+ *   modal, which a person opened on purpose.
  * - **Not under `prefers-reduced-motion`.** A hero that begins moving on its own
  *   is precisely what that setting is about. The trailer stays available behind
- *   its button.
- * - **Nothing is requested from YouTube until it starts**, so a page someone
- *   passes through makes no third-party request at all.
+ *   the modal's button, which is a deliberate act rather than an ambush.
  */
-const DELAY_MS = 2000
 
-const playing = ref(false)
-const muted = ref(true)
-/** Held back so the iframe — and the request it makes — does not exist yet. */
+/**
+ * How long the player gets to confirm before the banner wins.
+ *
+ * Generous on purpose: it covers loading the embed over a slow connection as
+ * well as the failures, and the cost of being wrong in that direction is only
+ * that a working trailer is dropped a moment before it would have started.
+ */
+const CONFIRM_MS = 4000
+
+/** Whether the iframe exists at all, so nothing is requested before it does. */
 const mounted = ref(false)
+/** Whether it has earned the right to be seen. */
+const revealed = ref(false)
+const frame = ref<HTMLIFrameElement | null>(null)
 
 const embedUrl = computed(() =>
   props.trailerId && mounted.value
-    ? youtubeEmbedUrl(props.trailerId, { muted: muted.value })
+    // `mounted` is only ever set on the client, so `location` is safe to read.
+    ? youtubeEmbedUrl(props.trailerId, { origin: window.location.origin })
     : null,
 )
 
-let timer: ReturnType<typeof setTimeout> | undefined
+let deadline: ReturnType<typeof setTimeout> | undefined
 
 function stopTrailer(): void {
-  clearTimeout(timer)
-  playing.value = false
+  clearTimeout(deadline)
+  revealed.value = false
   mounted.value = false
-  muted.value = true
+}
+
+/**
+ * The embed posts nothing until it is subscribed to, and it is only reachable
+ * once its document exists — so this is bound to the iframe's `load` rather than
+ * fired alongside the mount.
+ */
+function subscribe(): void {
+  frame.value?.contentWindow?.postMessage(LISTENING, EMBED_ORIGIN)
+}
+
+function onMessage(event: MessageEvent): void {
+  if (!mounted.value) return
+
+  const signal = readPlayerSignal(event.origin, event.data)
+  if (signal === 'playing') {
+    clearTimeout(deadline)
+    revealed.value = true
+  }
+  // Told rather than timed out: an error arrives immediately, and waiting the
+  // full deadline to act on it would leave the grey card fading in behind a
+  // reveal that is about to be cancelled anyway.
+  else if (signal === 'failed') stopTrailer()
 }
 
 function startTrailer(): void {
-  if (!props.trailerId) return
-  mounted.value = true
-  playing.value = true
-}
-
-/**
- * The ✕, as opposed to the internal stop.
- *
- * `stopTrailer` is also how `scheduleTrailer` clears the previous trailer, so
- * emitting from there would fire on every change of `trailerId`. Only a person
- * pressing the button means "I do not want this", and only that is worth
- * telling the page about — the home hero rotates, and a trailer somebody just
- * dismissed coming back ten seconds later is the same annoyance twice.
- */
-function dismissTrailer(): void {
-  stopTrailer()
-  emit('dismiss')
-}
-
-/**
- * Toggling sound reloads the iframe with a different `mute`, because the player
- * is only reachable through the YouTube JS API otherwise — a whole script to
- * load, for one control. The reload costs a restart of the trailer, which is
- * what someone turning the sound on generally wants anyway.
- */
-function toggleSound(): void {
-  muted.value = !muted.value
-}
-
-function scheduleTrailer(): void {
-  clearTimeout(timer)
   stopTrailer()
 
   if (!props.trailerId) return
+  if (props.paused) return
   if (import.meta.server) return
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
-  timer = setTimeout(startTrailer, DELAY_MS)
+  mounted.value = true
+  deadline = setTimeout(() => {
+    // Still nothing. Whatever the reason, the banner is the answer — and the
+    // iframe goes rather than sitting there invisible, holding a connection to
+    // a third party for a video this page has given up on.
+    if (!revealed.value) stopTrailer()
+  }, CONFIRM_MS)
 }
 
-onMounted(scheduleTrailer)
-onBeforeUnmount(() => clearTimeout(timer))
-// A client-side navigation swaps the prop on the same component instance.
-watch(() => props.trailerId, scheduleTrailer)
+onMounted(() => {
+  window.addEventListener('message', onMessage)
+  startTrailer()
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(deadline)
+  window.removeEventListener('message', onMessage)
+})
+
+// A client-side navigation swaps the prop on the same component instance, and
+// `paused` goes up and down as the modal opens and closes.
+watch(() => [props.trailerId, props.paused], startTrailer)
 
 /**
  * `svh` rather than `vh` for the full-height hero: `vh` ignores a mobile
@@ -175,13 +205,17 @@ watch(
       lands on it, so without this the Play button underneath stops responding
       the moment the trailer fades in — and the page looks fine while doing it.
 
-      `aria-hidden` because it is decoration behind real content. Its controls
-      below are the part anyone needs to reach.
+      `aria-hidden` because it is decoration behind real content. The Trailer
+      button in the page's own button row is the part anyone needs to reach.
+
+      The crossfade is short. A full second was the tail of a two-second wait and
+      read as a deliberate flourish; now that the trailer is already playing when
+      this runs, the same second reads as the page being slow.
     -->
     <div
       v-if="embedUrl"
-      class="pointer-events-none absolute inset-0 transition-opacity duration-1000"
-      :class="playing ? 'opacity-100' : 'opacity-0'"
+      class="pointer-events-none absolute inset-0 transition-opacity duration-300"
+      :class="revealed ? 'opacity-100' : 'opacity-0'"
       aria-hidden="true"
     >
       <!--
@@ -190,12 +224,14 @@ watch(
         like a mistake; cropping is what the banner underneath already does.
       -->
       <iframe
+        ref="frame"
         :src="embedUrl"
         class="absolute top-1/2 left-1/2 h-[56.25vw] min-h-full w-[177.78vh] min-w-full -translate-x-1/2 -translate-y-1/2"
         title=""
         frameborder="0"
         allow="autoplay; encrypted-media"
         referrerpolicy="strict-origin-when-cross-origin"
+        @load="subscribe"
       />
     </div>
 
@@ -220,58 +256,13 @@ watch(
     </div>
 
     <!--
-      The trailer's controls, and the only way to start one when
-      `prefers-reduced-motion` has stopped it doing so itself. Real buttons with
-      real labels, sitting above the scrim rather than over the artwork.
-
-      They align to the page column, not to the window, which is why this is a
-      full-width band around a `page-shell` rather than a `right-*` inset. The
-      gutter grows from 1rem to 5rem across the breakpoints and then the shell
-      starts centring inside `max-width: 110rem` — so a fixed inset matched the
-      content on a phone and hung 1.5–5rem outside it on every desktop, drifting
-      further the wider the screen got. Reusing the shell also keeps one
-      definition of the gutter rather than a second copy to keep in sync.
-
-      The band spans the hero, so it is `pointer-events-none` and each button
-      takes pointer events back: an invisible full-width strip lying over the
-      hero would otherwise swallow the clicks meant for Play underneath it,
-      exactly as the iframe above does.
+      There were trailer controls here — a play button, a mute toggle and a ✕ —
+      in a band along the floor of the hero. They are gone, and the reason is
+      worth keeping: they were controls for something nobody was watching. The
+      ambient trailer is scrimmed, cropped and sitting under a page's worth of
+      text, so a sound toggle on it offered audio for a video you cannot see.
+      Anyone who wants the trailer wants the trailer, and that is the button in
+      the page's own row, next to My List.
     -->
-    <div v-if="trailerId" class="pointer-events-none absolute inset-x-0 bottom-6 z-1">
-      <div class="page-shell flex w-full items-center justify-end gap-2">
-        <template v-if="playing">
-          <UButton
-            size="sm"
-            color="neutral"
-            variant="subtle"
-            class="pointer-events-auto"
-            :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
-            :aria-label="muted ? 'Unmute the trailer' : 'Mute the trailer'"
-            @click="toggleSound"
-          />
-          <UButton
-            size="sm"
-            color="neutral"
-            variant="subtle"
-            class="pointer-events-auto"
-            icon="i-lucide-x"
-            aria-label="Stop the trailer"
-            @click="dismissTrailer"
-          />
-        </template>
-        <UButton
-          v-else
-          size="sm"
-          color="neutral"
-          variant="subtle"
-          class="pointer-events-auto"
-          icon="i-lucide-clapperboard"
-          aria-label="Play the trailer"
-          @click="startTrailer"
-        >
-          Trailer
-        </UButton>
-      </div>
-    </div>
   </section>
 </template>
