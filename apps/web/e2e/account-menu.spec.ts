@@ -68,6 +68,31 @@ test.describe('the account menu', () => {
     expect(await body()).toEqual({ overflow: '', paddingRight: '', marginRight: '' })
   })
 
+  /**
+   * History is reached from here and nowhere else in the shell.
+   *
+   * Both halves matter. A menu entry that renders but navigates nowhere leaves
+   * the page unreachable now that the header link is gone, and a header link
+   * left behind would mean the move never happened — neither shows up in a
+   * test that only opens the menu and looks at it.
+   */
+  test('is the way to History, which has left the header', async ({ page }) => {
+    await visit(page, '/')
+
+    await expect(
+      page.locator('header nav').getByRole('link', { name: 'History', exact: true }),
+    ).toHaveCount(0)
+
+    await trigger(page).click()
+
+    const item = page.getByRole('menuitem', { name: 'History' })
+    await expect(item).toBeVisible()
+
+    await item.click()
+    await page.waitForURL('**/history')
+    await expect(page.getByRole('heading', { name: 'History', level: 1 })).toBeVisible()
+  })
+
   test('names the signed-in user', async ({ page }) => {
     await visit(page, '/')
 

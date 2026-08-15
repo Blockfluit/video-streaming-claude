@@ -14,7 +14,6 @@ const links = computed(() => [
   { label: 'Home', to: '/' },
   { label: 'Browse', to: '/browse' },
   { label: 'My List', to: '/my-list' },
-  { label: 'History', to: '/history' },
   { label: 'Requests', to: '/requests' },
   ...(isAdmin.value ? [{ label: 'Manage', to: '/admin' }] : []),
 ])
@@ -43,11 +42,20 @@ async function signOut() {
  * template is a new identity on every one of those ticks, handed to a menu
  * that may be open at the time; a computed is one identity until the role
  * changes.
+ *
+ * History lives here rather than in the header: it is one person's viewing,
+ * not a way into the library, and the two are the same kind of thing as
+ * `Manage library` — somewhere your account takes you. The nested arrays are
+ * groups, so `Sign out` sits behind a separator instead of flush against a
+ * destination you were aiming for.
  */
-const accountItems = computed(() => [[
-  ...(isAdmin.value ? [{ label: 'Manage library', icon: 'i-lucide-sliders-horizontal', to: '/admin' }] : []),
-  { label: 'Sign out', icon: 'i-lucide-log-out', onSelect: signOut },
-]])
+const accountItems = computed(() => [
+  [
+    { label: 'History', icon: 'i-lucide-history', to: '/history' },
+    ...(isAdmin.value ? [{ label: 'Manage library', icon: 'i-lucide-sliders-horizontal', to: '/admin' }] : []),
+  ],
+  [{ label: 'Sign out', icon: 'i-lucide-log-out', onSelect: signOut }],
+])
 
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 </script>
