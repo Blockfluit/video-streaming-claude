@@ -1,4 +1,4 @@
-import { expect, expectsRequest, fillStable, test, visit } from './fixtures'
+import { expect, expectsRequest, fillStable, test, visit, visitPlayer } from './fixtures'
 import type { Page } from '@playwright/test'
 
 
@@ -9,6 +9,26 @@ async function withMetadata(page: Page) {
     .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState), { timeout: 20_000 })
     .toBeGreaterThanOrEqual(1)
   return video
+}
+
+/**
+ * Holds the playhead still.
+ *
+ * The player starts on its own, so a test about *where a seek lands* is
+ * otherwise racing playback: by the time an assertion reads `currentTime`, the
+ * film has moved on and the number says as much about the machine's speed as
+ * about the button that was pressed.
+ *
+ * The listener matters as much as the `pause()`. Playing is attempted from
+ * `loadedmetadata`, and that attempt is a promise that can settle *after* this
+ * call — a bare `pause()` would then be undone a moment later, which is the
+ * flake this exists to remove rather than a fix for it.
+ */
+async function freeze(page: Page): Promise<void> {
+  await page.locator('video').evaluate((el: HTMLVideoElement) => {
+    el.addEventListener('play', () => el.pause())
+    el.pause()
+  })
 }
 
 /**
@@ -186,6 +206,44 @@ test.describe('viewer', () => {
     await page.waitForURL(url => url.pathname === episode!.series)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * Arriving at the player is the press that starts it.
+   *
+   * `paused` alone would pass against a player that is stalled rather than
+   * playing — the flag says what was *asked for*, not what is happening — so
+   * the position has to move as well. Both, or this passes while the picture
+   * sits still.
+   */
+  test('the player starts playing on arrival', async ({ page }) => {
+    await startPlaying(page)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
+
+    const at = () => video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    const opened = await at()
+    await expect.poll(at).toBeGreaterThan(opened)
+  })
+
+  /**
+   * And on a hard load, which is a different path and where the *resume* was
+   * once silently skipped: the `<video>` arrives in the server-rendered markup
+   * and the browser starts fetching before Vue hydrates, so `loadedmetadata`
+   * can fire into nothing. Playing is started from that same handler, so it can
+   * be lost the same way and only a real page load can tell.
+   */
+  test('the player starts playing on a hard load of its URL', async ({ page }) => {
+    await startPlaying(page)
+    const url = new URL(page.url()).pathname
+
+    // `visitPlayer`, not `visit`: a page that is streaming never reaches
+    // `networkidle`, so the ordinary helper waits here until the test dies.
+    await visitPlayer(page, url)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
   })
 
   const SEARCH = 'input[placeholder="Search titles, genres and cast"]'
@@ -458,6 +516,10 @@ test.describe('viewer', () => {
       await page.getByRole('link', { name: /^Resume from/ }).click()
       await page.waitForURL(/\/watch\//)
       await withMetadata(page)
+      // This test is about where playback *opens*, not about it running. Left
+      // running, the closing assertion below — that starting over went back to
+      // the beginning — would be measuring how fast this machine plays.
+      await freeze(page)
 
       const currentTime = () =>
         page.locator('video').evaluate((el: HTMLVideoElement) => el.currentTime)
@@ -480,6 +542,7 @@ test.describe('viewer', () => {
        */
       await page.reload()
       await withMetadata(page)
+      await freeze(page)
       await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
 
       /*
@@ -524,6 +587,14 @@ test.describe('viewer', () => {
       // agreeing, which they stop doing the moment the library changes.
       const target = await currentVideoId(page)
       const video = await withMetadata(page)
+      /*
+       * Before the position is read, and this is load-bearing twice over: the
+       * player runs on its own now, so an anchor read from a moving playhead is
+       * stale by the time the marker reaches the API — and the reload below
+       * would then open at whatever the beats had since written, which can be
+       * past the very intro this test is about to define.
+       */
+      await freeze(page)
       const duration = await video.evaluate((el: HTMLVideoElement) => el.duration)
 
       /*
@@ -544,7 +615,12 @@ test.describe('viewer', () => {
         })
       }, { id: target, end: introEnd })
       await page.reload()
-      await page.waitForLoadState('networkidle')
+      // Metadata rather than `networkidle`: this page is streaming, so the
+      // network never falls quiet and waiting for it to would hang until the
+      // test times out. Frozen again on the far side too, or the overlay is a
+      // five-second window that playback closes while the click is being aimed.
+      await withMetadata(page)
+      await freeze(page)
 
       const skip = page.getByRole('button', { name: 'Skip intro' })
       await expect(skip).toBeVisible()
@@ -703,7 +779,10 @@ test.describe('viewer', () => {
 
       const href = await card.getAttribute('href')
       await card.click()
-      await page.waitForURL(url => url.pathname === href)
+      // Path *and* query: a link built inside a collection now carries `?from=`,
+      // and comparing the path alone would both fail to match and stop noticing
+      // if the collection were dropped from the link.
+      await page.waitForURL(url => url.pathname + url.search === href)
 
       /*
        * Straight into playback, not onto another page of description. The shelf
@@ -775,8 +854,114 @@ test.describe('viewer', () => {
 
     const href = await entry.getAttribute('href')
     await entry.click()
-    await page.waitForURL(url => url.pathname === href)
+    // Path and query, because every link on a collection page now names the
+    // collection it came from — see the shelf test above.
+    await page.waitForURL(url => url.pathname + url.search === href)
     await expect(page.locator('video')).toBeVisible()
+  })
+
+  /**
+   * Stepping through a show from the player.
+   *
+   * The collection is picked from the **data** rather than from
+   * `locator.count()`, which does not retry: a guard written with it runs
+   * before the list has rendered and skips on every run, which is how a test in
+   * this suite reported green for weeks while asserting nothing.
+   *
+   * At most one season is part of the condition, not a convenience. The
+   * collection page orders its list by `orderIndex` alone while the player
+   * orders by season first, so within a single season the two provably agree
+   * and the first row really is the start of the sequence. Across seasons they
+   * need not, and the test would be asserting the page's ordering rather than
+   * the player's.
+   */
+  test('the player steps to the next episode and back again', async ({ page }) => {
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        if ((detail.seasons ?? []).length <= 1 && (detail.videos ?? []).length > 1) {
+          return collection.slug as string
+        }
+      }
+      return null
+    })
+    test.skip(slug === null, 'no collection here holds two videos in one season')
+
+    await visit(page, `/c/${slug}`)
+
+    // Scoped past the hero, whose Play button is also a `/watch/` link — an
+    // unscoped `.first()` would click that and never touch an episode row.
+    const entry = page.locator('main section ~ div a[href^="/watch/"]').first()
+    await expect(entry).toBeVisible()
+    await entry.click()
+    await page.waitForURL(/\/watch\//)
+
+    const start = page.url()
+    expect(
+      new URL(start).searchParams.get('from'),
+      'the collection has to travel with the link, or the player cannot know which order to step through',
+    ).toBe(slug)
+
+    /*
+     * Nothing precedes the first episode, and the control says so from where it
+     * already is. Removing it would move everything beside it, so the button
+     * somebody was aiming at shifts under the pointer at exactly the moment
+     * they reach the end of a show.
+     */
+    await expect(page.getByRole('button', { name: 'Previous episode' })).toBeDisabled()
+
+    const next = page.getByRole('link', { name: 'Next episode' })
+    await expect(next).toBeVisible()
+
+    const nextHref = await next.getAttribute('href')
+    expect(
+      new URL(nextHref!, start).searchParams.get('from'),
+      'one step must not drop the collection, or the stepper vanishes underneath whoever is using it',
+    ).toBe(slug)
+
+    await next.click()
+    await page.waitForURL(url => url.pathname + url.search === nextHref)
+    await expect(page.locator('video')).toBeVisible()
+
+    /*
+     * And back. The two are mirrors — forward then back is how somebody checks
+     * they pressed the right one, and it has to land exactly where they were.
+     */
+    const back = page.getByRole('link', { name: 'Previous episode' })
+    await expect(back).toBeVisible()
+    await back.click()
+    await page.waitForURL(url => url.href === start)
+  })
+
+  /**
+   * The stepper is scoped by the URL, and this is what that costs.
+   *
+   * A video belongs to any number of collections, and where it sits is a fact
+   * about one membership — the same episode can be episode 3 of a show and item
+   * 1 of a best-of row. So a player reached without a collection named has no
+   * running order it could honestly pick, and offers none. Asserted rather than
+   * assumed, because the tempting fix is to reach for `collections[0]` and be
+   * wrong about half the time.
+   */
+  test('a player reached without a collection offers no stepper', async ({ page }) => {
+    await visit(page, '/browse')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    expect(slug, 'the library holds no video').not.toBeNull()
+
+    await visit(page, `/watch/${slug}`)
+
+    // The page itself rendered — otherwise this passes for having found nothing.
+    await expect(page.getByRole('link', { name: 'Details' })).toBeVisible()
+
+    await expect(page.getByRole('link', { name: 'Next episode' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Previous episode' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Previous episode' })).toHaveCount(0)
   })
 
   /**

@@ -225,8 +225,20 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
         </p>
 
         <div class="flex flex-wrap items-center gap-3 pt-2">
-          <!-- The one real call to action on the screen, so it is the solid one. -->
-          <UButton :to="playPath(video)" size="lg" icon="i-lucide-play" class="font-semibold">
+          <!--
+            The one real call to action on the screen, so it is the solid one.
+
+            It names the collection this page is already showing — the same one
+            the "more from" shelf below is drawn from — so playing from here
+            steps through the show rather than landing in it alone. A standalone
+            film has none, which is what the optional argument is for.
+          -->
+          <UButton
+            :to="playPath(video, primary?.collection.slug)"
+            size="lg"
+            icon="i-lucide-play"
+            class="font-semibold"
+          >
             {{ resumeAt === null ? 'Play' : `Resume from ${timecode(resumeAt)}` }}
           </UButton>
           <AddToListButton :video-id="video.id" :saved="stats?.inMyList" label />
@@ -290,12 +302,15 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
           These play. The shelf only exists when this video is in a collection,
           so picking from it is the same act as picking an episode on the
           collection's own page — and that plays.
+
+          The collection goes with the link: it is the one this shelf is drawn
+          from, so it is also the running order the player should step through.
         -->
         <MediaCard
           v-for="entry in otherVideos"
           :key="entry.id"
           class="w-56 sm:w-64"
-          :to="playPath(entry)"
+          :to="playPath(entry, primary.collection.slug)"
           :title="entry.title"
           :subtitle="runtime(entry.durationSec)"
           :image-url="videoPoster(entry)"

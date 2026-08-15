@@ -81,6 +81,43 @@ describe('playPath', () => {
   it('has a link for a video that belongs to no collection', () => {
     expect(playPath({ slug: 'orphan' })).toBe('/watch/orphan')
   })
+
+  /**
+   * Which collection the viewer came through, so the player can offer the next
+   * and previous episode.
+   *
+   * It has to be carried rather than worked out at the far end: a video belongs
+   * to any number of collections, and `seasonId` and `orderIndex` are facts
+   * about *one* membership, so the same episode can be episode 3 of a show and
+   * item 1 of a best-of row. There is no honest way to pick between them once
+   * the link has been followed — the surface that built it is the one that knew.
+   */
+  it('carries the collection it was reached through', () => {
+    expect(playPath({ slug: 'the-pilot' }, 'the-big-sky')).toBe(
+      '/watch/the-pilot?from=the-big-sky',
+    )
+  })
+
+  /**
+   * The surfaces where the question is still what to watch pass nothing, and
+   * neither do Continue Watching and History, which hold a video and a position
+   * with no collection in hand. Every one of those call sites is untouched, so
+   * the no-argument form has to stay exactly what it was.
+   */
+  it('is unchanged when there is no collection to name', () => {
+    expect(playPath({ slug: 'the-film' })).toBe('/watch/the-film')
+    expect(playPath({ slug: 'the-film' }, null)).toBe('/watch/the-film')
+    expect(playPath({ slug: 'the-film' }, undefined)).toBe('/watch/the-film')
+  })
+
+  /** An empty slug names no collection, and an empty `?from=` is not a value. */
+  it('does not append an empty parameter', () => {
+    expect(playPath({ slug: 'the-film' }, '')).toBe('/watch/the-film')
+  })
+
+  it('encodes the collection slug', () => {
+    expect(playPath({ slug: 'the-film' }, 'a&b')).toBe('/watch/the-film?from=a%26b')
+  })
 })
 
 /**

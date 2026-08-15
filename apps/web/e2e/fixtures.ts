@@ -128,6 +128,30 @@ export async function visit(page: Page, path: string): Promise<void> {
 }
 
 /**
+ * The same, for `/watch/:slug` — which `visit` cannot do.
+ *
+ * The player starts playing on arrival, and a video being streamed is a page
+ * that never goes quiet: the range requests keep coming for as long as it is
+ * playing, so `networkidle` above simply waits until the test times out. That
+ * is not a flake to be retried, it is the wrong question — this page's job is
+ * to keep the network busy.
+ *
+ * What can be waited for is the player being ready, which is the thing the
+ * `networkidle` was standing in for anyway. `readyState >= 1` means the browser
+ * has parsed the metadata, and by then the markup is hydrated and the element
+ * is answering.
+ */
+export async function visitPlayer(page: Page, path: string): Promise<void> {
+  await page.goto(path)
+  await expect
+    .poll(
+      () => page.locator('video').evaluate((el: HTMLVideoElement) => el.readyState),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThanOrEqual(1)
+}
+
+/**
  * Runs an action and asserts it actually reached the API.
  *
  * This is what separates "the button is there" from "the button works". A

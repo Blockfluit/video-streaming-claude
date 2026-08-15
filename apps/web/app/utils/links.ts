@@ -65,9 +65,24 @@ export function videoPath(video: LinkableVideo): string {
  * - **Continue Watching and History** play, for the same reason.
  * - **Browse, My List and curated rows** describe. Those are the surfaces where
  *   the question is still what to watch.
+ *
+ * The optional collection is what lets the player offer the next and previous
+ * episode. It has to be *carried* rather than worked out on arrival: a video
+ * belongs to any number of collections, and `seasonId` and `orderIndex` sit on
+ * the membership, so the same episode can be episode 3 of a show and item 1 of a
+ * best-of row. Once the link has been followed there is no honest way to choose
+ * between them — the surface that built the link is the one that knew.
+ *
+ * So the surfaces on the "plays" side of the rule above pass it, because being
+ * inside a collection is exactly what put them there. Continue Watching and
+ * History do not: they hold a video and a position, with no collection in hand.
+ * Passing nothing is an ordinary state and simply means no stepper.
  */
-export function playPath(video: LinkableVideo): string {
-  return `/watch/${video.slug}`
+export function playPath(video: LinkableVideo, fromCollectionSlug?: string | null): string {
+  const path = `/watch/${video.slug}`
+  if (!fromCollectionSlug) return path
+
+  return `${path}?from=${encodeURIComponent(fromCollectionSlug)}`
 }
 
 /** Enough of a membership to tell an episode from everything else. */
