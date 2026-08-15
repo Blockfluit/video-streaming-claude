@@ -36,13 +36,14 @@ export const HERO_LIMIT = 5
 /**
  * How long each entry holds the hero.
  *
- * `HeroBackdrop` waits two seconds before its trailer fades in, so this is
- * roughly two seconds of banner and eight of trailer. Much shorter and the
- * entry changes before its trailer has said anything, while opening a YouTube
- * iframe every few seconds. Advancing when a trailer actually *ends* would need
- * the YouTube JS API — `enablejsapi` is set and nothing listens — so a fixed
- * period is the honest version of "then play the next in line", and the pill on
- * the active bullet is the honest picture of it.
+ * `HeroBackdrop` now starts its trailer at once and reveals it the moment the
+ * player confirms, so this is very nearly ten seconds of trailer — it used to be
+ * eight, behind a two-second delay. Much shorter and the entry changes before
+ * its trailer has said anything, while opening a YouTube iframe every few
+ * seconds. Advancing when a trailer actually *ends* would mean tracking the
+ * player's state through the whole entry rather than only until it starts, so a
+ * fixed period stays the honest version of "then play the next in line", and the
+ * pill on the active bullet is the honest picture of it.
  */
 export const ROTATE_MS = 10_000
 

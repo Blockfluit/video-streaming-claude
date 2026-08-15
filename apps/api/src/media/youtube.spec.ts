@@ -111,9 +111,47 @@ describe('youtubeEmbedUrl', () => {
     expect(youtubeEmbedUrl(ID)).toContain('controls=0');
   });
 
+  /**
+   * The trailer dialog is the other caller, and it is the opposite case: someone
+   * asked for this one, so they get a scrubber, a volume slider and fullscreen.
+   *
+   * `showinfo` goes with them. It suppresses the title and share buttons, which
+   * is right when the player is decoration under a page's own heading and wrong
+   * in a dialog whose whole content is the player.
+   */
+  it('can be asked for the player chrome, for a trailer someone opened', () => {
+    const url = youtubeEmbedUrl(ID, { controls: true });
+    expect(url).toContain('controls=1');
+    expect(url).not.toContain('showinfo');
+  });
+
+  // Every existing caller is the hero, and it passes no options at all.
+  it('leaves the chrome off unless asked', () => {
+    const url = youtubeEmbedUrl(ID);
+    expect(url).toContain('controls=0');
+    expect(url).toContain('showinfo=0');
+  });
+
   // Without it the page cannot hear the video end, and the hero keeps a black
   // frame where the banner should have come back.
   it('enables the JS API so the page can hear it finish', () => {
     expect(youtubeEmbedUrl(ID)).toContain('enablejsapi=1');
+  });
+
+  /**
+   * YouTube documents `origin` as going with `enablejsapi`, and the player may
+   * ignore the handshake without it. The hero waits for that handshake before it
+   * reveals anything, so the cost of omitting it is a trailer that never appears
+   * — a silent failure, and the reason this is pinned.
+   */
+  it('names the embedding page when one is given', () => {
+    expect(youtubeEmbedUrl(ID, { origin: 'https://films.example' })).toContain(
+      'origin=https%3A%2F%2Ffilms.example',
+    );
+  });
+
+  // There is no `window` in the API, which is the other caller of this file.
+  it('leaves it out when there is no origin to name', () => {
+    expect(youtubeEmbedUrl(ID)).not.toContain('origin=');
   });
 });

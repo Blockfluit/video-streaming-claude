@@ -150,6 +150,13 @@ const metaLine = computed(() =>
 
 const { isAdmin } = useSession()
 
+/**
+ * Shared between the button that opens the trailer and the hero behind it: the
+ * hero is playing the same video, silently, and leaving it running under an open
+ * dialog is two copies of one trailer for as long as the dialog is up.
+ */
+const trailerOpen = ref(false)
+
 useHead(() => ({ title: video.value?.title ?? 'Library' }))
 </script>
 
@@ -161,7 +168,12 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
       title floating mid-screen with nothing under it. Where there *is* something
       below, it scrolls up from the bottom edge the ordinary way.
     -->
-    <HeroBackdrop :image="videoBanner(video)" size="full" :trailer-id="video.trailerYoutubeId">
+    <HeroBackdrop
+      :image="videoBanner(video)"
+      size="full"
+      :trailer-id="video.trailerYoutubeId"
+      :paused="trailerOpen"
+    >
       <div class="rise max-w-2xl space-y-4">
         <!--
           Every collection holding this video, not a guessed single parent. In
@@ -242,6 +254,15 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
             {{ resumeAt === null ? 'Play' : `Resume from ${timecode(resumeAt)}` }}
           </UButton>
           <AddToListButton :video-id="video.id" :saved="stats?.inMyList" label />
+          <!--
+            Renders nothing when there is no trailer, so the row closes up rather
+            than offering a button that opens an empty dialog.
+          -->
+          <TrailerModal
+            v-model:open="trailerOpen"
+            :trailer-id="video.trailerYoutubeId"
+            :title="video.title"
+          />
           <!--
             Straight to this video's editor, so fixing a title or a marker does
             not mean walking back through the admin library to find the row you
