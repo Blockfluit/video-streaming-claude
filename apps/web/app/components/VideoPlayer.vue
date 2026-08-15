@@ -2,6 +2,12 @@
 /**
  * The player.
  *
+ * It starts on its own. This component exists on one route, and that route is
+ * what a link saying Play, Resume or an episode's name goes to — so the press
+ * that got here is the press that starts it. A refresh or a pasted link plays
+ * for the same reason: `/watch/:slug` is the address of a thing playing, not a
+ * page about one. See `onLoadedMetadata`, where it happens.
+ *
  * Watch time is accumulated from `timeupdate` deltas with **jumps over 2s
  * discarded**, so scrubbing through a film does not report the film as
  * watched. Beats go out every 10s while playing, plus on pause, end and tab
@@ -124,7 +130,7 @@ function onSeeked() {
 }
 
 /**
- * Resumes, rather than offering to.
+ * Resumes, rather than offering to — and then plays.
  *
  * A surface that says "Resume from 12:34" and then opens at 0:00 has not
  * resumed anything, and asking twice for one thing is the tedious half of being
@@ -149,19 +155,44 @@ function onLoadedMetadata() {
   resumeApplied = true
 
   const point = resumePoint(stats.value?.mine?.lastPositionSec, props.durationSec ?? el.duration)
-  if (point === null) return
+  if (point !== null) {
+    el.currentTime = point
+    // `onTimeUpdate` discards jumps over 2s, but this one happens before any
+    // `timeupdate` fires — without it the first beat credits the whole resume
+    // offset as time watched.
+    lastTick = point
+    // The intro and outro overlays read this, and a comment pinned to "now" is
+    // pinned to whatever the parent was last told.
+    currentTime.value = point
+    emit('timeupdate', point)
 
-  el.currentTime = point
-  // `onTimeUpdate` discards jumps over 2s, but this one happens before any
-  // `timeupdate` fires — without it the first beat credits the whole resume
-  // offset as time watched.
-  lastTick = point
-  // The intro and outro overlays read this, and a comment pinned to "now" is
-  // pinned to whatever the parent was last told.
-  currentTime.value = point
-  emit('timeupdate', point)
+    showStartOver.value = true
+  }
 
-  showStartOver.value = true
+  /*
+   * And then it plays.
+   *
+   * Reaching this route is the decision to watch — every way in is a press on
+   * something that says Play, Resume, or an episode's name — so asking a second
+   * time is asking twice for one thing.
+   *
+   * After the resume seek and never before it, which is also why this is a
+   * `play()` call rather than the `autoplay` attribute: the `<video>` and its
+   * `<source>` are in the server-rendered markup, so the attribute would have
+   * the browser open at 0:00 while Vue was still hydrating and only then be
+   * seeked away — a second of the wrong scene, out loud, on every resume.
+   *
+   * Not gated on `prefers-reduced-motion` either. `HeroBackdrop` honours that
+   * setting because its trailer is decoration nobody asked for; this is the
+   * thing the viewer navigated to.
+   */
+  void el.play().catch(() => {
+    // A browser that has not yet decided to trust this origin refuses an
+    // unmuted play it saw no click for, and says so by rejecting here. The
+    // poster and the controls are already on screen, so the refusal costs one
+    // press and nothing else — where muting and playing anyway would start a
+    // film silently, which is the worse of the two failures.
+  })
 }
 
 function dismissOffer() {

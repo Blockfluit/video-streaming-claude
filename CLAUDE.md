@@ -754,6 +754,21 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   top-right is the publish state and quality, and the top-left is My List's remove button — the only way
   off that list, and not worth displacing for a chip.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
+- **The player starts itself from `onLoadedMetadata`, after the resume seek — never with the `autoplay`
+  attribute.** The `<video>` and its `<source>` are server-rendered, so the attribute has the browser open
+  at 0:00 while Vue is still hydrating and only then be seeked to the resume point: a second of the wrong
+  scene, out loud, on every resume. `play()` is attempted once per load, and a browser that refuses an
+  unmuted play it saw no click for rejects it — which is left alone, because the poster and the controls
+  are already on screen and muting instead would start a film silently. Playwright does **not** pass
+  `--autoplay-policy=no-user-gesture-required`, so `playwright.config.ts` does; without it a fresh headless
+  profile refuses, and the test asserting playback fails against working code. Tests about *where a seek
+  lands* call `freeze()` (`e2e/viewer.spec.ts`), which pauses **and** re-pauses on `play`, since the
+  autoplay attempt can settle after a bare `pause()`.
+- **`/watch/:slug` never reaches `networkidle`, so `visit()` cannot open it.** A playing video keeps issuing
+  range requests, so the wait inside `visit` runs until the *test* times out — a hang with no failing
+  assertion to point at the cause. `visitPlayer()` (`e2e/fixtures.ts`) waits for `readyState >= 1` instead,
+  which is what the `networkidle` was standing in for. Any reload of the player page needs the same
+  treatment. (Found by running the suite: the arrival test passed and the hard-load test hung.)
 
 **Frontend** (`apps/web`, in addition to the notes above)
 - **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
