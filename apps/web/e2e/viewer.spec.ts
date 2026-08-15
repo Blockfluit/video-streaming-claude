@@ -1,4 +1,4 @@
-import { expect, expectsRequest, fillStable, test, visit } from './fixtures'
+import { expect, expectsRequest, fillStable, test, visit, visitPlayer } from './fixtures'
 import type { Page } from '@playwright/test'
 
 
@@ -9,6 +9,26 @@ async function withMetadata(page: Page) {
     .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState), { timeout: 20_000 })
     .toBeGreaterThanOrEqual(1)
   return video
+}
+
+/**
+ * Holds the playhead still.
+ *
+ * The player starts on its own, so a test about *where a seek lands* is
+ * otherwise racing playback: by the time an assertion reads `currentTime`, the
+ * film has moved on and the number says as much about the machine's speed as
+ * about the button that was pressed.
+ *
+ * The listener matters as much as the `pause()`. Playing is attempted from
+ * `loadedmetadata`, and that attempt is a promise that can settle *after* this
+ * call — a bare `pause()` would then be undone a moment later, which is the
+ * flake this exists to remove rather than a fix for it.
+ */
+async function freeze(page: Page): Promise<void> {
+  await page.locator('video').evaluate((el: HTMLVideoElement) => {
+    el.addEventListener('play', () => el.pause())
+    el.pause()
+  })
 }
 
 /**
@@ -101,6 +121,44 @@ test.describe('viewer', () => {
     await page.waitForURL(url => url.pathname === videoPage)
     await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
     await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * Arriving at the player is the press that starts it.
+   *
+   * `paused` alone would pass against a player that is stalled rather than
+   * playing — the flag says what was *asked for*, not what is happening — so
+   * the position has to move as well. Both, or this passes while the picture
+   * sits still.
+   */
+  test('the player starts playing on arrival', async ({ page }) => {
+    await startPlaying(page)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
+
+    const at = () => video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    const opened = await at()
+    await expect.poll(at).toBeGreaterThan(opened)
+  })
+
+  /**
+   * And on a hard load, which is a different path and where the *resume* was
+   * once silently skipped: the `<video>` arrives in the server-rendered markup
+   * and the browser starts fetching before Vue hydrates, so `loadedmetadata`
+   * can fire into nothing. Playing is started from that same handler, so it can
+   * be lost the same way and only a real page load can tell.
+   */
+  test('the player starts playing on a hard load of its URL', async ({ page }) => {
+    await startPlaying(page)
+    const url = new URL(page.url()).pathname
+
+    // `visitPlayer`, not `visit`: a page that is streaming never reaches
+    // `networkidle`, so the ordinary helper waits here until the test dies.
+    await visitPlayer(page, url)
+    const video = await withMetadata(page)
+
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
   })
 
   const SEARCH = 'input[placeholder="Search titles, genres and cast"]'
@@ -373,6 +431,10 @@ test.describe('viewer', () => {
       await page.getByRole('link', { name: /^Resume from/ }).click()
       await page.waitForURL(/\/watch\//)
       await withMetadata(page)
+      // This test is about where playback *opens*, not about it running. Left
+      // running, the closing assertion below — that starting over went back to
+      // the beginning — would be measuring how fast this machine plays.
+      await freeze(page)
 
       const currentTime = () =>
         page.locator('video').evaluate((el: HTMLVideoElement) => el.currentTime)
@@ -395,6 +457,7 @@ test.describe('viewer', () => {
        */
       await page.reload()
       await withMetadata(page)
+      await freeze(page)
       await expect.poll(currentTime).toBeGreaterThan(seeded - 2)
 
       /*
@@ -439,6 +502,14 @@ test.describe('viewer', () => {
       // agreeing, which they stop doing the moment the library changes.
       const target = await currentVideoId(page)
       const video = await withMetadata(page)
+      /*
+       * Before the position is read, and this is load-bearing twice over: the
+       * player runs on its own now, so an anchor read from a moving playhead is
+       * stale by the time the marker reaches the API — and the reload below
+       * would then open at whatever the beats had since written, which can be
+       * past the very intro this test is about to define.
+       */
+      await freeze(page)
       const duration = await video.evaluate((el: HTMLVideoElement) => el.duration)
 
       /*
@@ -459,7 +530,12 @@ test.describe('viewer', () => {
         })
       }, { id: target, end: introEnd })
       await page.reload()
-      await page.waitForLoadState('networkidle')
+      // Metadata rather than `networkidle`: this page is streaming, so the
+      // network never falls quiet and waiting for it to would hang until the
+      // test times out. Frozen again on the far side too, or the overlay is a
+      // five-second window that playback closes while the click is being aimed.
+      await withMetadata(page)
+      await freeze(page)
 
       const skip = page.getByRole('button', { name: 'Skip intro' })
       await expect(skip).toBeVisible()
