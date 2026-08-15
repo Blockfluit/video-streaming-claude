@@ -31,8 +31,40 @@ interface VideoDetail {
   collections: Membership[]
 }
 
+/** Only what ordering needs; the rest of the collection's record is not read here. */
+interface CollectionSequence {
+  seasons: { id: string, number: number | null }[]
+  videos: {
+    id: string
+    slug: string
+    title: string
+    seasonId: string | null
+    orderIndex: number | null
+  }[]
+}
+
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
+
+/**
+ * Which collection this was reached through, and therefore which running order
+ * the stepper walks.
+ *
+ * It is in the URL because it cannot be worked out here. A video belongs to any
+ * number of collections and `seasonId`/`orderIndex` are facts about one
+ * membership, so the same episode can be episode 3 of a show and item 1 of a
+ * best-of row; picking one on arrival would be a guess that is wrong about half
+ * the time. The surface that built the link knew, so it says so.
+ *
+ * Absent is an ordinary state — a standalone film, or something opened from
+ * Continue Watching — and simply means no stepper.
+ */
+const from = computed(() => {
+  const query = route.query.from
+  // Repeating a query parameter is legal and gives an array; the first wins.
+  const named = Array.isArray(query) ? query[0] : query
+  return typeof named === 'string' && named.length > 0 ? named : null
+})
 
 const { data: video, error } = await useApiData<VideoDetail>(
   () => `playback-${slug.value}`,
@@ -44,30 +76,73 @@ if (error.value) {
   throw createError({ statusCode: 404, statusMessage: 'No such video', fatal: true })
 }
 
-const primary = computed(() => video.value?.collections?.[0] ?? null)
+/**
+ * The collection this was reached through, for what comes before and after.
+ *
+ * It replaces a read of `GET /videos?collectionId=…`, which cannot answer the
+ * question: that endpoint sorts by title, deliberately, because a video belongs
+ * to any number of collections and a library-wide listing has no single running
+ * order to offer. The old "Next episode" button was therefore the alphabetically
+ * next title, capped at a hundred.
+ *
+ * `lazy`, because this is chrome beside the title and the player is the point of
+ * the page. Blocking the render on a second request would hold up the `<source>`
+ * the browser starts fetching from the server-rendered HTML, which is to say it
+ * would delay playback to draw a button.
+ *
+ * The key is the watch page's own, deliberately **not** the `detail-<slug>` the
+ * collection page uses for this same URL. `useApiData` freezes its key at setup
+ * while `watch` keeps refetching under it, so a move between two collections on
+ * this route would write one collection's episodes into the other's cache entry
+ * — and the collection page would later render the wrong show's list. Sharing
+ * bought a warm ref rather than a skipped request in any case.
+ */
+const { data: collection } = await useApiData<CollectionSequence>(
+  () => `watch-sequence-${from.value ?? 'none'}`,
+  () => `/collections/${encodeURIComponent(from.value!)}`,
+  { watch: [from], immediate: from.value !== null, lazy: true },
+)
+
+/** The collection in the order somebody actually watches it. */
+const sequence = computed(() =>
+  episodeSequence(collection.value?.videos ?? [], collection.value?.seasons ?? []),
+)
 
 /**
- * The rest of the collection, for what "next episode" means. Asked for only
- * when there is a collection to ask about — a standalone film has no next.
+ * Both ends of the step, from one lookup.
+ *
+ * A video that is not in the sequence gets nothing either way — which covers a
+ * `?from=` naming a collection this video is not in (it arrives through the URL,
+ * so anyone can write one), a collection the caller cannot see, and the case
+ * where the response was truncated past its embedded-video cap and this episode
+ * fell the wrong side of the cut. Offering no stepper beats offering a wrong one.
  */
-const { data: siblings } = await useApiData<{
-  items: { id: string, slug: string, title: string }[]
-}>(
-  () => `siblings-${primary.value?.collectionId ?? 'none'}`,
-  () => `/videos?collectionId=${primary.value!.collectionId}&limit=100`,
-  { watch: [primary], immediate: !!primary.value },
+const steps = computed(() => neighbours(sequence.value, video.value?.id ?? ''))
+
+/**
+ * Shown as a pair or not at all, so the row does not gain a control halfway
+ * through a show. One video on its own has nothing to step between.
+ */
+const hasStepper = computed(
+  () => sequence.value.length > 1 && sequence.value.some(entry => entry.id === video.value?.id),
+)
+
+/**
+ * Both links carry the collection on, or taking one step would be the last one
+ * available — the stepper would vanish underneath the person using it.
+ */
+const previousTo = computed(() =>
+  steps.value.previous ? playPath(steps.value.previous, from.value) : null,
 )
 
 /**
  * Next keeps *playing* rather than bouncing through a description. Someone who
- * has reached the outro of episode three has already decided.
+ * has reached the outro of episode three has already decided. This is also what
+ * the player's own outro button follows.
  */
-const nextTo = computed(() => {
-  const ordered = siblings.value?.items ?? []
-  const index = ordered.findIndex(entry => entry.id === video.value?.id)
-  const next = index >= 0 ? ordered[index + 1] : undefined
-  return next ? playPath(next) : null
-})
+const nextTo = computed(() =>
+  steps.value.next ? playPath(steps.value.next, from.value) : null,
+)
 
 /** Back to this video's own page, which is where the cast and synopsis are. */
 const backTo = computed(() => (video.value ? videoPath(video.value) : '/browse'))
@@ -115,11 +190,46 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
           {{ video.state }}
         </UBadge>
         <!--
-          The pair is kept together in one `ml-auto` group rather than pushed
-          apart: with the margin on the first button, a second one lands beside
-          the title and the row reads as two unrelated halves.
+          The controls are kept together in one `ml-auto` group rather than
+          pushed apart: with the margin on the first button, a second one lands
+          beside the title and the row reads as two unrelated halves.
         -->
         <div class="ml-auto flex items-center gap-2">
+          <!--
+            Stepping through the collection this was reached through.
+
+            Rendered as a pair and kept in place at the ends rather than
+            disappearing: a control that vanishes at the last episode moves
+            everything beside it, and the row you were aiming at shifts under
+            the pointer. Disabled says "this is the end of the show", which is
+            worth knowing; absent says nothing at all.
+
+            No `to` when there is nowhere to go, so this is a real disabled
+            `<button>` rather than a link that still navigates.
+          -->
+          <template v-if="hasStepper">
+            <UButton
+              :to="previousTo ?? undefined"
+              :disabled="!previousTo"
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-chevron-left"
+              aria-label="Previous episode"
+            >
+              Previous
+            </UButton>
+            <UButton
+              :to="nextTo ?? undefined"
+              :disabled="!nextTo"
+              color="neutral"
+              variant="subtle"
+              trailing-icon="i-lucide-chevron-right"
+              aria-label="Next episode"
+            >
+              Next
+            </UButton>
+          </template>
+
           <!-- Everything worth reading about this video is one click away. -->
           <UButton :to="backTo" color="neutral" variant="subtle" icon="i-lucide-info">
             Details

@@ -731,6 +731,30 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   case. `videoPath` was called
   `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
   that; every bug here is "which of the two did I call", so the names have to point at their own routes.
+- **The player's Previous/Next are scoped by `?from=<collection-slug>`, which `playPath` takes as an
+  optional second argument.** It has to travel in the URL: a video belongs to any number of collections and
+  `seasonId`/`orderIndex` sit on the *membership*, so the same episode is episode 3 of a show and item 1 of
+  a best-of row, and the player cannot derive one running order from the video alone. Reaching for
+  `collections[0]` is the tempting fix and is wrong for anything in two collections. Every surface on the
+  "plays" side of the rule above passes it; Continue Watching and History do not, because they hold a video
+  and a position with no collection in hand, and no stepper is the honest answer there.
+- **`GET /videos?collectionId=…` is sorted by `title, id` and is not an episode order.** That is deliberate
+  — a library-wide listing has no single running order to offer — and reading a sequence off it is how the
+  outro's "Next episode" spent months going to the alphabetically next title, capped at 100. The order comes
+  from `GET /collections/:slug`, through `episodeSequence` in `app/utils/episode-sequence.ts`.
+- **`MEMBERSHIP_ORDER` is not cross-season order either.** It opens `{ seasonId: 'asc' }` and `seasonId` is
+  a **cuid**, so the videos arrive grouped by season with the seasons in an order nobody chose. It is a
+  *total* order for paging, which is a different job. Season numbers are on the response's separate
+  `seasons` list, which is why `episodeSequence` takes both halves. Invisible on the collection page, which
+  renders one season at a time and never compares two.
+- **`episodeSequence`/`neighbours` are not a second `nextEpisode`, and must not become one.** `nextEpisode`
+  (the API's, and the only definition of it) answers *where to resume* — the first unfinished episode — and
+  has no mirror. This answers *what physically follows*, which is the only thing a Previous and a Next
+  button can mean, because pressing one then the other has to return you where you were. A surface wanting
+  "carry on watching this show" wants the API's answer, not this one.
+- A video that is not in the sequence gets **no stepper**, which is one answer covering a `?from=` naming a
+  collection it is not in (the URL is writable by anyone), one the caller cannot see, and a response
+  truncated past its embedded-video cap. Offering nothing beats offering a wrong neighbour.
 - **`browse.vue` lists collections *and* films**, merged into one grid. It listed only collections, so a
   film could never appear there however often it was published — a folder of eight films is one shelf, and
   the films are *on* it rather than on none. Reported twice: "I published it and browse does not show it",
@@ -860,6 +884,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
   measured by painting the colours on a canvas — Chromium returns `oklab()` for anything from the Tailwind
   palette, and parsing that as `rgb()` silently reports every ratio as ~1.
+- **The audit skips the contrast of anything under `0.99` effective opacity**, so every *disabled* control
+  in the app is invisible to it — `@nuxt/ui` dims those to `0.75`. That is the right call (a disabled
+  control is deliberately quiet, and 0.75 still clears the `0.35` invisible-control floor), but it means a
+  green audit says nothing about a disabled state. Judge those by eye.
+- **A control that only renders in some states is only audited in those states.** The player's Previous/Next
+  need `?from=` in the URL, and the audit's player test arrives by clicking Play on a video picked by title
+  — which may be in no collection at all. The controls were therefore absent exactly when the audit ran, so
+  a second test addresses a collection-scoped player directly. A control that is never on screen when the
+  audit walks the page has not been judged by it, and the audit cannot tell you that.
 - Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
   silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
   the first character typed into a search box.

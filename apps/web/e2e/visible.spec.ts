@@ -291,6 +291,44 @@ test.describe('legibility', () => {
   })
 
   /**
+   * The player's episode stepper, which the test above cannot reach.
+   *
+   * Previous and Next only render when the URL names the collection the video
+   * was reached through, and that test arrives at the player by clicking Play
+   * on a video picked purely by title — which may be in no collection at all.
+   * So the controls were absent exactly when the audit ran, and a control that
+   * is never on screen when the audit walks the page has not been judged by it.
+   *
+   * Addressed directly rather than by clicking through, so the collection is
+   * chosen from the data and the stepper is provably present. Which of the two
+   * is disabled does not matter here — the audit is looking at colour.
+   */
+  test('the player\'s episode stepper too', async ({ page }) => {
+    await visit(page, '/browse')
+    const target = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        const videos = detail.videos ?? []
+        if (videos.length > 1) return `/watch/${videos[0].slug}?from=${collection.slug}`
+      }
+      return null
+    })
+    test.skip(target === null, 'no collection here holds two videos')
+
+    await visit(page, target!)
+    // By label, so this holds whichever end of the sequence we landed on.
+    await expect(page.getByLabel('Next episode')).toBeVisible()
+    await expect(page.getByLabel('Previous episode')).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `stepper:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
+  /**
    * The account panel, which is on every page and on none of them.
    *
    * It is closed until clicked and Reka teleports it to `<body>`, so walking
