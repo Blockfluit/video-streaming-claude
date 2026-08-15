@@ -76,6 +76,9 @@ describe('Subtitle search (real database)', () => {
       async download() {
         return { bytes: Buffer.from(SRT, 'utf8'), format: 'srt' };
       },
+      async quota() {
+        return { remaining: 18, allowed: 20 };
+      },
       ...overrides,
     } as SubtitleProvider;
   }
@@ -248,6 +251,10 @@ describe('Subtitle search (real database)', () => {
       const response = await admin.get('/subtitles/search/status').expect(200);
       expect(response.body).toEqual({ configured: false });
     });
+
+    it('has no allowance to report either', async () => {
+      await admin.get('/subtitles/search/quota').expect(503);
+    });
   });
 
   describe('installing a candidate', () => {
@@ -391,6 +398,42 @@ describe('Subtitle search (real database)', () => {
     it('will not let a signed-out caller search', async () => {
       const id = await ingestOne();
       await http().get(`/videos/${id}/subtitle-candidates?language=en`).expect(401);
+    });
+  });
+
+  describe('the download allowance', () => {
+    it('reports what is left today', async () => {
+      const response = await admin.get('/subtitles/search/quota').expect(200);
+
+      expect(response.body).toEqual({ quota: { remaining: 18, allowed: 20 } });
+    });
+
+    /**
+     * Wrapped rather than bare: a handler returning `null` sends an empty 200
+     * body, and the picker could not then tell "this server has no such number"
+     * from "the response went missing".
+     */
+    it('says so explicitly when there is no such number', async () => {
+      provider = stubProvider({ async quota() { return null; } });
+      await app.close();
+      await startApp();
+      admin = request.agent(app.getHttpServer());
+      await admin.post('/auth/login').send({ username: 'ada', password: PASSWORD }).expect(200);
+
+      const response = await admin.get('/subtitles/search/quota').expect(200);
+
+      expect(response.body).toEqual({ quota: null });
+    });
+
+    it('is shut to a USER, like the rest of it', async () => {
+      const invite = await admin.post('/admin/invites').send({ role: 'USER' }).expect(201);
+      const viewer = request.agent(app.getHttpServer());
+      await viewer
+        .post('/auth/redeem')
+        .send({ token: invite.body.token, username: 'grace', password: PASSWORD })
+        .expect(201);
+
+      await viewer.get('/subtitles/search/quota').expect(403);
     });
   });
 

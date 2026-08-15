@@ -684,6 +684,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   upstream body is logged and never rendered.
 - The provider is injected behind `SUBTITLE_PROVIDER`, which is also the seam the db suite replaces —
   talking to opensubtitles.com in a test would be testing their uptime.
+- The download allowance (`GET /infos/user`) belongs to the **account**, not the key, so a server holding a
+  key and no account has **no such number** — `quota()` returns `null` there, and `quotaNotice` renders
+  nothing. `null` and `0` are different answers: "0 of 0 left" would tell an admin they had spent something
+  they never had and send them waiting for a reset that never comes. At zero the install buttons are
+  *disabled* rather than left to fail, because the refusal otherwise arrives from a machine the admin has
+  never heard of.
+- The quota route is wrapped as `{ quota }` rather than returned bare: a handler returning `null` sends an
+  empty 200 body, and the picker could not then tell "no such number" from "the response went missing".
+- Reading the allowance again after a download is a **re-read, not a decrement**. The account is shared with
+  anything else using it, so local arithmetic drifts from the truth the first time it is.
 
 **Data**
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added

@@ -16,7 +16,7 @@ import { languageName } from '../common/language';
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { osdbHashOfFile } from './providers/hash';
-import { SUBTITLE_PROVIDER, type SubtitleProvider } from './providers/provider';
+import { SUBTITLE_PROVIDER, type SubtitleProvider, type SubtitleQuota } from './providers/provider';
 import { searchTermsFor } from './providers/search-terms';
 import { SubtitlesService } from './subtitles.service';
 
@@ -116,6 +116,19 @@ export class SubtitleSearchService {
     }
 
     return toPage(candidates, candidates.length, { limit: MAX_SUBTITLE_CANDIDATES, offset: 0 });
+  }
+
+  /**
+   * What is left of today's download allowance.
+   *
+   * Its own call rather than a field on the search response: the picker wants
+   * this the moment it opens, before anyone has searched for anything, and a
+   * search that also reported a quota would have to make this call whether or
+   * not the screen asking for it was interested.
+   */
+  quota(): Promise<SubtitleQuota | null> {
+    this.assertConfigured();
+    return this.provider.quota();
   }
 
   /** Downloads the chosen candidate and installs it as a track on the video. */

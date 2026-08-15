@@ -172,6 +172,54 @@ describe('OpenSubtitlesClient', () => {
     });
   });
 
+  describe('quota', () => {
+    it('reports what the account has left today', async () => {
+      const fetchImpl = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/login')) return jsonResponse({ token: 'jwt-token' });
+        return jsonResponse({
+          data: { allowed_downloads: 20, downloads_count: 2, remaining_downloads: 18 },
+        });
+      });
+      const client = clientWith(CONFIGURED, fetchImpl);
+
+      await expect(client.quota()).resolves.toEqual({ remaining: 18, allowed: 20 });
+
+      const [url, init] = fetchImpl.mock.calls[1] as FetchArgs;
+      expect(url).toContain('/infos/user');
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer jwt-token');
+    });
+
+    it('is null with a key but no account, rather than zero', async () => {
+      // Searching works on the key alone. Reporting "0 of 0" there would read as
+      // an exhausted allowance instead of an account that was never configured.
+      const client = clientWith({ OPENSUBTITLES_API_KEY: 'test-key' }, jest.fn());
+
+      await expect(client.quota()).resolves.toBeNull();
+    });
+
+    it('reads a used-up allowance as zero, not as missing', async () => {
+      const fetchImpl = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/login')) return jsonResponse({ token: 'jwt-token' });
+        return jsonResponse({
+          data: { allowed_downloads: 20, downloads_count: 20, remaining_downloads: 0 },
+        });
+      });
+      const client = clientWith(CONFIGURED, fetchImpl);
+
+      await expect(client.quota()).resolves.toEqual({ remaining: 0, allowed: 20 });
+    });
+
+    it('is null when the response omits the numbers', async () => {
+      const fetchImpl = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/login')) return jsonResponse({ token: 'jwt-token' });
+        return jsonResponse({ data: { level: 'Sub leecher' } });
+      });
+      const client = clientWith(CONFIGURED, fetchImpl);
+
+      await expect(client.quota()).resolves.toBeNull();
+    });
+  });
+
   describe('download', () => {
     it('logs in for a token, then fetches the link the API hands back', async () => {
       const fetchImpl = jest

@@ -79,6 +79,35 @@ const languageItems = computed(() =>
 const language = ref<{ label: string, value: string }>({ label: 'English', value: 'en' })
 
 /**
+ * Today's remaining downloads.
+ *
+ * The free allowance is about twenty a day, which is small enough that reaching
+ * it is an ordinary afternoon — so it is worth saying before somebody clicks
+ * rather than after. Null means this server has no such number (it can search
+ * but has no account), which is different from an allowance of nothing; that
+ * distinction lives in `quotaNotice`, where it is tested.
+ */
+const quota = ref<SubtitleQuota | null>(null)
+const notice = computed(() => quotaNotice(quota.value))
+
+/**
+ * Failing quietly, deliberately. The allowance is an aside; if reading it goes
+ * wrong the picker still works, and an error toast about a number nobody asked
+ * for would be noise on top of whatever actually broke.
+ */
+async function readQuota() {
+  try {
+    const response = await api<{ quota: SubtitleQuota | null }>('/subtitles/search/quota')
+    quota.value = response.quota
+  }
+  catch {
+    quota.value = null
+  }
+}
+
+const exhausted = computed(() => notice.value?.exhausted === true)
+
+/**
  * Reset on every open. Left alone, the dialog reopens showing the results of the
  * last search, which reads as results for this video.
  */
@@ -87,6 +116,7 @@ watch(finding, (open) => {
   results.value = []
   searched.value = false
   query.value = ''
+  void readQuota()
   void search()
 })
 
@@ -124,6 +154,10 @@ async function install(candidate: SubtitleCandidate) {
     finding.value = false
     await refresh()
     toast.add({ title: 'Subtitle added', color: 'success' })
+    // One fewer than a moment ago. Re-read rather than decrement: the allowance
+    // is shared with anything else using this account, so our arithmetic would
+    // drift from the truth the first time it was.
+    void readQuota()
   }
   catch (error) {
     toast.add({ title: apiMessage(error, 'Could not add that subtitle'), color: 'error' })
@@ -302,6 +336,19 @@ function openFinder() {
             </UButton>
           </form>
 
+          <!--
+            Only when there is a number to show. A server that can search but
+            has no account has no allowance, and inventing "0 of 0" for it would
+            read as exhausted rather than absent.
+          -->
+          <p
+            v-if="notice"
+            class="text-sm"
+            :class="notice.exhausted ? 'text-(--ui-text)' : 'text-(--ui-text-muted)'"
+          >
+            {{ notice.text }}
+          </p>
+
           <ul v-if="results.length" class="divide-y divide-(--ui-border)">
             <li
               v-for="candidate in results"
@@ -323,12 +370,19 @@ function openFinder() {
                   <span v-if="candidate.hearingImpaired">SDH</span>
                 </div>
               </div>
+              <!--
+                Disabled once the allowance is gone, rather than left clickable
+                to fail: the refusal comes back from a machine the admin has
+                never heard of, and one they can see coming reads very
+                differently from one they cannot.
+              -->
               <UButton
                 size="xs"
                 color="neutral"
                 variant="subtle"
                 :loading="installing === candidate.fileId"
-                :disabled="installing !== null"
+                :disabled="installing !== null || exhausted"
+                :title="exhausted ? 'No downloads left today' : undefined"
                 @click="install(candidate)"
               >
                 Use this

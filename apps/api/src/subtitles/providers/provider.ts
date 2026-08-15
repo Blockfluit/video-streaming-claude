@@ -28,6 +28,18 @@ export interface SubtitleQuery {
   episodeNumber?: number;
 }
 
+/**
+ * How much of today's download allowance is left.
+ *
+ * Worth surfacing because the free allowance is small enough that reaching it
+ * is an ordinary afternoon, and a refusal an admin can see coming is a very
+ * different experience from one they cannot.
+ */
+export interface SubtitleQuota {
+  remaining: number;
+  allowed: number;
+}
+
 export interface DownloadedSubtitle {
   bytes: Buffer;
   /** `srt`, `vtt`, `ass`, … — decides whether the install path has to convert. */
@@ -49,6 +61,15 @@ export interface SubtitleProvider {
   search(query: SubtitleQuery): Promise<SubtitleCandidate[]>;
 
   download(fileId: string): Promise<DownloadedSubtitle>;
+
+  /**
+   * Today's remaining downloads, or `null` when there is no such number.
+   *
+   * Null rather than zero when the server is configured to search but not to
+   * download: nothing has been spent and nothing is left, and reporting "0 of 0"
+   * would read as an exhausted allowance rather than an absent account.
+   */
+  quota(): Promise<SubtitleQuota | null>;
 }
 
 /** Nest injection token — the interface is a type and cannot be one itself. */

@@ -34,6 +34,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { listLanguages } from '../common/language';
 import { validate } from '../common/zod-validation.pipe';
+import type { SubtitleQuota } from './providers/provider';
 import { VideosService } from '../videos/videos.service';
 import { SubtitleSearchService } from './subtitle-search.service';
 import { SubtitlesService } from './subtitles.service';
@@ -117,6 +118,25 @@ export class SubtitlesController {
   @Roles('ADMIN')
   searchStatus(): { configured: boolean } {
     return { configured: this.search.isConfigured };
+  }
+
+  /**
+   * How many downloads today's allowance has left.
+   *
+   * Throttled like the other outbound calls — it is a request to another server,
+   * however cheap, and a screen that polled it would spend somebody else's
+   * budget.
+   *
+   * Wrapped in an object rather than returned bare, because a handler returning
+   * `null` sends an empty 200 body: the caller then cannot tell "this server has
+   * no such number" from "something ate the response". A server configured to
+   * search but not to download is the former.
+   */
+  @ThrottleExpensive()
+  @Get('subtitles/search/quota')
+  @Roles('ADMIN')
+  async searchQuota(): Promise<{ quota: SubtitleQuota | null }> {
+    return { quota: await this.search.quota() };
   }
 
   /**

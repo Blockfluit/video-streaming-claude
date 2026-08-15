@@ -2,7 +2,12 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MAX_SUBTITLE_CANDIDATES, type SubtitleCandidate } from '@video/shared';
 
-import type { DownloadedSubtitle, SubtitleProvider, SubtitleQuery } from './provider';
+import type {
+  DownloadedSubtitle,
+  SubtitleProvider,
+  SubtitleQuery,
+  SubtitleQuota,
+} from './provider';
 
 /**
  * OpenSubtitles, over the REST API.
@@ -99,6 +104,35 @@ export class OpenSubtitlesClient implements SubtitleProvider {
       .slice(0, MAX_SUBTITLE_CANDIDATES);
   }
 
+  /**
+   * Today's allowance, straight from the account.
+   *
+   * Needs the login token, not just the key — the allowance belongs to the
+   * account rather than to the consumer, which is why a search-only server has
+   * no number to report rather than a zero.
+   */
+  async quota(): Promise<SubtitleQuota | null> {
+    if (!this.hasAccount) return null;
+
+    const token = await this.authenticate();
+    const response = await this.fetchWithTimeout(`${BASE_URL}/infos/user`, {
+      headers: { ...this.headers(), Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw this.errorFor(response.status, await safeBody(response));
+
+    const body = (await response.json()) as {
+      data?: { remaining_downloads?: number; allowed_downloads?: number };
+    };
+    const remaining = body?.data?.remaining_downloads;
+    const allowed = body?.data?.allowed_downloads;
+
+    // Null rather than a guess: a made-up allowance shown as fact is worse than
+    // no indicator, because the admin would plan around it.
+    if (typeof remaining !== 'number' || typeof allowed !== 'number') return null;
+
+    return { remaining, allowed };
+  }
+
   async download(fileId: string): Promise<DownloadedSubtitle> {
     const link = await this.requestDownloadLink(fileId);
 
@@ -142,6 +176,14 @@ export class OpenSubtitlesClient implements SubtitleProvider {
     }
 
     return { url: body.link, fileName: body.file_name ?? null };
+  }
+
+  /** Searching needs only the key; downloading and the allowance need the account. */
+  private get hasAccount(): boolean {
+    return Boolean(
+      this.config.get<string>('OPENSUBTITLES_USERNAME') &&
+        this.config.get<string>('OPENSUBTITLES_PASSWORD'),
+    );
   }
 
   private async authenticate(): Promise<string> {

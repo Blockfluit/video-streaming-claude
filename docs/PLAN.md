@@ -802,7 +802,7 @@ All routes require an authenticated session except `POST /auth/login` and `POST 
 | Videos | `GET /videos` (filters: `state`, `collectionId`, `q`, `tag`) · `GET /videos/:id` · `POST /videos/upload` · `PATCH/DELETE /videos/:id` · `POST /videos/:id/publish\|archive\|reprobe` · `PATCH /videos/:id/markers` |
 | Thumbnails | `POST /videos/:id/thumbnail` · `POST /videos/:id/thumbnail/capture` · `DELETE /videos/:id/thumbnail` |
 | Subtitles | `GET /videos/:id/subtitles` · `GET /videos/:id/subtitles/:sid.vtt` · `POST /videos/:id/subtitles` (manual upload) · `PATCH/DELETE /subtitles/:id` |
-| Subtitle search | `GET /subtitles/search/status` · `GET /subtitles/languages` · `GET /videos/:id/subtitle-candidates` · `POST /videos/:id/subtitles/fetch` — all ADMIN, all 503 without a provider key |
+| Subtitle search | `GET /subtitles/search/status` · `GET /subtitles/languages` · `GET /subtitles/search/quota` · `GET /videos/:id/subtitle-candidates` · `POST /videos/:id/subtitles/fetch` — all ADMIN, all 503 without a provider key |
 | Streaming | `GET /videos/:id/stream` (Range) · `GET /videos/:id/thumbnail` · `GET /collections/:id/poster` |
 | Conversion | `POST /videos/:id/convert` · `POST /videos/:id/extract-subtitles` · `DELETE /videos/:id/source` |
 | Jobs | `GET /admin/jobs` (filter `status`, `videoId`) · `GET /admin/jobs/:id` · `POST /admin/jobs/:id/cancel` · `POST /admin/jobs/:id/retry` |
