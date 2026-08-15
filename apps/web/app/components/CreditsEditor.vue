@@ -57,7 +57,7 @@ const { data, refresh } = await useApiData<Page<Credit>>(
 // Straight off the shared enum, so a role added to the schema appears here
 // without a second list to keep in step.
 const ROLES = creditRoleSchema.options.map(role => ({
-  label: role.charAt(0) + role.slice(1).toLowerCase(),
+  label: roleLabel(role),
   value: role,
 }))
 
@@ -99,11 +99,18 @@ const shown = computed(() => {
   )
 })
 
-function roleLabel(credit: Credit): string {
-  const name = credit.role.charAt(0) + credit.role.slice(1).toLowerCase()
+/**
+ * What to call one row.
+ *
+ * Deliberately not named `roleLabel`: that is the shared helper in
+ * `app/utils/credits.ts` this delegates to, and a local binding of the same
+ * name would shadow the auto-import — turning the call below into a recursive
+ * one rather than a compile error.
+ */
+function creditLabel(credit: Credit): string {
   // The job title is what distinguishes two OTHER credits, so it wins the label
   // where there is one.
-  return credit.jobTitle && credit.role === 'OTHER' ? credit.jobTitle : name
+  return credit.jobTitle && credit.role === 'OTHER' ? credit.jobTitle : roleLabel(credit.role)
 }
 
 /**
@@ -274,7 +281,7 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
         <div class="min-w-0 grow">
           <p class="truncate text-sm font-medium">{{ credit.person.name }}</p>
           <p class="truncate text-xs text-(--ui-text-muted)">
-            {{ roleLabel(credit) }}
+            {{ creditLabel(credit) }}
             <span v-if="credit.characterName">— {{ credit.characterName }}</span>
           </p>
         </div>

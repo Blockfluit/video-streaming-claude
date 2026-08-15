@@ -43,10 +43,9 @@ const expanded = ref(false)
  */
 const TOP_BILLED = 8
 
-/** Sentence case from the enum, so a new role needs no change here. */
-function roleLabel(role: string): string {
-  return role.charAt(0) + role.slice(1).toLowerCase()
-}
+// `roleLabel` lives in `app/utils/credits.ts` — this panel, the credits editor
+// and a person's own page all sentence-case a role, and three copies of one
+// line is how they drift.
 
 const all = computed(() => data.value?.items ?? [])
 
@@ -115,7 +114,18 @@ const groups = computed(() => {
           <span
             class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
           >
-            <span class="font-medium">{{ credit.person.name }}</span>
+            <!--
+              A name is the way to that person's filmography.
+
+              Underlined on hover rather than tinted: an accent colour is how
+              this app *marks* things, never how it sets type, and saturated
+              red on a raised surface reads badly at this size however well it
+              scores. The focus ring is the browser's own, left alone.
+            -->
+            <NuxtLink
+              :to="`/people/${credit.person.slug}`"
+              class="rounded-sm font-medium hover:underline focus-visible:underline"
+            >{{ credit.person.name }}</NuxtLink>
             <span v-if="credit.characterName" class="text-(--ui-text-muted)">
               as {{ credit.characterName }}
             </span>
@@ -133,7 +143,20 @@ const groups = computed(() => {
         <template v-for="(group, index) in headline" :key="group.label">
           <span v-if="index > 0" aria-hidden="true">{{ ' · ' }}</span>
           <span>{{ group.label }}</span>
-          <span class="text-(--ui-text-toned)">{{ ` ${group.names.join(', ')}` }}</span>
+          <!--
+            The names are links now, so the comma-joining moved out of
+            `join(', ')` and into a loop — and the separators between them are
+            subject to exactly the same trimming as the ones between groups,
+            which is why they are interpolated too rather than typed as
+            whitespace between the tags.
+          -->
+          <template v-for="(person, place) in group.people" :key="person.slug">
+            <span>{{ place > 0 ? ', ' : ' ' }}</span>
+            <NuxtLink
+              :to="`/people/${person.slug}`"
+              class="rounded-sm text-(--ui-text-toned) hover:underline focus-visible:underline"
+            >{{ person.name }}</NuxtLink>
+          </template>
           <span v-if="group.more">{{ ` and ${group.more} more` }}</span>
         </template>
       </p>
@@ -149,7 +172,18 @@ const groups = computed(() => {
             <span
               class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
             >
-              <span class="font-medium">{{ credit.person.name }}</span>
+              <!--
+              A name is the way to that person's filmography.
+
+              Underlined on hover rather than tinted: an accent colour is how
+              this app *marks* things, never how it sets type, and saturated
+              red on a raised surface reads badly at this size however well it
+              scores. The focus ring is the browser's own, left alone.
+            -->
+            <NuxtLink
+              :to="`/people/${credit.person.slug}`"
+              class="rounded-sm font-medium hover:underline focus-visible:underline"
+            >{{ credit.person.name }}</NuxtLink>
               <span v-if="credit.characterName" class="text-(--ui-text-muted)">
                 as {{ credit.characterName }}
               </span>
