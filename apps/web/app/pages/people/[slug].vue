@@ -36,17 +36,22 @@ interface PersonDetail {
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
 
-const { data: person, error } = await useApiData<PersonDetail>(
+const { data: person, error, status } = await useApiData<PersonDetail>(
   () => `person-${slug.value}`,
   () => `/people/${encodeURIComponent(slug.value)}`,
-  { watch: [slug] },
+  { watch: [slug], lazy: true },
 )
 
 // A slug nobody holds is a 404, the same call `/v/:slug` makes. Rendering an
 // empty page instead would read as "this person has no credits yet".
-if (error.value) {
-  throw createError({ statusCode: 404, statusMessage: 'No such person', fatal: true })
-}
+//
+// In a watcher rather than in setup, and `showError` rather than a throw: under
+// `lazy` the request has not been made when setup runs, so `error` is null here
+// and the throw would never fire. `immediate` keeps the server behaving as it
+// did, where the fetch blocks and the error is already set.
+watch(error, (failure) => {
+  if (failure) showError({ statusCode: 404, statusMessage: 'No such person', fatal: true })
+}, { immediate: true })
 
 /** Grouped by role, in the server's order. Pure and specced — see `credits.ts`. */
 const groups = computed(() => filmography(person.value?.credits ?? []))
@@ -109,5 +114,24 @@ useHead(() => ({ title: person.value?.name ?? 'Person' }))
     <p v-if="groups.length === 0" class="py-20 text-center text-(--ui-text-muted)">
       No credits recorded yet.
     </p>
+  </div>
+
+  <!-- The name and the filmography under it, in outline. -->
+  <div
+    v-else-if="status !== 'success'"
+    class="page-shell space-y-8 pt-24 pb-16"
+    role="status"
+    aria-label="Loading this person"
+  >
+    <div class="space-y-3">
+      <div class="skeleton h-3 w-28" />
+      <div class="skeleton h-10 w-72" />
+      <div class="skeleton h-4 w-full max-w-2xl" />
+    </div>
+
+    <div class="space-y-3">
+      <div class="skeleton h-6 w-32" />
+      <SkeletonPosterGrid :count="6" />
+    </div>
   </div>
 </template>

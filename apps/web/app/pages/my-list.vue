@@ -39,7 +39,16 @@ interface SavedItem {
 const api = useApi()
 const toast = useToast()
 
-const { data, refresh } = await useApiData<Page<SavedItem>>('my-list', '/me/watchlist?limit=100')
+/*
+ * `lazy` so the page paints straight away on a client-side navigation instead
+ * of leaving the previous screen frozen. A hard load is unaffected — the server
+ * still awaits this and still renders the list into the HTML.
+ */
+const { data, refresh, status } = await useApiData<Page<SavedItem>>(
+  'my-list',
+  '/me/watchlist?limit=100',
+  { lazy: true },
+)
 const items = ref<SavedItem[]>([])
 watchEffect(() => {
   items.value = data.value?.items ?? []
@@ -113,6 +122,16 @@ useHead({ title: 'My List' })
           @click="remove(item)"
         />
       </div>
+    </div>
+
+    <!--
+      On `status`, not on `items`. This page renders from a local ref so a
+      removal can be optimistic, and that ref starts empty — so an `items`-based
+      test cannot tell "not fetched yet" from "nothing saved", which is exactly
+      the distinction the placeholder is here to draw.
+    -->
+    <div v-else-if="status !== 'success'" role="status" aria-label="Loading your list">
+      <SkeletonPosterGrid />
     </div>
 
     <p v-else class="py-20 text-center text-(--ui-text-muted)">

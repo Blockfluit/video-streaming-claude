@@ -985,6 +985,43 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   request and no results, so a page that destructures only `{ data }` renders an outage as "No rows yet" or
   "Nothing here yet" — which sends whoever reads it looking in entirely the wrong place. Take `error` too
   and check it **before** the empty state.
+- The **same rule applies while a request is still out**, which is what the skeletons are for. Viewer pages
+  pass `{ lazy: true }` so a client-side navigation paints at once instead of leaving the previous screen
+  frozen — and the moment they do, "no data yet" and "no data" become the same `null` again. The branch order
+  is **error → content → skeleton → empty**: content before the skeleton so a refetch (browse's filters,
+  requests' status) keeps the rows already on screen rather than collapsing them to placeholders, and the
+  empty state last so it is only reached once the request has genuinely succeeded with nothing in it.
+- Test that with `status !== 'success'`, **never `status === 'pending'`**. `status` is initialised to `idle`
+  and only becomes `pending` when the fetch actually starts (`asyncData.js` lines 309, 330), and under `lazy`
+  the fetch is deferred to `onBeforeMount` — so on the one frame the placeholder exists to fill, `pending` is
+  false. `pendingWhenIdle` defaults to false in Nuxt 4, so the `pending` ref is merely that same comparison.
+- **`lazy: true` costs SSR nothing** — checked in `node_modules/nuxt/dist/app/composables/asyncData.js` and
+  worth not re-deriving. The server branch (lines 85–91) calls `initialFetch()` and registers
+  `onServerPrefetch` **without consulting `lazy`**; only `server: false` would skip it. So a hard load still
+  blocks and still ships the real content, hydration reads it from the payload with `status` already
+  `success` (line 108), and only a client-side navigation sees a placeholder. The `await` at each call site
+  can stay: `useAsyncData` always returns a thenable, but under `lazy` on the client the underlying promise
+  does not exist yet, so it settles on the next microtask rather than on the network.
+- A fetch that decides **what a URL is** stays blocking. `c/[collection]/[...path]`'s `resolve` answers 404
+  and 301s a shared collection link to the video's own page; painting an episode grid and then redirecting
+  out of it is worse than the pause. Its second request only fills a page that resolve has already committed
+  to, so that is the one that goes `lazy`.
+- Making a primary fetch `lazy` **breaks a `throw createError` in setup**, silently. `error` is null there
+  because the request has not been made, so the throw never fires and a missing record renders the page's own
+  fallback instead of Nuxt's error page. Move it to `watch(error, …, { immediate: true })` calling
+  `showError` — outside setup there is nothing left to throw to, and `immediate` covers the server, where the
+  fetch does block and the error is already present.
+- **Do not use `USkeleton`.** It hardcodes `role="alert"`, `aria-live="polite"` and `aria-label="loading"` on
+  every instance with no prop to disable them, so a grid of twenty placeholders is twenty live regions all
+  announcing themselves — the same trap as `USelectMenu`'s built-in `aria-label` shadowing its visible text.
+  Its theme resolves to exactly the three declarations `.skeleton` carries in `main.css`, so nothing is given
+  up; the skeleton components put **one** `role="status"` on the container instead.
+- A skeleton is a textless, non-interactive `<div>` with a solid `background-color`. Never a gradient
+  shimmer: `visible.spec.ts` stops resolving a backdrop at the first `background-image` and returns null,
+  which silently exempts that element **and every descendant** from the border and text-contrast checks — a
+  shimmer buys a green audit by blinding it. Never an `<a>`/`<button>` either, which the audit *does* check
+  for an effective opacity below 0.35. And the pulse is decoration: the global reduced-motion reset stops it,
+  so the resting colour has to read as a placeholder on its own.
 - **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every control
   on the page cleared AA — the worst was 5.78:1 and the `Edit` buttons measured 6.19:1. The formula weights
   red at 0.2126, so saturated red text on near-black scores well and reads badly at 12–14px. The fix was to
