@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   collectionPath,
+  detailsPath,
   imdbPersonUrl,
   imdbTitleUrl,
   personPath,
@@ -79,6 +80,70 @@ describe('playPath', () => {
 
   it('has a link for a video that belongs to no collection', () => {
     expect(playPath({ slug: 'orphan' })).toBe('/watch/orphan')
+  })
+})
+
+/**
+ * Which of the two description pages the *player* sends you to.
+ *
+ * The whole distinction is `seasonId`. An episode is described by its series;
+ * everything else is described by its own page, which is a real page and one a
+ * collection does not repeat.
+ */
+describe('detailsPath', () => {
+  const episode = {
+    slug: 'pilot',
+    collections: [{ seasonId: 'season-1', collection: { slug: 'the-big-sky' } }],
+  }
+
+  it('sends an episode to its series', () => {
+    expect(detailsPath(episode)).toBe('/c/the-big-sky')
+  })
+
+  /**
+   * A film in a saga keeps its own page. The collection holding it is a shelf of
+   * films, not a season list, and none of the synopsis, cast or certification on
+   * `/v/:slug` appears there — sending a film to it loses everything it was
+   * pressed for.
+   */
+  it('leaves a film in a collection on its own page', () => {
+    expect(detailsPath({
+      slug: 'deathly-hallows',
+      collections: [{ seasonId: null, collection: { slug: 'harry-potter' } }],
+    })).toBe('/v/deathly-hallows')
+  })
+
+  it('leaves a standalone film on its own page', () => {
+    expect(detailsPath({ slug: 'arrival', collections: [] })).toBe('/v/arrival')
+  })
+
+  /**
+   * The field is optional on every shape that predates memberships, and a page
+   * whose button throws is worse than one pointing somewhere defensible.
+   */
+  it('survives a video that arrived without its memberships', () => {
+    expect(detailsPath({ slug: 'arrival' })).toBe('/v/arrival')
+    expect(detailsPath({ slug: 'arrival', collections: null })).toBe('/v/arrival')
+  })
+
+  /**
+   * The reason this looks for the season-bearing membership rather than taking
+   * the first one: a video can be an episode of one collection and an extra in
+   * another, and only one of those two is a series. Picking `collections[0]`
+   * the way the "from ..." subtitle does would answer this case wrongly.
+   */
+  it('finds the series behind a membership that is not a season', () => {
+    expect(detailsPath({
+      slug: 'pilot',
+      collections: [
+        { seasonId: null, collection: { slug: 'staff-picks' } },
+        { seasonId: 'season-1', collection: { slug: 'the-big-sky' } },
+      ],
+    })).toBe('/c/the-big-sky')
+  })
+
+  it('never sends the player to another player', () => {
+    expect(detailsPath(episode)).not.toContain('/watch/')
   })
 })
 

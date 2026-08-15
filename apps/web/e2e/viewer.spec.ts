@@ -37,6 +37,62 @@ async function aVideoPage(page: Page): Promise<string> {
   return `/v/${slug}`
 }
 
+interface Membership {
+  seasonId: string | null
+  collection: { slug: string }
+}
+
+interface Candidate {
+  slug: string
+  collections?: Membership[] | null
+}
+
+/**
+ * The library's videos with their memberships.
+ *
+ * `/api/videos` already carries `collections`, so the kind of a video is one
+ * request away — which is what lets a test pick the kind it is about instead of
+ * whatever sorts first.
+ *
+ * Asked through `page.request`, which carries the context's session cookie, so
+ * no page has to be loaded to ask a question about the data. Routing it through
+ * a `/browse` visit and an in-page `fetch` is what the older helper does, and it
+ * makes every such lookup wait on `networkidle` for a page the test does not
+ * care about — a shelf that keeps loading as it scrolls may never go idle.
+ */
+async function libraryVideos(page: Page): Promise<Candidate[]> {
+  const response = await page.request.get('/api/videos?limit=100')
+  expect(response.ok(), 'the library did not answer').toBeTruthy()
+  return ((await response.json()).items ?? []) as Candidate[]
+}
+
+/** The membership that makes a video an episode, or null for everything else. */
+function episodeOf(video: Candidate): Membership | null {
+  return video.collections?.find(membership => membership.seasonId) ?? null
+}
+
+/**
+ * A video that is **not** an episode.
+ *
+ * Details leads somewhere different for the two now, so a test about either has
+ * to say which one it means. Taking whatever sorted first would leave this test
+ * passing or failing on the seed data, and failing on *correct* behaviour the
+ * day a series happens to sort to the front.
+ */
+async function aFilmPage(page: Page): Promise<string | null> {
+  const film = (await libraryVideos(page)).find(video => !episodeOf(video))
+  return film ? `/v/${film.slug}` : null
+}
+
+/** An episode, with the series its Details button must reach. */
+async function anEpisode(page: Page): Promise<{ path: string, series: string } | null> {
+  for (const video of await libraryVideos(page)) {
+    const membership = episodeOf(video)
+    if (membership) return { path: `/v/${video.slug}`, series: `/c/${membership.collection.slug}` }
+  }
+  return null
+}
+
 /** A video page, then Play — playback is a deliberate second press now. */
 async function startPlaying(page: Page): Promise<void> {
   await visit(page, await aVideoPage(page))
@@ -90,9 +146,19 @@ test.describe('viewer', () => {
     await expect(page.locator('video')).toBeVisible()
   })
 
-  test('the player links back to the page it came from', async ({ page }) => {
-    const videoPage = await aVideoPage(page)
-    await visit(page, videoPage)
+  /**
+   * A film's own page holds its synopsis, cast and certification, and no
+   * collection page repeats any of it — so Details keeps leading there. The
+   * video is chosen for *not* being an episode: those go somewhere else now,
+   * and a test taking whatever sorted first would assert the wrong half of the
+   * rule at the seed data's discretion.
+   */
+  test('the player links back to the film it came from', async ({ page }) => {
+    const videoPage = await aFilmPage(page)
+    // Decided from the data, not from a locator: a count that has not rendered
+    // yet is zero, and a skip that always runs reports green forever.
+    test.skip(videoPage === null, 'the library holds no video outside a season')
+    await visit(page, videoPage!)
 
     await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
     await page.waitForURL(/\/watch\//)
@@ -100,6 +166,25 @@ test.describe('viewer', () => {
     await page.getByRole('link', { name: 'Details' }).click()
     await page.waitForURL(url => url.pathname === videoPage)
     await expect(page.getByRole('link', { name: /^(Play|Resume)/ }).first()).toBeVisible()
+    await expect(page.locator('video')).toHaveCount(0)
+  })
+
+  /**
+   * The change this exists for. Halfway through an episode, the page worth
+   * reaching is the **show** — its seasons and the rest of its episodes — not a
+   * page describing the episode already on screen.
+   */
+  test('the player sends an episode to its series', async ({ page }) => {
+    const episode = await anEpisode(page)
+    test.skip(episode === null, 'the library holds no episode in a season')
+
+    await visit(page, episode!.path)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
+
+    await page.getByRole('link', { name: 'Details' }).click()
+    await page.waitForURL(url => url.pathname === episode!.series)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     await expect(page.locator('video')).toHaveCount(0)
   })
 
