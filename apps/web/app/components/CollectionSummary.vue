@@ -63,6 +63,16 @@ const props = defineProps<{
   videos: SummaryVideo[]
   /** Set when the page is a season rather than the whole collection. */
   season?: SummarySeason | null
+  /**
+   * The list is still being fetched.
+   *
+   * The page's two requests answer different questions and no longer arrive
+   * together: `resolve` says what this URL is and still blocks, so the title
+   * above is real from the first frame, while the videos come from a `lazy`
+   * read. Without this the gap between them renders as "Nothing in this
+   * collection" on a collection that is about to fill up.
+   */
+  loading?: boolean
 }>()
 
 /**
@@ -405,7 +415,21 @@ const trailerOpen = ref(false)
           already watching, so a wide frame of it is more use than a 2:3 poster —
           which is the shape for choosing *between* titles, not within one.
         -->
-        <ul v-if="asEpisodes" class="divide-y divide-(--ui-border)">
+        <!--
+          Only while there is nothing to show. A season filter refetches
+          nothing — `listed` is computed from what is already here — so this is
+          the first load and no other case.
+        -->
+        <div
+          v-if="loading && listed.length === 0"
+          role="status"
+          :aria-label="asEpisodes ? 'Loading episodes' : 'Loading titles'"
+        >
+          <SkeletonList v-if="asEpisodes" :count="6" />
+          <SkeletonPosterGrid v-else :count="8" />
+        </div>
+
+        <ul v-else-if="asEpisodes" class="divide-y divide-(--ui-border)">
           <li v-for="(entry, index) in listed" :key="entry.id">
             <EpisodeRow
               :to="playPath(entry, collection.slug)"
@@ -455,7 +479,7 @@ const trailerOpen = ref(false)
         episode can sit directly in the collection while the season folders
         still exist, and then the season filter correctly finds none.
       -->
-      <p v-if="listed.length === 0" class="py-20 text-center text-(--ui-text-muted)">
+      <p v-if="listed.length === 0 && !loading" class="py-20 text-center text-(--ui-text-muted)">
         <template v-if="season">
           Nothing in this season.
           <NuxtLink :to="`/c/${collection.slug}`" class="text-(--ui-text) underline underline-offset-4">
