@@ -206,6 +206,45 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
 }
 
+/**
+ * One placeholder block, for the skeletons that stand in for content a page is
+ * still fetching.
+ *
+ * Here rather than as a repeated utility string for the same reason
+ * `.poster-grid` is: every skeleton in the app is this shape, and three copies
+ * of `animate-pulse rounded-md bg-(--ui-bg-elevated)` is three places to change
+ * the one that is wrong.
+ *
+ * Deliberately **not** `USkeleton`. That component hardcodes `role="alert"`,
+ * `aria-live="polite"` and `aria-label="loading"` on every instance with no prop
+ * to turn them off, so a grid of twenty placeholders is twenty live regions all
+ * announcing themselves — the same trap as `USelectMenu`'s built-in
+ * `aria-label`. The components using this class carry one `role="status"` on the
+ * container instead. Its theme resolves to exactly the three declarations below,
+ * so nothing is given up.
+ *
+ * The pulse is decoration, not information: the reduced-motion reset further
+ * down stops it dead, so the resting colour is what has to read as a
+ * placeholder. `--ui-bg-elevated` is the surface a card already sits on, which
+ * is why a skeleton looks like the thing it is standing in for.
+ *
+ * A solid `background-color`, never a gradient shimmer. `visible.spec.ts` stops
+ * resolving a backdrop at the first `background-image` it meets and returns
+ * null, which silently exempts that element *and every descendant* from the
+ * border and text-contrast checks — a shimmer would buy a green audit by
+ * blinding it.
+ */
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.skeleton {
+  background-color: var(--ui-bg-elevated);
+  border-radius: 0.375rem;
+  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 /* Shelves scroll horizontally; the scrollbar is noise between the rows. */
 .no-scrollbar {
   scrollbar-width: none;
