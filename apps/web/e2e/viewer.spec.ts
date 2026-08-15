@@ -800,6 +800,93 @@ test.describe('viewer', () => {
     await expect(page.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Previous episode' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Previous episode' })).toHaveCount(0)
+
+    // And no rail either: it is drawn from the same sequence the stepper walks,
+    // so a page that cannot offer one cannot honestly offer the other.
+    await expect(page.getByRole('complementary')).toHaveCount(0)
+  })
+
+  /**
+   * The rest of the collection, beside the player.
+   *
+   * The stepper answers "what is adjacent"; the rail answers "what is there",
+   * which is the question somebody has when they want the episode they skipped.
+   * Both are drawn from one sequence, and this pins that they agree — a rail
+   * listing a different order from the Next button renders perfectly either way.
+   *
+   * The collection is chosen from the **data**, never from `locator.count()`,
+   * which does not retry: a guard written with it runs before the list has
+   * rendered and therefore skips on every run. One did exactly that in this
+   * suite for weeks while reporting green.
+   */
+  test('the player lists the rest of the collection beside it', async ({ page }) => {
+    await visit(page, '/browse')
+    const found = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        if ((detail.videos ?? []).length > 1) {
+          return { slug: collection.slug as string, count: detail.videos.length as number }
+        }
+      }
+      return null
+    })
+    test.skip(found === null, 'no collection here holds two videos')
+
+    await visit(page, `/c/${found!.slug}`)
+
+    // Scoped past the hero, whose Play button is also a `/watch/` link.
+    const entry = page.locator('main section ~ div a[href^="/watch/"]').first()
+    await expect(entry).toBeVisible()
+    await entry.click()
+    await page.waitForURL(/\/watch\//)
+
+    const rail = page.getByRole('complementary')
+    await expect(rail).toBeVisible()
+
+    /*
+     * A row per video, and no more. The rail is fed the whole sequence, so a
+     * short list means the ordering dropped something — which is the failure
+     * that looks fine on screen, because a show missing one episode still
+     * reads as a show.
+     */
+    const rows = rail.locator('a[href^="/watch/"]')
+    await expect(rows).toHaveCount(found!.count)
+
+    /*
+     * Every link carries the collection on. Without it the first click out of
+     * the rail is the last one — the rail and the stepper both vanish from the
+     * page it lands on, which reads as the app breaking.
+     */
+    const hrefs = await rows.evaluateAll(links =>
+      links.map(link => link.getAttribute('href') ?? ''),
+    )
+    for (const href of hrefs) {
+      expect(
+        new URL(href, page.url()).searchParams.get('from'),
+        'a rail link that drops the collection ends the rail',
+      ).toBe(found!.slug)
+    }
+
+    /*
+     * And it says which one is playing — announced, not merely tinted. A list
+     * of everything with nothing marked is a list you have to read your own
+     * address bar to use, and a background colour says that to sighted users
+     * only.
+     */
+    const playing = new URL(page.url()).pathname
+    await expect(rail.locator('[aria-current="true"]')).toHaveCount(1)
+    await expect(rail.locator(`a[href^="${playing}"]`)).toHaveAttribute('aria-current', 'true')
+
+    // Following a row plays it, rather than describing it.
+    const otherHref = hrefs.find(href => !href.startsWith(playing))
+    expect(otherHref, 'every row points at the episode already playing').toBeTruthy()
+    await rail.locator(`a[href="${otherHref}"]`).click()
+    await page.waitForURL(url => url.pathname + url.search === otherHref)
+    await expect(page.locator('video')).toBeVisible()
+
+    // The rail survives the trip, which is the whole point of carrying `from`.
+    await expect(page.getByRole('complementary')).toBeVisible()
   })
 
   /**

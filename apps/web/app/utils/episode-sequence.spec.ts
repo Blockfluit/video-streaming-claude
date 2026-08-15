@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { episodeSequence, neighbours } from './episode-sequence'
+import { episodeSequence, groupBySeason, neighbours } from './episode-sequence'
 
 /** A season, as `GET /collections/:slug` returns them. */
 function season(id: string, number: number | null) {
@@ -239,5 +239,123 @@ describe('neighbours', () => {
     const forward = neighbours(sequence, 's1e1').next
 
     expect(neighbours(sequence, forward!.id).previous?.id).toBe('s1e1')
+  })
+})
+
+describe('groupBySeason', () => {
+  const seasons = [season('one', 1), season('two', 2)]
+
+  /**
+   * The rail's whole reason for grouping: sixty rows with nothing marking where
+   * one season ends and the next begins is a list nobody can navigate.
+   */
+  it('cuts the sequence into one group per season, in sequence order', () => {
+    const sequence = episodeSequence(
+      [
+        episode('s2e1', 'Three', 'two', 1),
+        episode('s1e1', 'One', 'one', 1),
+        episode('s1e2', 'Two', 'one', 2),
+      ],
+      seasons,
+    )
+
+    const groups = groupBySeason(sequence, seasons)
+
+    expect(groups.map(group => group.season?.id)).toEqual(['one', 'two'])
+    expect(groups.map(group => ids(group.videos))).toEqual([['s1e1', 's1e2'], ['s2e1']])
+  })
+
+  /**
+   * It partitions what it is given and never re-sorts it. `episodeSequence` is
+   * the one place the order is decided, and a second opinion here is how the
+   * rail and the stepper would start disagreeing about the same show.
+   */
+  it('preserves the order it was handed, without sorting', () => {
+    const backwards = [
+      episode('s2e1', 'Three', 'two', 1),
+      episode('s1e1', 'One', 'one', 1),
+    ]
+
+    expect(groupBySeason(backwards, seasons).map(group => group.season?.id)).toEqual([
+      'two',
+      'one',
+    ])
+  })
+
+  /**
+   * `seasonId: null` is a real value meaning "directly in the collection" —
+   * where films live, and inside a show the loose extra nobody filed. It is a
+   * group of its own rather than being dropped or folded into the last season.
+   */
+  it('gives videos with no season a group of their own', () => {
+    const sequence = episodeSequence(
+      [episode('s1e1', 'One', 'one', 1), episode('extra', 'Extra', null, 1)],
+      seasons,
+    )
+
+    const groups = groupBySeason(sequence, seasons)
+
+    expect(groups).toHaveLength(2)
+    expect(groups[1]?.season).toBeNull()
+    expect(ids(groups[1]!.videos)).toEqual(['extra'])
+  })
+
+  /** A collection of films has no seasons at all, and is one unlabelled group. */
+  it('returns a single null-season group for a collection with no seasons', () => {
+    const sequence = episodeSequence(
+      [episode('a', 'A', null, 1), episode('b', 'B', null, 2)],
+      [],
+    )
+
+    const groups = groupBySeason(sequence, [])
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.season).toBeNull()
+    expect(ids(groups[0]!.videos)).toEqual(['a', 'b'])
+  })
+
+  /**
+   * Both halves come from one response, so this should not happen — but losing
+   * a real episode would silently shorten the show, which is the worse failure.
+   * It keeps its place, in a group labelled with nothing it cannot vouch for.
+   */
+  it('keeps a video whose season is not in the list', () => {
+    const sequence = [episode('orphan', 'Orphan', 'gone', 1)]
+
+    const groups = groupBySeason(sequence, seasons)
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.season).toBeNull()
+    expect(ids(groups[0]!.videos)).toEqual(['orphan'])
+  })
+
+  /**
+   * Two runs of the same season cannot come out of `episodeSequence`, but the
+   * function is given an array and must not silently merge across a gap — that
+   * would reorder the caller's list while claiming to preserve it.
+   */
+  it('starts a new group each time the season changes', () => {
+    const interleaved = [
+      episode('a', 'A', 'one', 1),
+      episode('b', 'B', 'two', 1),
+      episode('c', 'C', 'one', 2),
+    ]
+
+    expect(groupBySeason(interleaved, seasons).map(group => group.season?.id)).toEqual([
+      'one',
+      'two',
+      'one',
+    ])
+  })
+
+  it('returns nothing for an empty sequence', () => {
+    expect(groupBySeason([], seasons)).toEqual([])
+  })
+
+  /** Generic like the sort, so the rail still has runtimes and artwork. */
+  it('carries the caller\'s extra fields through', () => {
+    const videos = [{ ...episode('a', 'A', null, 1), durationSec: 42 }]
+
+    expect(groupBySeason(videos, [])[0]?.videos[0]?.durationSec).toBe(42)
   })
 })

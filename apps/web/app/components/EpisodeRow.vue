@@ -36,20 +36,46 @@ const props = defineProps<{
   /** The state chip, for an admin looking at a draft. Null when published. */
   badge?: string | null
   current?: boolean
+  /**
+   * The narrow build, for the rail beside the player rather than a page of its
+   * own.
+   *
+   * A prop rather than a class the caller passes: the widths that have to shrink
+   * sit on an *inner* element, which a class on the component root cannot reach.
+   * At the full size the still alone is 16rem, which is most of a 22rem rail
+   * before the title gets a pixel.
+   *
+   * The synopsis goes rather than being clamped shorter. Two lines of prose at
+   * that width is four or five words a line, which reads as damage; the episode
+   * page is where a description has room, and the rail is for finding the row.
+   */
+  dense?: boolean
 }>()
 
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
+
+const rowClass = computed(() => (props.dense ? 'gap-3 p-2' : 'gap-4 p-3'))
+const numberClass = computed(() =>
+  props.dense ? 'w-4 pt-3 text-sm' : 'w-6 pt-6 text-lg',
+)
+/** Fixed rather than responsive: the rail is one width at every breakpoint. */
+const stillClass = computed(() =>
+  props.dense ? 'w-28' : 'w-40 sm:w-48 lg:w-64',
+)
+const titleClass = computed(() => (props.dense ? 'text-sm' : ''))
 </script>
 
 <template>
   <NuxtLink
     :to="to"
-    class="group flex items-start gap-4 rounded-lg p-3 transition-colors"
-    :class="current ? 'bg-(--ui-bg-accented)' : 'hover:bg-(--ui-bg-elevated)'"
+    class="group flex items-start rounded-lg transition-colors"
+    :class="[rowClass, current ? 'bg-(--ui-bg-accented)' : 'hover:bg-(--ui-bg-elevated)']"
+    :aria-current="current ? 'true' : undefined"
   >
     <span
-      class="w-6 shrink-0 pt-6 text-right text-lg font-semibold tabular-nums text-(--ui-text-dimmed)"
+      class="shrink-0 text-right font-semibold tabular-nums text-(--ui-text-dimmed)"
+      :class="numberClass"
       aria-hidden="true"
     >{{ number ?? '' }}</span>
 
@@ -61,7 +87,10 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
       Hover is the ring, matching the cards. There was a play glyph in the middle
       of this frame, which covered the picture on the row you were pointing at.
     -->
-    <div class="relative aspect-video w-40 shrink-0 overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) transition-shadow group-hover:ring-2 group-hover:ring-(--ui-primary) group-focus-visible:ring-2 group-focus-visible:ring-(--ui-primary) sm:w-48 lg:w-64">
+    <div
+      class="relative aspect-video shrink-0 overflow-hidden rounded-md bg-(--ui-bg-elevated) ring-1 ring-(--ui-border) transition-shadow group-hover:ring-2 group-hover:ring-(--ui-primary) group-focus-visible:ring-2 group-focus-visible:ring-(--ui-primary)"
+      :class="stillClass"
+    >
       <img
         v-if="showImage"
         :src="imageUrl!"
@@ -82,8 +111,12 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
 
     <div class="min-w-0 flex-1 space-y-1 py-0.5">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p class="font-medium text-(--ui-text-highlighted)">{{ title }}</p>
-        <span v-if="runtime(durationSec)" class="text-sm text-(--ui-text-muted)">
+        <p class="font-medium text-(--ui-text-highlighted)" :class="titleClass">{{ title }}</p>
+        <span
+          v-if="runtime(durationSec)"
+          class="text-(--ui-text-muted)"
+          :class="dense ? 'text-xs' : 'text-sm'"
+        >
           {{ runtime(durationSec) }}
         </span>
         <UBadge v-if="badge" color="warning" variant="subtle" size="sm">{{ badge }}</UBadge>
@@ -94,7 +127,7 @@ const showImage = computed(() => Boolean(props.imageUrl) && !broken.value)
           aria-label="Watched"
         />
       </div>
-      <p v-if="description" class="line-clamp-2 text-sm text-(--ui-text-muted)">
+      <p v-if="description && !dense" class="line-clamp-2 text-sm text-(--ui-text-muted)">
         {{ description }}
       </p>
     </div>

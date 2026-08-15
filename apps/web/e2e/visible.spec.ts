@@ -291,19 +291,24 @@ test.describe('legibility', () => {
   })
 
   /**
-   * The player's episode stepper, which the test above cannot reach.
+   * The player's episode stepper and the rail beside it, which the test above
+   * cannot reach.
    *
-   * Previous and Next only render when the URL names the collection the video
-   * was reached through, and that test arrives at the player by clicking Play
-   * on a video picked purely by title — which may be in no collection at all.
-   * So the controls were absent exactly when the audit ran, and a control that
-   * is never on screen when the audit walks the page has not been judged by it.
+   * Both render only when the URL names the collection the video was reached
+   * through, and that test arrives at the player by clicking Play on a video
+   * picked purely by title — which may be in no collection at all. So they were
+   * absent exactly when the audit ran, and something never on screen when the
+   * audit walks the page has not been judged by it.
    *
    * Addressed directly rather than by clicking through, so the collection is
-   * chosen from the data and the stepper is provably present. Which of the two
-   * is disabled does not matter here — the audit is looking at colour.
+   * chosen from the data and both are provably present. Which end of the
+   * sequence we land on does not matter — the audit is looking at colour.
+   *
+   * The rail is asserted rather than left to chance: it shares its condition
+   * with the stepper today, and a test that covers a thing only by coincidence
+   * stops covering it the day that stops being true, without going red.
    */
-  test('the player\'s episode stepper too', async ({ page }) => {
+  test('the player\'s episode stepper and rail too', async ({ page }) => {
     await visit(page, '/browse')
     const target = await page.evaluate(async () => {
       const list = await (await fetch('/api/collections?limit=100')).json()
@@ -320,11 +325,12 @@ test.describe('legibility', () => {
     // By label, so this holds whichever end of the sequence we landed on.
     await expect(page.getByLabel('Next episode')).toBeVisible()
     await expect(page.getByLabel('Previous episode')).toBeVisible()
+    await expect(page.getByRole('complementary')).toBeVisible()
 
     const problems = await page.evaluate(AUDIT)
     expect(
       problems,
-      `stepper:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+      `stepper and rail:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
     ).toEqual([])
   })
 

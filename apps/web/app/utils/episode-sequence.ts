@@ -158,3 +158,56 @@ export function neighbours<T extends SequenceVideo>(
     next: sequence[index + 1] ?? null,
   }
 }
+
+/** One season's run of the sequence. `season` is null when there is none to name. */
+export interface SeasonGroup<T> {
+  season: SequenceSeason | null
+  videos: T[]
+}
+
+/**
+ * The same sequence, cut where the season changes.
+ *
+ * A rail beside the player lists the whole show, and sixty rows with nothing
+ * marking where one season ends and the next begins is a list nobody can
+ * navigate. The heading is the only thing that makes a long one readable.
+ *
+ * It **partitions and never re-sorts**. `episodeSequence` is the one place a
+ * collection's running order is decided; a second opinion here is exactly how
+ * the rail and the stepper would come to disagree about the same show while
+ * both rendered perfectly. So this walks the array it is handed and cuts it —
+ * consecutive runs, which is why two separated runs of one season stay two
+ * groups rather than being merged back together. Merging would silently reorder
+ * the caller's list while claiming to preserve it.
+ *
+ * A `season` of null covers three different things on purpose, because a
+ * heading can only be drawn from a season that is actually known:
+ * `seasonId: null` (a real value meaning "directly in the collection", which is
+ * where films live and, inside a show, the loose extra nobody filed), a
+ * collection with no seasons at all, and a `seasonId` naming a season missing
+ * from the list. The last should not happen — both halves come from one
+ * response — but dropping the video would silently shorten the show, which is
+ * the worse of the two failures.
+ */
+export function groupBySeason<T extends SequenceVideo>(
+  sequence: readonly T[],
+  seasons: readonly SequenceSeason[],
+): SeasonGroup<T>[] {
+  const byId = new Map(seasons.map(season => [season.id, season]))
+  const groups: SeasonGroup<T>[] = []
+
+  let openId: string | null | undefined
+
+  for (const video of sequence) {
+    // Compared before it is resolved: an unknown season still starts a group of
+    // its own, and resolving first would fold every unknown one together.
+    if (groups.length === 0 || video.seasonId !== openId) {
+      openId = video.seasonId
+      groups.push({ season: byId.get(video.seasonId ?? '') ?? null, videos: [] })
+    }
+
+    groups[groups.length - 1]!.videos.push(video)
+  }
+
+  return groups
+}
