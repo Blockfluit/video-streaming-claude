@@ -164,6 +164,25 @@ const groups = computed(() => groupBySeason(sequence.value, collection.value?.se
 const hasRail = computed(() => hasStepper.value)
 
 /**
+ * Whether to *leave room* for the rail — which is not the same question as
+ * whether there is one to draw yet, and must not be answered by the same value.
+ *
+ * The sequence read is `lazy`, so the first paint has no collection: deciding
+ * the columns from `hasRail` gave a single full-width column, and the rail
+ * arriving a moment later took a third of it away. The player is 16:9 and sized
+ * by its column, so that is not a control appearing beside some text — it is the
+ * picture itself resizing under the person who just pressed play, on every
+ * episode.
+ *
+ * `?from=` is in the URL and therefore known before anything is fetched, so the
+ * column is reserved from the first paint and the player is one size throughout.
+ * The cost is the rare case where the collection turns out to hold a single
+ * video: an empty column, collapsing once, rather than every ordinary load
+ * reflowing.
+ */
+const expectsRail = computed(() => from.value !== null)
+
+/**
  * The collection to name above the rail, taken from this video's own
  * memberships rather than from the sequence read.
  *
@@ -228,7 +247,7 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
     -->
     <div
       class="grid gap-x-8 gap-y-6 lg:items-start"
-      :class="hasRail
+      :class="expectsRail
         ? 'lg:grid-cols-[minmax(0,1fr)_22rem]'
         : 'mx-auto w-full max-w-[min(100%,calc((100dvh-13rem)*16/9))]'"
     >

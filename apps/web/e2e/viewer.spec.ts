@@ -890,6 +890,66 @@ test.describe('viewer', () => {
   })
 
   /**
+   * The picture must not resize once the rail's data lands.
+   *
+   * The player is 16:9 and takes its size from its grid column, so a column
+   * decided by the loaded collection is not a control appearing beside some
+   * text — it is the video changing size under whoever just pressed Play. It
+   * measured 1550px wide and then snapped to 1216px.
+   *
+   * A **client-side** arrival, because that is the only one that can shift and
+   * the reason this went unnoticed: a fresh load is server-rendered, and Nitro
+   * fetches the sequence even though it is `lazy` and ships it in the payload,
+   * so the rail is in the first paint and nothing moves. Pressing Play on
+   * `/v/:slug` is a client navigation into a collection whose sequence is not
+   * cached, and there the data genuinely arrives late.
+   *
+   * The read is held open rather than raced. Without that, "before the data
+   * arrives" is a window a fast machine closes before the first measurement,
+   * and the test passes by measuring the settled state twice.
+   */
+  test('the player is one size while the rail is still loading', async ({ page }) => {
+    await visit(page, '/browse')
+    const found = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        const videos = detail.videos ?? []
+        if (videos.length > 1) {
+          return { slug: collection.slug as string, first: videos[0].slug as string }
+        }
+      }
+      return null
+    })
+    test.skip(found === null, 'no collection here holds two videos')
+
+    await page.route(`**/api/collections/${found!.slug}`, async (route) => {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      await route.continue()
+    })
+
+    await visit(page, `/v/${found!.first}`)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
+
+    await page.locator('video').waitFor({ state: 'attached' })
+    const early = await page.locator('video').boundingBox()
+
+    // The measurement is only worth anything taken before the rail exists.
+    expect(
+      await page.getByRole('complementary').count(),
+      'the rail arrived before this could measure without it',
+    ).toBe(0)
+
+    await expect(page.getByRole('complementary')).toBeVisible({ timeout: 20_000 })
+    const settled = await page.locator('video').boundingBox()
+
+    expect(Math.round(early!.width), 'the player resized as the rail arrived').toBe(
+      Math.round(settled!.width),
+    )
+  })
+
+  /**
    * Cards show posters; episode rows show banners.
    *
    * Asserted through the *request* rather than the rendered box, because the

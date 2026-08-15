@@ -90,11 +90,46 @@ const total = computed(() => positions.value.size)
  * collects into an array whatever the name, so the single element that matters
  * would arrive wrapped — and a conditional name is worse still, since Vue keeps
  * registering the ref for rows that no longer match.
+ *
+ * The narrowing lives here rather than in the template: a `as` cast in a
+ * template expression is compiled by a different parser than the one that
+ * type-checked it, which is a lot of trust for a line that only needs an
+ * element.
  */
+const list = ref<HTMLElement | null>(null)
 const current = ref<HTMLElement | null>(null)
 
+function markCurrent(el: unknown, id: string): void {
+  if (id === props.currentVideoId) current.value = (el as HTMLElement | null) ?? null
+}
+
+/**
+ * Bring the episode being watched into view — **inside the rail, and nowhere
+ * else**.
+ *
+ * `scrollIntoView` was the obvious call and is the wrong one: it scrolls every
+ * scrollable ancestor, the document included. On episode nine of a show that is
+ * a page which scrolls itself down to the rail the moment somebody presses
+ * play, taking the picture off the top of the screen. Setting the container's
+ * own `scrollTop` cannot move anything but the container.
+ *
+ * Measured through `getBoundingClientRect` rather than `offsetTop`, which is
+ * relative to whichever ancestor happens to be positioned and would silently
+ * measure from the wrong box if any of them ever gains a `relative`.
+ *
+ * Once, on mount. On a step to the next episode the browser keeps the rail's
+ * scroll position and the highlight moves one row, and yanking the list back
+ * would undo a deliberate scroll for the sake of a single row.
+ */
 onMounted(() => {
-  current.value?.scrollIntoView({ block: 'nearest' })
+  const row = current.value
+  const box = list.value
+  if (!row || !box) return
+
+  const rowBox = row.getBoundingClientRect()
+  const listBox = box.getBoundingClientRect()
+
+  box.scrollTop += rowBox.top - listBox.top - (listBox.height - rowBox.height) / 2
 })
 </script>
 
@@ -139,7 +174,7 @@ onMounted(() => {
       beside the player and takes a plain, shorter cap — a rail as tall as the
       phone would push the comments off the bottom of a scroll people do reach.
     -->
-    <div class="max-h-[28rem] overflow-y-auto rounded-lg lg:max-h-[calc(100dvh-16rem)]">
+    <div ref="list" class="max-h-[28rem] overflow-y-auto rounded-lg lg:max-h-[calc(100dvh-16rem)]">
       <div v-for="(group, index) in groups" :key="group.season?.id ?? `loose-${index}`">
         <!--
           Sticky, because the heading answering "which season am I looking at"
@@ -156,7 +191,7 @@ onMounted(() => {
           <li
             v-for="entry in group.videos"
             :key="entry.id"
-            :ref="el => { if (entry.id === currentVideoId) current = el as HTMLElement | null }"
+            :ref="el => markCurrent(el, entry.id)"
           >
             <EpisodeRow
               dense
