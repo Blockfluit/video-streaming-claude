@@ -127,18 +127,32 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   iframe must be `pointer-events-none`: an iframe swallows every click that lands on it, so without
   that the Play button underneath stops working the moment the trailer fades in, and the page looks
   perfectly fine while doing it.
+- **The reveal is never gated on the player confirming anything.** `HeroBackdrop` mounts the iframe
+  hidden and crossfades it in ~900ms after the iframe's `load`; it reveals *earlier* if the embed
+  volunteers `onStateChange / info: 1`, and it retreats to the banner **only** on `onError`. It was
+  built the other way round once — hidden until the player confirmed, unmounted after four seconds of
+  silence — and real YouTube does not reliably answer that handshake, so every viewer got the banner
+  and nothing else, on every title. It shipped green because the browser suite's only stub answered
+  every time. **Silence means carry on; only an error means stop**, and `hero.spec.ts` now stubs all
+  three behaviours (answers, silent, failing) for exactly that reason.
+- The "can't be loaded" fallback needs no timer: an embed that never fires `load` never reveals, so a
+  blocked host or a dead network leaves the banner where it is by construction.
+- **`subscribeToPlayer` posts `listening` repeatedly**, not once. An iframe's `load` fires when its
+  *document* arrives, which is before the player has attached its own `message` listener — a single
+  message sent then lands on nothing and the embed never asks again, which is the likeliest reason the
+  handshake was never heard at all. It is bounded (~4s) and cancelled when the trailer is torn down.
 - **The home hero rotates**, and does so on a **fixed interval** rather than when a trailer ends.
-  There is no ended signal: `enablejsapi` is set and *nothing listens*, so "play the next one when
-  this finishes" would need a `postMessage` listener that does not exist. The interval is ~10s
-  against `HeroBackdrop`'s 2s fade-in — roughly two seconds of banner and eight of trailer. Much
-  shorter and the entry changes before its trailer has said anything, while opening a YouTube iframe
-  every few seconds.
+  There is no ended signal worth relying on: the page hears the embed only when it chooses to speak,
+  which it may never do, so "play the next one when this finishes" would rest on the same silence that
+  already cost the feature once. The interval is ~10s, which is very nearly ten seconds of trailer now
+  that it starts at once. Much shorter and the entry changes before its trailer has said anything,
+  while opening a YouTube iframe every few seconds.
 - The rotation stops for all three of: `prefers-reduced-motion` (it never starts — the same rule the
   trailer follows), a pointer resting on the hero or focus inside it, and an explicit pause button.
-  Auto-updating content needs a way to stop it. `HeroBackdrop` emits `dismiss` from the trailer's ✕
-  and **only** from there — `stopTrailer` is also how it clears the previous trailer on a change of
-  `trailerId`, so emitting from inside it would fire on every turn of the carousel. Dismissing stops
-  the rotation too: somebody who closed a trailer is not asking for the next one ten seconds later.
+  Auto-updating content needs a way to stop it. An **open `TrailerModal` holds it too**: the hero
+  cannot turn over while somebody is watching this title's trailer in a dialog on top of it. There was
+  a ✕ on the hero and a `dismiss` emit behind it; both are gone with the rest of the hero's trailer
+  controls, which steered something nobody was watching.
 - The rotation's dots are dimmed with a **colour**, never `opacity`. `visible.spec.ts` reports an
   interactive element under 0.35 effective opacity as invisible, and opacity multiplies down the
   whole ancestor chain. Inactive is `--ui-border-accented` (3:1, the non-text floor for something
@@ -148,8 +162,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   runs behind the cards, which means the bottom 4rem of the hero is underneath a row heading:
   "Recently added" landed exactly on top of the pause button. Anything the *page* owns inside the
   hero has to sit above that band, and the text column is the one place clear of it at every width.
-  The trailer's own controls are bottom-**right** and escape this only because a shelf heading is
-  short — do not read their position as a precedent for anything on the left.
+  The hero's own trailer controls used to sit bottom-**right** and escaped this only because a shelf
+  heading is short; they are gone now, so there is no precedent there for anything on the left.
 - The browser suite therefore runs with `reducedMotion: 'reduce'` set in `playwright.config.ts`.
   Without it the auto-playing trailer puts a third-party iframe on `/` — a page a dozen tests visit
   only to get a base URL for a `fetch` — where the response watchdog fails any 4xx in any frame,

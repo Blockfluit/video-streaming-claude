@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { LISTENING, PLAYER_ORIGINS, readPlayerSignal } from './youtube-embed'
+import { EMBED_ORIGIN, LISTENING, PLAYER_ORIGINS, readPlayerSignal, subscribeToPlayer } from './youtube-embed'
 
 /** What the embed actually posts: a JSON *string*, not an object. */
 function posted(payload: unknown): string {
@@ -102,5 +102,72 @@ describe('PLAYER_ORIGINS', () => {
       'https://www.youtube-nocookie.com',
       'https://www.youtube.com',
     ])
+  })
+})
+
+/**
+ * The retry is the whole point of this helper, and it is exactly the kind of
+ * thing that looks right and does nothing: a single `postMessage` at `load`
+ * lands before the player has a listener, and the silence that follows is
+ * indistinguishable from an embed with nothing to say.
+ */
+describe('subscribeToPlayer', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** Only the one property the helper touches, so no DOM is needed. */
+  function fakeFrame() {
+    return { contentWindow: { postMessage: vi.fn<(message: string, targetOrigin: string) => void>() } }
+  }
+
+  it('asks immediately rather than waiting out the first interval', () => {
+    const frame = fakeFrame()
+    subscribeToPlayer(frame)
+
+    expect(frame.contentWindow.postMessage).toHaveBeenCalledTimes(1)
+    expect(frame.contentWindow.postMessage).toHaveBeenCalledWith(LISTENING, EMBED_ORIGIN)
+  })
+
+  it('keeps asking, because the first ask lands before the player is listening', () => {
+    const frame = fakeFrame()
+    subscribeToPlayer(frame, 300, 4000)
+
+    vi.advanceTimersByTime(900)
+    expect(frame.contentWindow.postMessage).toHaveBeenCalledTimes(4)
+  })
+
+  // A page left posting at a third party forever is its own bug.
+  it('gives up eventually', () => {
+    const frame = fakeFrame()
+    subscribeToPlayer(frame, 300, 1000)
+
+    vi.advanceTimersByTime(1000)
+    const asked = frame.contentWindow.postMessage.mock.calls.length
+
+    vi.advanceTimersByTime(10_000)
+    expect(frame.contentWindow.postMessage).toHaveBeenCalledTimes(asked)
+  })
+
+  it('stops when cancelled, so a torn-down trailer stops talking', () => {
+    const frame = fakeFrame()
+    const cancel = subscribeToPlayer(frame, 300, 4000)
+
+    vi.advanceTimersByTime(300)
+    cancel()
+    vi.advanceTimersByTime(3000)
+
+    expect(frame.contentWindow.postMessage).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * A cross-origin iframe that has been removed from the document reports a null
+   * `contentWindow`, and this runs on a timer that can outlive the element.
+   */
+  it('tolerates a frame that has gone away', () => {
+    expect(() => {
+      const cancel = subscribeToPlayer({ contentWindow: null })
+      vi.advanceTimersByTime(1000)
+      cancel()
+    }).not.toThrow()
   })
 })

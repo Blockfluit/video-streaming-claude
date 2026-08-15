@@ -1,12 +1,18 @@
 /**
- * Hearing whether a YouTube embed actually started.
+ * Hearing whether a YouTube embed has failed.
  *
- * The hero shows its banner and fades the trailer over it. Fading it in blindly
- * is what it used to do, and it is wrong in the one case that matters: when the
- * video will not play — autoplay refused, embedding disabled by the owner, the
- * video pulled — YouTube paints its own grey "Video unavailable" card, and that
- * card is what got faded across the artwork. The banner is the fallback, so the
- * page has to know whether to use it.
+ * The hero shows its banner and fades the trailer over it. When a video will not
+ * play — embedding disabled by the owner, the video pulled — YouTube paints its
+ * own grey "Video unavailable" card, and fading *that* over the artwork is worse
+ * than the banner the page already has. So the page listens, and retreats to the
+ * banner when the player says it has failed.
+ *
+ * **What it must never do is wait for permission to start.** An earlier version
+ * gated the reveal on hearing `onStateChange / info: 1` and unmounted the iframe
+ * if that never arrived. It never arrived — the embed does not reliably answer
+ * — so every viewer got the banner and nothing else, on every title, while the
+ * test suite passed against a stub that always answered. Silence now means
+ * "carry on"; only an error means stop.
  *
  * `enablejsapi=1` is already in the embed URL, and it is enough on its own: the
  * player answers a `postMessage` handshake without the `iframe_api` script being
@@ -23,6 +29,45 @@
 
 /** Subscribes to the player's events. It posts nothing until it receives this. */
 export const LISTENING = JSON.stringify({ event: 'listening', id: 1, channel: 'widget' })
+
+/**
+ * Ask to be subscribed, repeatedly, until the embed answers.
+ *
+ * Posting once is not enough and that is very likely why nothing was ever heard.
+ * An iframe's `load` fires when its *document* arrives, which is before the
+ * player's own script has attached its `message` listener — so a single message
+ * sent at that moment lands on nothing, and the embed never asks again. Nothing
+ * reports this: the page simply hears silence forever.
+ *
+ * Returns its own canceller rather than taking a signal, because the two things
+ * that end it — an answer arriving, and the trailer being torn down — live in
+ * different places in the component.
+ */
+export function subscribeToPlayer(
+  /**
+   * Structural rather than `HTMLIFrameElement`, which an `<iframe>` satisfies and
+   * a test fake can too — this needs no DOM to be worth testing. `null` is the
+   * ordinary state of a frame that has been removed while the timer still runs.
+   */
+  frame: { contentWindow: { postMessage: (message: string, targetOrigin: string) => void } | null },
+  everyMs = 300,
+  forMs = 4000,
+): () => void {
+  const post = (): void => {
+    frame.contentWindow?.postMessage(LISTENING, EMBED_ORIGIN)
+  }
+
+  post()
+  const repeat = setInterval(post, everyMs)
+  // Bounded: an embed that has not answered in four seconds is not going to, and
+  // a page left posting at a third party forever is its own bug.
+  const giveUp = setTimeout(() => clearInterval(repeat), forMs)
+
+  return () => {
+    clearInterval(repeat)
+    clearTimeout(giveUp)
+  }
+}
 
 /**
  * Both, deliberately. The `src` is the no-cookie host, but the player posts from
