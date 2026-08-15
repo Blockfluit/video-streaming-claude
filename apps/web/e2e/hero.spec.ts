@@ -173,8 +173,62 @@ test.describe('the home hero', () => {
   })
 
   /**
+   * The pill fills as the entry's turn runs out, which is the whole reason the
+   * active bullet is a pill rather than a dot.
+   *
+   * Measured rather than asserted on a class: a bar bound to a value that never
+   * changes renders perfectly, and that is precisely the failure worth catching
+   * here. The fill has no test hook of its own — this suite has none anywhere —
+   * so it is reached through the `aria-current` the active bullet already
+   * carries.
+   *
+   * A ratio rather than two absolute widths, because the pill itself is only
+   * 40px: a couple of seconds of a ten-second turn is a handful of pixels, and
+   * demanding an exact number would fail on a machine that dropped frames.
+   */
+  test('fills the active bullet as its turn runs out', async ({ page }) => {
+    await visit(page, '/')
+
+    const count = await entryCount(page)
+    test.skip(count < 2, 'the library has only one recent entry to show')
+
+    const pill = page.locator('[aria-current="true"]')
+    const progress = pill.locator('span')
+    await expect(progress).toHaveCount(1)
+
+    // Away from the hero, or hovering would hold the rotation still and the
+    // fill with it — which is correct behaviour and would fail this test.
+    await page.mouse.move(0, 0)
+
+    /**
+     * Zero is a real width here — the fill starts empty — and Playwright treats
+     * an element with an empty box as hidden, so `toBeVisible` and a bare `!`
+     * on `boundingBox()` would both be reading the state under test as a fault.
+     */
+    const widthOf = async (locator: typeof progress): Promise<number> =>
+      (await locator.boundingBox())?.width ?? 0
+
+    const started = await widthOf(progress)
+    const track = await widthOf(pill)
+
+    await page.waitForTimeout(2000)
+
+    const later = await widthOf(progress)
+
+    // Grown, and not yet finished: two seconds into a ten-second turn.
+    expect(later).toBeGreaterThan(started)
+    expect(later).toBeLessThan(track)
+  })
+
+  /**
    * Auto-updating content needs a way to stop it, and "wait, what was that" is
    * the commonest reason to want one.
+   *
+   * The control is the active bullet itself now. The button that used to sit
+   * beside it took its label from `rotating`, which is false while the pointer
+   * is on the hero — so it read "Resume the rotation" from the moment anyone
+   * reached for it and never changed. This asserts the label flips under the
+   * click, with the pointer still where clicking left it.
    */
   test('holds still once the rotation is paused', async ({ page }) => {
     await visit(page, '/')
@@ -183,6 +237,9 @@ test.describe('the home hero', () => {
     test.skip(count < 2, 'the library has only one recent entry to show')
 
     await page.getByRole('button', { name: 'Pause the rotation' }).click()
+
+    // Still hovering the hero, which is what broke the old control.
+    await expect(page.getByRole('button', { name: 'Resume the rotation' })).toBeVisible()
 
     const heading = page.getByRole('heading', { level: 1 })
     const held = await heading.textContent()

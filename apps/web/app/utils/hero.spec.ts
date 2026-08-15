@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { heroEntries, HERO_LIMIT, type RowEntry } from './hero'
+import { heroEntries, HERO_LIMIT, ROTATE_MS, type RowEntry, tickRotation } from './hero'
 
 /**
  * What the home page leads with.
@@ -230,5 +230,83 @@ describe('heroEntries', () => {
     const item = { id: 'i1', video: withoutTrailer, collection: null }
 
     expect(heroEntries([shelf('RECENTLY_ADDED', [item])], [])[0]?.trailerId).toBeNull()
+  })
+})
+
+/**
+ * The rotation's clock.
+ *
+ * Pure and tested on its own because it is now *visible*: the active bullet is
+ * a pill that fills as the entry's turn runs out, so an off-by-a-frame is no
+ * longer invisible — it reads as a bar that jumps, or one that finishes early
+ * and sits full while the hero refuses to move on.
+ *
+ * The page drives it from `requestAnimationFrame`, which is what makes the
+ * delta something worth defending against: frames do not arrive on a schedule,
+ * and a tab that has been in the background hands back one enormous gap.
+ */
+describe('tickRotation', () => {
+  const start = { index: 0, elapsedMs: 0 }
+
+  it('accumulates a partial frame without moving on', () => {
+    expect(tickRotation(start, 16, 5)).toEqual({ index: 0, elapsedMs: 16 })
+  })
+
+  it('carries elapsed time forward across frames', () => {
+    const after = tickRotation(tickRotation(start, 16, 5), 34, 5)
+
+    expect(after).toEqual({ index: 0, elapsedMs: 50 })
+  })
+
+  it('advances and starts the next entry from zero once the period is up', () => {
+    expect(tickRotation({ index: 0, elapsedMs: ROTATE_MS - 10 }, 20, 5))
+      .toEqual({ index: 1, elapsedMs: 0 })
+  })
+
+  /**
+   * The remainder is deliberately dropped rather than carried. The cap below
+   * already bounds a step to one entry, and carrying it would leave the first
+   * frame of a new entry with its pill already partly filled.
+   */
+  it('returns to the first entry after the last', () => {
+    expect(tickRotation({ index: 4, elapsedMs: ROTATE_MS }, 1, 5))
+      .toEqual({ index: 0, elapsedMs: 0 })
+  })
+
+  /**
+   * A backgrounded tab produces no frames at all, so its first frame back
+   * reports the whole absence as one delta. Capping it advances one entry, the
+   * way sitting there for one period would have; taking it at face value skips
+   * however many entries the viewer was away for and lands somewhere arbitrary.
+   *
+   * The same "cap it, do not reject it" rule the watch heartbeat follows.
+   */
+  it('advances exactly one entry however long the tab was away', () => {
+    expect(tickRotation(start, 10 * ROTATE_MS, 5)).toEqual({ index: 1, elapsedMs: 0 })
+  })
+
+  /** A clock that goes backwards must not un-fill the pill. */
+  it('ignores a negative delta', () => {
+    expect(tickRotation({ index: 2, elapsedMs: 400 }, -5000, 5))
+      .toEqual({ index: 2, elapsedMs: 400 })
+  })
+
+  /**
+   * The controls are hidden below two entries, so there is nothing to count
+   * down *to* — a pill filling towards a change that cannot happen is a lie.
+   */
+  it('holds still when there is nothing to rotate through', () => {
+    expect(tickRotation(start, ROTATE_MS, 1)).toEqual(start)
+    expect(tickRotation(start, ROTATE_MS, 0)).toEqual(start)
+  })
+
+  /**
+   * `entries` can shrink under a refetch. The page reads the hero through the
+   * same modulo, so the index must not be left pointing past the end.
+   */
+  it('wraps an index left past the end by a shrinking library', () => {
+    // Seven of three is showing entry 1, so the next one is entry 2.
+    expect(tickRotation({ index: 7, elapsedMs: ROTATE_MS }, 1, 3))
+      .toEqual({ index: 2, elapsedMs: 0 })
   })
 })

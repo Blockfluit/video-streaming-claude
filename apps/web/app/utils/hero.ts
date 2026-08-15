@@ -33,6 +33,64 @@ import { collectionPath, videoPath } from './links'
 /** A shelf, not a catalogue. Five is what a person will sit through before it loops. */
 export const HERO_LIMIT = 5
 
+/**
+ * How long each entry holds the hero.
+ *
+ * `HeroBackdrop` waits two seconds before its trailer fades in, so this is
+ * roughly two seconds of banner and eight of trailer. Much shorter and the
+ * entry changes before its trailer has said anything, while opening a YouTube
+ * iframe every few seconds. Advancing when a trailer actually *ends* would need
+ * the YouTube JS API — `enablejsapi` is set and nothing listens — so a fixed
+ * period is the honest version of "then play the next in line", and the pill on
+ * the active bullet is the honest picture of it.
+ */
+export const ROTATE_MS = 10_000
+
+export interface Rotation {
+  index: number
+  /** How long the current entry has held the hero, `0..ROTATE_MS`. */
+  elapsedMs: number
+}
+
+/**
+ * Move the rotation on by a frame's worth of time.
+ *
+ * The page drives this from `requestAnimationFrame` rather than an interval,
+ * because the elapsed time is now drawn: the active bullet is a pill that fills
+ * as the entry's turn runs out. That makes the *delta* the thing worth
+ * defending against — frames do not arrive on a schedule, and a tab that has
+ * been in the background produces none at all, then hands the whole absence
+ * over as one enormous gap on its first frame back.
+ *
+ * So the delta is **capped** at one period rather than rejected, the same rule
+ * (and for the same reason) as `deltaSec` on the watch heartbeat: a viewer who
+ * came back after ten minutes sees the hero move on once, not skip four
+ * entries and land somewhere arbitrary.
+ */
+export function tickRotation(
+  state: Rotation,
+  deltaMs: number,
+  count: number,
+  periodMs = ROTATE_MS,
+): Rotation {
+  // Below two there is nothing to count down *to*, and the controls are hidden
+  // anyway. A pill filling towards a change that cannot happen is a lie.
+  if (count < 2) return state
+
+  const credited = Math.min(Math.max(deltaMs, 0), periodMs)
+  const elapsedMs = state.elapsedMs + credited
+
+  if (elapsedMs < periodMs) return { index: state.index, elapsedMs }
+
+  // The remainder is dropped rather than carried: the cap already bounds a step
+  // to one entry, and carrying it would leave the first frame of a new entry
+  // with its pill already partly filled.
+  //
+  // The modulo also normalises an index left past the end by a library that
+  // shrank under a refetch — the page reads the hero through the same one.
+  return { index: (state.index + 1) % count, elapsedMs: 0 }
+}
+
 export interface HeroEntry {
   id: string
   title: string

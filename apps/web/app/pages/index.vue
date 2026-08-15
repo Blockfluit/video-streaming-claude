@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { LibraryCard, Page } from '@video/shared'
 
+import type { Rotation } from '~/utils/hero'
+
 /**
  * The home page: a hero, then whatever rows an admin has configured, in order.
  *
@@ -110,45 +112,42 @@ const shelves = computed(() => (rows.value?.items ?? []).filter(row => row.items
 const entries = computed(() => heroEntries(shelves.value, newest.value?.items ?? []))
 
 /**
- * Which one is showing.
+ * Which one is showing, and how long it has been showing for.
  *
- * Starts at 0 deterministically. Anything derived from a clock or a random
- * number renders one entry on the server and a different one in the browser,
- * and a hydration mismatch is a warning rather than an error — so it would
- * simply be wrong, quietly, forever.
+ * Starts at the beginning of the first entry, deterministically. Anything
+ * derived from a clock or a random number renders one entry on the server and a
+ * different one in the browser, and a hydration mismatch is a warning rather
+ * than an error — so it would simply be wrong, quietly, forever. `elapsedMs` is
+ * part of that: the pill on the active bullet is drawn from it, so the server
+ * renders an empty one and the browser fills it from there.
+ *
+ * `tickRotation` in `app/utils/hero.ts` owns the arithmetic and is unit-tested;
+ * this file is the clock around it.
  */
-const active = ref(0)
+const rotation = ref<Rotation>({ index: 0, elapsedMs: 0 })
 
 /**
  * Read through the modulo rather than trusting the index.
  *
- * `entries` can shrink under a refetch, which would otherwise leave `active`
+ * `entries` can shrink under a refetch, which would otherwise leave the index
  * past the end and the hero blank while `v-if` still passed.
  */
-const hero = computed(() =>
-  entries.value.length === 0 ? null : entries.value[active.value % entries.value.length] ?? null,
+const active = computed(() =>
+  entries.value.length === 0 ? 0 : rotation.value.index % entries.value.length,
 )
 
-/**
- * How long each entry holds the hero.
- *
- * `HeroBackdrop` waits two seconds before its trailer fades in, so this is
- * roughly two seconds of banner and eight of trailer. Much shorter and the
- * entry changes before its trailer has said anything, while opening a YouTube
- * iframe every few seconds. Advancing when a trailer actually *ends* would need
- * the YouTube JS API — `enablejsapi` is set and nothing listens — so a fixed
- * interval is the honest version of "then play the next in line".
- */
-const ROTATE_MS = 10_000
+const hero = computed(() =>
+  entries.value.length === 0 ? null : entries.value[active.value] ?? null,
+)
 
 /**
  * Rotation stops for the three things that should stop it.
  *
- * `paused` covers a pointer resting on the hero, keyboard focus inside it, and
- * the explicit control — auto-updating content needs a way to stop it, and
- * "wait, what was that" is the commonest reason to want one. `dismissed` is
- * separate and permanent for the visit: somebody who closed the trailer is not
- * asking to be shown the next one ten seconds later.
+ * `hovering` covers a pointer resting on the hero and keyboard focus inside it.
+ * `paused` is the explicit control — auto-updating content needs a way to stop
+ * it, and "wait, what was that" is the commonest reason to want one. `dismissed`
+ * is separate and permanent for the visit: somebody who closed the trailer is
+ * not asking to be shown the next one ten seconds later.
  */
 const paused = ref(false)
 const hovering = ref(false)
@@ -158,32 +157,105 @@ const rotating = computed(() =>
   entries.value.length > 1 && !paused.value && !hovering.value && !dismissed.value,
 )
 
-let timer: ReturnType<typeof setInterval> | undefined
+/**
+ * What the pill's *label* keys on — deliberately not `rotating`.
+ *
+ * `rotating` folds in `hovering`, and a pointer is on the hero whenever anyone
+ * is near enough to press the control. Labelling from it is what made the old
+ * pause button look inert: it read "Resume the rotation" from the moment you
+ * reached for it and could not change while you were there. This says only
+ * whether the viewer has stopped it, so pressing it flips the label under their
+ * hand.
+ */
+const stopped = computed(() => paused.value || dismissed.value)
 
-function advance(): void {
+/**
+ * Whether the hero may move on its own at all.
+ *
+ * Defaults to true so the server renders the common case — an empty pill about
+ * to start filling. Under `prefers-reduced-motion` the pill is drawn full
+ * instead of empty: a bar that will never fill reads as broken, where a solid
+ * one reads as "this is the one you are looking at", which is all it can
+ * honestly say when nothing is going to happen next.
+ */
+const motion = ref(true)
+
+const fill = computed(() =>
+  motion.value ? Math.min(rotation.value.elapsedMs / ROTATE_MS, 1) : 1,
+)
+
+let frame: number | undefined
+let last = 0
+
+/**
+ * A frame loop rather than an interval, because the elapsed time is now drawn.
+ * An interval that fires every ten seconds says nothing about where the current
+ * turn has got to, and a second timer to animate the pill alongside it is two
+ * clocks to keep in agreement — they drift apart exactly when the rotation is
+ * held and resumed, which is most of the time.
+ *
+ * It also stops entirely in a background tab, where an interval keeps firing:
+ * the hero holds where it was left rather than burning through five entries
+ * nobody was there to see.
+ */
+function step(now: number): void {
+  frame = requestAnimationFrame(step)
+
+  const delta = now - last
+  // Before the guard, not after: a paused hero still has to keep its clock
+  // current, or resuming hands the whole paused span over as one delta.
+  last = now
+
   if (!rotating.value) return
-  active.value = (active.value + 1) % entries.value.length
+
+  rotation.value = tickRotation(rotation.value, delta, entries.value.length)
 }
 
 /**
- * Started in `onMounted`, so it never runs during SSR: an interval created in
- * `setup` runs in Nitro on every render, is never cleared, and mutates state
- * between rendering the markup and serialising the payload.
+ * Started in `onMounted`, so it never runs during SSR: a loop created in
+ * `setup` would run in Nitro on every render, never be cancelled, and mutate
+ * state between rendering the markup and serialising the payload.
  *
  * Not under `prefers-reduced-motion` either. A hero that begins moving on its
  * own is precisely what that setting is about, and it is the same rule the
- * trailer already follows — the dots still work, and so does the pause button.
+ * trailer already follows — the bullets still work.
  */
 onMounted(() => {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  timer = setInterval(advance, ROTATE_MS)
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    motion.value = false
+    return
+  }
+
+  last = performance.now()
+  frame = requestAnimationFrame(step)
 })
 
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  if (frame !== undefined) cancelAnimationFrame(frame)
+})
 
 /** Picking one by hand is a decision, so it stops the carousel moving under you. */
 function show(index: number): void {
-  active.value = index
+  rotation.value = { index, elapsedMs: 0 }
+  paused.value = true
+}
+
+/**
+ * The active bullet is also the stop control, which is why it does not simply
+ * flip `paused`.
+ *
+ * `dismissed` stops the rotation just as firmly and is set from a different
+ * button — the trailer's ✕ — so leaving it alone here would offer "Resume the
+ * rotation" on something that then refused to resume. Asking for it back out
+ * loud outranks having closed a trailer earlier.
+ */
+function togglePause(): void {
+  if (stopped.value) {
+    paused.value = false
+    dismissed.value = false
+    return
+  }
+
   paused.value = true
 }
 
@@ -304,30 +376,52 @@ useHead({ title: 'Home' })
         reachable nor announced. An inactive dot is dimmed with a *colour*, never
         with `opacity`: the audit reports an interactive element under 0.35
         effective opacity, and opacity multiplies down the whole ancestor chain.
+
+        There was a pause/resume button on the left of this row and it is gone,
+        replaced by the active bullet itself. It was not merely redundant: its
+        icon and label came from `rotating`, which is false while a pointer is
+        anywhere on the hero — so by the time anyone had reached for it, it was
+        already showing "play" and could not change under their click. A control
+        that cannot answer is worse than no control, and the pill says the same
+        thing better by showing the turn it is counting down.
       -->
-      <div v-if="entries.length > 1" class="mt-6 flex items-center gap-3">
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="subtle"
-          :icon="rotating ? 'i-lucide-pause' : 'i-lucide-play'"
-          :aria-label="rotating ? 'Pause the rotation' : 'Resume the rotation'"
-          @click="paused = !paused"
-        />
-        <div class="flex items-center gap-2">
-          <button
-            v-for="(entry, index) in entries"
-            :key="entry.id"
-            type="button"
-            class="size-2.5 rounded-full transition-colors"
-            :class="index === active % entries.length
-              ? 'bg-(--ui-primary)'
-              : 'bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
-            :aria-label="`Show ${entry.title}`"
-            :aria-current="index === active % entries.length ? 'true' : undefined"
-            @click="show(index)"
+      <div v-if="entries.length > 1" class="mt-6 flex items-center gap-2">
+        <!--
+          The active bullet stretches into a pill and fills over the entry's
+          turn, so the wait is visible rather than a surprise — and it doubles as
+          the stop control, because auto-updating content needs one.
+
+          Its label keys on `stopped`, never on `rotating`: hovering freezes the
+          fill (which explains itself) but must not rename the button, which is
+          the exact fault the old play button had.
+        -->
+        <button
+          v-for="(entry, index) in entries"
+          :key="entry.id"
+          type="button"
+          class="h-2.5 rounded-full transition-[width,background-color]"
+          :class="index === active
+            ? 'w-10 bg-(--ui-border-accented)'
+            : 'w-2.5 bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
+          :aria-label="index === active
+            ? (stopped ? 'Resume the rotation' : 'Pause the rotation')
+            : `Show ${entry.title}`"
+          :aria-current="index === active ? 'true' : undefined"
+          @click="index === active ? togglePause() : show(index)"
+        >
+          <!--
+            Decoration: `aria-current` is what announces which entry is showing,
+            and a progressbar nested inside a button is an ambiguity nobody
+            needs. No transition on the width — it is rewritten every frame, and
+            a transition would smear it a third of a second behind the truth.
+          -->
+          <span
+            v-if="index === active"
+            aria-hidden="true"
+            class="block h-full rounded-full bg-(--ui-primary)"
+            :style="{ width: `${fill * 100}%` }"
           />
-        </div>
+        </button>
       </div>
     </HeroBackdrop>
 
