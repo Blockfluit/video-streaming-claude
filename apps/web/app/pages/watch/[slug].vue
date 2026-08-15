@@ -147,6 +147,18 @@ const nextTo = computed(() =>
 /** Back to this video's own page, which is where the cast and synopsis are. */
 const backTo = computed(() => (video.value ? videoPath(video.value) : '/browse'))
 
+/**
+ * Where **Details** goes, which is not always `backTo`.
+ *
+ * For an episode it is the series: mid-episode, what someone wants back is the
+ * show they picked it from, not a page about the episode they are looking at.
+ * For a film — standalone or in a saga — it stays the film's own page, which
+ * holds the synopsis and cast that no collection page repeats. `detailsPath`
+ * owns that branch so it can be tested; the breadcrumb keeps `backTo`, because
+ * the video's own name there must lead to the video.
+ */
+const detailsTo = computed(() => (video.value ? detailsPath(video.value) : '/browse'))
+
 const player = ref<{ seek?: (s: number) => void } | null>(null)
 const currentTime = ref(0)
 
@@ -230,8 +242,11 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
             </UButton>
           </template>
 
-          <!-- Everything worth reading about this video is one click away. -->
-          <UButton :to="backTo" color="neutral" variant="subtle" icon="i-lucide-info">
+          <!--
+            Everything worth reading about this video is one click away — and for
+            an episode that is the series, not the episode. See `detailsTo`.
+          -->
+          <UButton :to="detailsTo" color="neutral" variant="subtle" icon="i-lucide-info">
             Details
           </UButton>
           <!--

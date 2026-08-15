@@ -85,6 +85,36 @@ export function playPath(video: LinkableVideo, fromCollectionSlug?: string | nul
   return `${path}?from=${encodeURIComponent(fromCollectionSlug)}`
 }
 
+/** Enough of a membership to tell an episode from everything else. */
+export interface DescribableVideo extends LinkableVideo {
+  collections?: { seasonId: string | null, collection: LinkableCollection }[] | null
+}
+
+/**
+ * Where a video is described *from the player*, which is not always its own page.
+ *
+ * An episode is described by its **series**. Halfway through episode three, the
+ * page worth reaching is the one you picked the episode from — the season list,
+ * the synopsis of the show, the rest of it — not a page about the episode already
+ * on screen. `videoPath` answers "where does this video live"; this answers "where
+ * does someone watching it want to go", and for an episode those differ.
+ *
+ * Everything else keeps `/v/:slug`, including a film sitting in a saga collection.
+ * That page carries the synopsis, cast and certification, and a collection page
+ * repeats none of it — sending a film to its shelf would lose the whole reason the
+ * button was pressed. `seasonId` is exactly the line between the two cases, and it
+ * is the same test `/v/:slug` labels an episode by.
+ *
+ * The season-bearing membership is searched for rather than read off the front: a
+ * video can be an episode of one collection and an extra in another, and only one
+ * of those is a series. `collections[0]` — what the "from …" subtitle uses — would
+ * answer that ordering wrongly.
+ */
+export function detailsPath(video: DescribableVideo): string {
+  const episodeOf = video.collections?.find(membership => membership.seasonId)
+  return episodeOf ? collectionPath(episodeOf.collection) : videoPath(video)
+}
+
 /**
  * A person's page — their filmography, and what they are known for.
  *
