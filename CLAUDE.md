@@ -814,16 +814,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
   and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
   enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
-- **1920 is the width `.page-shell` is tuned to**, and the arithmetic is exact: a `5rem` gutter either side of
-  1920px leaves 1760px, which *is* the `110rem` cap. So the cap does nothing at 1080p and everything above
-  it — a 4K screen got nine columns in the middle and ~1000px of dead background either side.
-  `.page-shell-wide` (browse and my-list, the two pages that are only a grid) drops the cap and grows the
-  gutter from that tuned width: `max(5rem, calc(5rem + (100vw - 1920px) * 0.12))`. Measured — 1920: 80px
-  gutter, 9 × 180px, unchanged either side of the change; 2560: 157px, 11 columns; 3840: 310px, 16 columns.
-  **Faster than proportional, deliberately.** A flat percentage (4.167vw, which is the same ratio 1080p has)
-  was the first attempt and reads as no margin at all at 4K — 160px against the ~1040px the cap used to
-  give. The margin has to become a larger *share* as the page grows, or the wall has nowhere to stop. Prose
-  pages keep the cap: a synopsis stops wanting width long before a wall of artwork does.
+- **Every page is `.page-shell` and nothing else.** One width, one gutter scale, the header included — so
+  moving between two routes never shifts the content sideways. `/browse` and `/my-list` were briefly given a
+  wider variant, on the reasoning that a wall of posters wants width in a way a synopsis does not: at 4K it
+  put sixteen columns 310px from the edge where every other page starts at 1115px. It was **removed on
+  sight** — the one page that does not line up does not read as using the space, it reads as broken, and
+  `/browse` is a click away from `/`. A wide treatment, if it ever returns, belongs to every full-width
+  surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
+  middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
+  page.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.

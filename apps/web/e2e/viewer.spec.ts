@@ -213,16 +213,17 @@ test.describe('viewer', () => {
   })
 
   /**
-   * A wide screen must not be left with empty space below one page of cards.
+   * A tall screen must not be left with empty space below one page of cards.
    *
-   * Fifty cards is under three rows on a 4K grid, so the first page never
-   * reaches the fold and nothing would ever ask for a second — the page keeps
-   * loading until the end of the list is off screen. Asserted at a viewport this
-   * suite does not otherwise use, because at 1280 one page already overflows and
-   * the bug is invisible.
+   * The page keeps loading until the end of the list is off screen, rather than
+   * fetching once and stopping. Proving that needs a viewport one page does
+   * *not* already fill — at this suite's usual 1280×720, fifty cards overflow
+   * several times over and a loader that never fired again would still look
+   * perfect. Hence the tall viewport: fifty cards is about six rows, so a 2400px
+   * screen shows the end of them and must ask for more without being scrolled.
    */
-  test('a wide viewport fills with cards rather than stopping at one page', async ({ page }) => {
-    await page.setViewportSize({ width: 2560, height: 1440 })
+  test('a tall viewport fills with cards rather than stopping at one page', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 2400 })
     await visit(page, '/browse')
 
     const total = await page.evaluate(async () => {
@@ -234,16 +235,16 @@ test.describe('viewer', () => {
     const cards = page.locator('main a[href^="/v/"], main a[href^="/c/"]')
     await expect(cards.first()).toBeVisible()
 
-    // The grid has to end below the fold, or there is a hole where cards should be.
-    await expect
-      .poll(
-        () => page.evaluate(() => {
-          const grid = document.querySelector('.poster-grid')
-          return grid ? grid.getBoundingClientRect().bottom - window.innerHeight : 0
-        }),
-        { timeout: 15_000 },
-      )
-      .toBeGreaterThan(0)
+    // Past one page, with no scrolling — that is the fill loop and nothing else.
+    await expect.poll(() => cards.count(), { timeout: 15_000 }).toBeGreaterThan(50)
+
+    // And the grid ends below the fold, so there is no band of empty background
+    // under it while there are still titles to show.
+    const overflow = await page.evaluate(() => {
+      const grid = document.querySelector('.poster-grid')
+      return grid ? grid.getBoundingClientRect().bottom - window.innerHeight : 0
+    })
+    expect(overflow).toBeGreaterThan(0)
   })
 
   /**
