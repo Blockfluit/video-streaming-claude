@@ -44,6 +44,10 @@ enum MediaOrigin {
   UPLOAD
   INGEST
   EXTRACTED
+  /// Fetched from an external subtitle provider by an admin. Like EXTRACTED and
+  /// UPLOAD — and unlike INGEST — it has no sidecar on disk to go missing, so
+  /// reconcile's sweep must never reap it.
+  DOWNLOADED
 }
 
 /// Where a piece of artwork came from, tracked per image rather than per video:

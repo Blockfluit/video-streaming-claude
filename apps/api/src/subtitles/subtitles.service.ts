@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { toPage, type Page } from '@video/shared';
@@ -165,13 +167,35 @@ export class SubtitlesService {
 
   /** Writes the servable `.vtt` into DERIVED_ROOT, converting if the source is not already one. */
   private async materialise(binding: SidecarBinding, storageKey: string): Promise<void> {
-    const source = this.storage.resolvePath('media', binding.sourceKey);
-    const destination = this.storage.resolvePath('derived', storageKey);
-    await this.storage.ensureDirectory('derived', `subtitles/${binding.videoId}`);
+    await this.writeVtt({
+      sourcePath: this.storage.resolvePath('media', binding.sourceKey),
+      format: binding.format,
+      storageKey,
+      describe: binding.sourceKey,
+    });
+  }
 
-    if (binding.format === 'vtt') {
+  /**
+   * The one answer to "how does an arbitrary subtitle file become a servable
+   * `.vtt` in DERIVED_ROOT".
+   *
+   * Takes an absolute path rather than a storage key because its two callers
+   * read from different places: a sidecar lives in the media tree, and a
+   * downloaded file is staged in `derived/tmp/` having never been on disk
+   * anywhere else.
+   */
+  private async writeVtt(input: {
+    sourcePath: string;
+    format: string;
+    storageKey: string;
+    /** How the source is named in an error an admin will read. */
+    describe: string;
+  }): Promise<void> {
+    await this.storage.ensureDirectory('derived', dirname(input.storageKey));
+
+    if (input.format === 'vtt') {
       // Copied rather than referenced, so everything served sits in one root.
-      await this.storage.save('derived', storageKey, await readFile(source));
+      await this.storage.save('derived', input.storageKey, await readFile(input.sourcePath));
       return;
     }
 
@@ -183,16 +207,119 @@ export class SubtitlesService {
      * bytes it contains — and a conversion that already failed cannot be
      * rescued by a retry it never reaches.
      */
-    const charset = isProbablyUtf8(await readFile(source)) ? undefined : 'CP1252';
+    const charset = isProbablyUtf8(await readFile(input.sourcePath)) ? undefined : 'CP1252';
     if (charset) {
-      this.logger.log(`${binding.sourceKey} is not UTF-8; converting as ${charset}`);
+      this.logger.log(`${input.describe} is not UTF-8; converting as ${charset}`);
     }
 
+    /**
+     * Converted into `tmp/` and renamed into place, like a transcode.
+     *
+     * ffmpeg truncates its output the moment it opens it, so converting
+     * straight to the final key leaves the live track empty for as long as the
+     * conversion takes — and empty for good if it fails. The player requests
+     * that URL the instant it mounts.
+     */
+    const staging = `tmp/subtitle-${randomUUID()}.vtt`;
+    await this.storage.ensureDirectory('derived', 'tmp');
+
     try {
-      await this.ffmpeg.convertSubtitle(source, destination, charset);
+      await this.ffmpeg.convertSubtitle(
+        input.sourcePath,
+        this.storage.resolvePath('derived', staging),
+        charset,
+      );
+      await this.storage.move('derived', staging, input.storageKey);
     } catch (error) {
+      await this.storage.delete('derived', staging);
       throw new BadRequestException(
-        `Could not convert ${binding.sourceKey}: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not convert ${input.describe}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Installs a subtitle fetched from an external provider.
+   *
+   * `origin: DOWNLOADED` for the same reason `EXTRACTED` exists: there is no
+   * sidecar in the media tree behind it, so reconcile — which reaps only
+   * `INGEST` rows — must never see it as a subtitle whose file has gone.
+   */
+  async installDownloaded(input: {
+    videoId: string;
+    fileId: string;
+    bytes: Buffer;
+    format: string;
+    language: string;
+    label: string;
+    isDefault: boolean;
+  }) {
+    const video = await this.prisma.video.findUnique({
+      where: { id: input.videoId },
+      select: { id: true },
+    });
+    if (!video) throw new NotFoundException('No such video');
+
+    // A provider that says `.vtt` and sends an SRT would otherwise install a
+    // track that lists a language and displays nothing.
+    if (input.format === 'vtt' && !isWebVtt(input.bytes)) {
+      throw new BadRequestException('That download is not WebVTT, despite being offered as one.');
+    }
+
+    const language = input.language.trim().toLowerCase();
+    const storageKey = `subtitles/${input.videoId}/download-${input.fileId}.vtt`;
+    const staging = `tmp/download-${randomUUID()}.${sanitiseExtension(input.format)}`;
+
+    await this.storage.save('derived', staging, input.bytes);
+    try {
+      await this.writeVtt({
+        sourcePath: this.storage.resolvePath('derived', staging),
+        format: input.format,
+        storageKey,
+        describe: `the downloaded ${input.format.toUpperCase()}`,
+      });
+    } finally {
+      // The staged copy is worthless either way — the conversion consumed it,
+      // or it failed and a retry downloads afresh.
+      await this.storage.delete('derived', staging);
+    }
+
+    const existing = await this.prisma.subtitle.findFirst({
+      where: { videoId: input.videoId, storageKey },
+      select: { id: true },
+    });
+
+    try {
+      const saved = existing
+        ? await this.prisma.subtitle.update({
+            where: { id: existing.id },
+            data: { language, label: input.label, sourceFormat: input.format },
+            select: SUBTITLE_SELECT,
+          })
+        : await this.prisma.subtitle.create({
+            data: {
+              videoId: input.videoId,
+              language,
+              label: input.label,
+              storageKey,
+              sourceFormat: input.format,
+              origin: 'DOWNLOADED',
+              isDefault: false,
+            },
+            select: SUBTITLE_SELECT,
+          });
+
+      if (input.isDefault) await this.setDefault(saved.id);
+
+      return { ...saved, languageKnown: isKnownLanguage(language) };
+    } catch (error) {
+      // `(videoId, language, label)` is unique, and the same language and label
+      // arriving from a different file is a duplicate rather than a failure the
+      // admin can do anything about without being told what happened.
+      await this.storage.delete('derived', storageKey);
+      this.logger.warn(`Could not install downloaded subtitle: ${describeError(error)}`);
+      throw new BadRequestException(
+        `This video already has a "${input.label}" track in that language. Rename or remove it first.`,
       );
     }
   }
@@ -356,6 +483,18 @@ export class SubtitlesService {
       this.prisma.subtitle.update({ where: { id }, data: { isDefault: true } }),
     ]);
   }
+}
+
+/**
+ * A provider names its own file, and that name reaches a path. Anything but a
+ * short alphanumeric extension is not one, and is replaced rather than trusted.
+ */
+function sanitiseExtension(format: string): string {
+  return /^[a-z0-9]{2,4}$/i.test(format) ? format.toLowerCase() : 'srt';
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** A stable, filesystem-safe name per track, so re-binding overwrites rather than accumulating. */

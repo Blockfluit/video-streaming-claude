@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseInterceptors,
@@ -17,8 +18,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   MAX_SUBTITLE_BYTES,
+  fetchSubtitleSchema,
+  subtitleSearchSchema,
   updateSubtitleSchema,
   uploadSubtitleSchema,
+  type FetchSubtitleInput,
+  type SubtitleSearchInput,
   type UpdateSubtitleInput,
   type UploadSubtitleInput,
 } from '@video/shared';
@@ -28,6 +33,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
 import { VideosService } from '../videos/videos.service';
+import { SubtitleSearchService } from './subtitle-search.service';
 import { SubtitlesService } from './subtitles.service';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ThrottleExpensive } from '../common/throttling';
@@ -36,6 +42,7 @@ import { ThrottleExpensive } from '../common/throttling';
 export class SubtitlesController {
   constructor(
     private readonly subtitles: SubtitlesService,
+    private readonly search: SubtitleSearchService,
     private readonly videos: VideosService,
   ) {}
 
@@ -95,6 +102,40 @@ export class SubtitlesController {
     if (!file) throw new BadRequestException('No subtitle uploaded');
 
     return this.subtitles.upload(videoId, file.buffer, dto);
+  }
+
+  /**
+   * What an external provider has for this video.
+   *
+   * A GET that makes an outbound call is unusual, but it is a read: nothing
+   * changes here, and an admin re-running a search after typing a better title
+   * is the expected way to use it.
+   */
+  @ThrottleExpensive()
+  @Get('videos/:videoId/subtitle-candidates')
+  @Roles('ADMIN')
+  findCandidates(
+    @Param('videoId') videoId: string,
+    @Query(validate(subtitleSearchSchema)) dto: SubtitleSearchInput,
+  ) {
+    return this.search.search(videoId, dto);
+  }
+
+  /**
+   * Installs one of them.
+   *
+   * Declared before nothing in particular — `subtitles/fetch` cannot collide
+   * with `subtitles/:subtitleId.vtt`, which is a GET and carries an extension.
+   */
+  @ThrottleExpensive()
+  @Post('videos/:videoId/subtitles/fetch')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  fetch(
+    @Param('videoId') videoId: string,
+    @Body(validate(fetchSubtitleSchema)) dto: FetchSubtitleInput,
+  ) {
+    return this.search.install(videoId, dto);
   }
 
   @Patch('subtitles/:id')
