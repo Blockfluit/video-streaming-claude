@@ -41,6 +41,18 @@ const props = defineProps<{
   paused?: boolean
 }>()
 
+/**
+ * The moment the trailer becomes visible — not when it was asked for.
+ *
+ * The home hero rotates on a fixed interval, and a YouTube embed measured here
+ * takes **five to nine seconds** just to fire `load`; the turn is ten. So the
+ * entry was changing at about the moment its trailer became watchable, and the
+ * page looked exactly as if no trailer ever played. The rotation starts an
+ * entry's turn from this instead, so a slow embed costs a longer turn rather
+ * than the whole feature.
+ */
+const emit = defineEmits<{ revealed: [] }>()
+
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
 
@@ -110,7 +122,10 @@ function stopTrailer(): void {
 
 function reveal(): void {
   clearTimeout(curtain)
+  if (revealed.value) return
+
   revealed.value = true
+  emit('revealed')
 }
 
 /**

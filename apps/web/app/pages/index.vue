@@ -194,6 +194,25 @@ const fill = computed(() =>
   motion.value ? Math.min(rotation.value.elapsedMs / ROTATE_MS, 1) : 1,
 )
 
+/**
+ * Restart this entry's turn the moment its trailer actually becomes visible.
+ *
+ * The turn is ten seconds and a YouTube embed, measured against the real thing,
+ * takes **five to nine** just to fire `load` — so the hero was moving on at
+ * about the moment there was finally something to watch, and the page read as
+ * though the trailer never played at all. (`onStateChange` never arrives, so
+ * there is no earlier signal to key on; the embed says nothing until it loads.)
+ *
+ * Once per entry, which the `revealed` emit already guarantees, and only while
+ * the carousel is running: resetting the clock repeatedly would be a hero that
+ * never advances. An entry whose trailer never loads keeps the ordinary ten
+ * seconds, so a dead embed cannot freeze the rotation.
+ */
+function giveTheTrailerItsTurn(): void {
+  if (!rotating.value) return
+  rotation.value = { ...rotation.value, elapsedMs: 0 }
+}
+
 let frame: number | undefined
 let last = 0
 
@@ -324,6 +343,7 @@ useHead({ title: 'Home' })
       :image="hero.image"
       :trailer-id="hero.trailerId"
       :paused="trailerOpen"
+      @revealed="giveTheTrailerItsTurn"
       @pointerenter="hovering = true"
       @pointerleave="hovering = false"
       @focusin="hovering = true"
