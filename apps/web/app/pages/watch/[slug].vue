@@ -31,7 +31,14 @@ interface VideoDetail {
   collections: Membership[]
 }
 
-/** Only what ordering needs; the rest of the collection's record is not read here. */
+/**
+ * What ordering needs, plus what the rail beside the player draws.
+ *
+ * All of it arrives on the one response already — this only widens the local
+ * view of it, so the rail costs no second request. `title` on a season is read
+ * for nothing yet; the heading is built from the number, and a season that
+ * names itself is a change to `EpisodeRail`, not to what is fetched.
+ */
 interface CollectionSequence {
   seasons: { id: string, number: number | null }[]
   videos: {
@@ -40,6 +47,8 @@ interface CollectionSequence {
     title: string
     seasonId: string | null
     orderIndex: number | null
+    durationSec: number | null
+    state: string
   }[]
 }
 
@@ -144,6 +153,70 @@ const nextTo = computed(() =>
   steps.value.next ? playPath(steps.value.next, from.value) : null,
 )
 
+/**
+ * The rail lists the same sequence the stepper walks, cut at the seasons.
+ *
+ * Deliberately the same `sequence` and the same condition as `hasStepper`, so a
+ * page never gains one of the two controls and not the other, and the rail can
+ * never claim an order the Next button disagrees with.
+ */
+const groups = computed(() => groupBySeason(sequence.value, collection.value?.seasons ?? []))
+const hasRail = computed(() => hasStepper.value)
+
+/**
+ * Whether to *leave room* for the rail — which is not the same question as
+ * whether there is one to draw yet, and must not be answered by the same value.
+ *
+ * The sequence read is `lazy`, so the first paint has no collection: deciding
+ * the columns from `hasRail` gave a single full-width column, and the rail
+ * arriving a moment later took a third of it away. The player is 16:9 and sized
+ * by its column, so that is not a control appearing beside some text — it is the
+ * picture itself resizing under the person who just pressed play, on every
+ * episode.
+ *
+ * `?from=` is in the URL and therefore known before anything is fetched, so the
+ * column is reserved from the first paint and the player is one size throughout.
+ * The cost is the rare case where the collection turns out to hold a single
+ * video: an empty column, collapsing once, rather than every ordinary load
+ * reflowing.
+ */
+const expectsRail = computed(() => from.value !== null)
+
+/**
+ * The collection to name above the rail, taken from this video's own
+ * memberships rather than from the sequence read.
+ *
+ * `?from=` is a slug and arrives through the URL, where anybody can write one.
+ * Matching it against the memberships is what makes the heading a fact about
+ * this video: a slug naming a collection this video is not in finds nothing, and
+ * the rail is already withheld in that case by `hasStepper`.
+ */
+const railCollection = computed(
+  () => video.value?.collections.find(entry => entry.collection.slug === from.value)?.collection
+    ?? null,
+)
+
+/**
+ * How far the viewer got through each of them, for the resume bars and the
+ * watched ticks — the same endpoint and the same shape the collection page
+ * uses, so the two screens cannot draw different bars for one episode.
+ *
+ * `lazy` for the reason the sequence read is: this is chrome beside the player,
+ * and blocking the render on it would delay playback to draw a progress bar.
+ * Asked for only when there is a rail to draw it in.
+ */
+const { data: watched } = await useApiData<{
+  items: { videoId: string, lastPositionSec: number, completed: boolean }[]
+}>(
+  () => `watch-progress-${from.value ?? 'none'}`,
+  () => `/collections/${encodeURIComponent(from.value!)}/progress`,
+  { watch: [from], immediate: from.value !== null, lazy: true },
+)
+
+const progressByVideo = computed(
+  () => new Map((watched.value?.items ?? []).map(item => [item.videoId, item])),
+)
+
 /** Back to this video's own page, which is where the cast and synopsis are. */
 const backTo = computed(() => (video.value ? videoPath(video.value) : '/browse'))
 
@@ -169,115 +242,155 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
 
 <template>
   <div v-if="video" class="page-shell pt-24 pb-24">
-    <nav class="mb-4 flex flex-wrap items-center gap-2 text-sm text-(--ui-text-muted)">
-      <template v-for="membership in video.collections" :key="membership.collectionId">
-        <NuxtLink
-          :to="collectionPath(membership.collection)"
-          class="transition-colors hover:text-(--ui-text)"
-        >
-          {{ membership.collection.title }}
-        </NuxtLink>
-        <span aria-hidden="true">/</span>
-      </template>
-      <NuxtLink :to="backTo" class="text-(--ui-text) transition-colors hover:text-white">
-        {{ video.title }}
-      </NuxtLink>
-    </nav>
+    <!--
+      One grid for the whole page, and the breadcrumb inside the player's own
+      column.
 
-    <div class="mx-auto max-w-6xl space-y-6">
-      <VideoPlayer
-        ref="player"
-        :video-id="video.id"
-        :title="video.title"
-        :duration-sec="video.durationSec"
-        :markers="video"
-        :next-to="nextTo"
-        @timeupdate="seconds => (currentTime = seconds)"
-      />
+      It used to sit out here as a child of `.page-shell` while everything below
+      it was wrapped in `mx-auto max-w-6xl`, so past about 1250px the trail
+      started several hundred pixels left of the picture it named. Sharing a
+      column makes the two edges the same edge, rather than two numbers that
+      happen to agree until one of them is changed.
 
-      <div class="flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-semibold tracking-tight">{{ video.title }}</h1>
-        <QualityBadge :width="video.width" :height="video.height" />
-        <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
-          {{ video.state }}
-        </UBadge>
-        <!--
-          The controls are kept together in one `ml-auto` group rather than
-          pushed apart: with the margin on the first button, a second one lands
-          beside the title and the row reads as two unrelated halves.
-        -->
-        <div class="ml-auto flex items-center gap-2">
-          <!--
-            Stepping through the collection this was reached through.
-
-            Rendered as a pair and kept in place at the ends rather than
-            disappearing: a control that vanishes at the last episode moves
-            everything beside it, and the row you were aiming at shifts under
-            the pointer. Disabled says "this is the end of the show", which is
-            worth knowing; absent says nothing at all.
-
-            No `to` when there is nowhere to go, so this is a real disabled
-            `<button>` rather than a link that still navigates.
-          -->
-          <template v-if="hasStepper">
-            <UButton
-              :to="previousTo ?? undefined"
-              :disabled="!previousTo"
-              color="neutral"
-              variant="subtle"
-              icon="i-lucide-chevron-left"
-              aria-label="Previous episode"
+      Rows and columns are placed explicitly so the rail can stand beside both
+      the player and the comments while the DOM order — player, episodes,
+      comments — is what a phone gets stacked. Left as source order, a rail
+      would land under a thread of comments, which is where nobody looks for it.
+    -->
+    <div
+      class="grid gap-x-8 gap-y-6 lg:items-start"
+      :class="expectsRail
+        ? 'lg:grid-cols-[minmax(0,1fr)_22rem]'
+        : 'mx-auto w-full max-w-[min(100%,calc((100dvh-13rem)*16/9))]'"
+    >
+      <div class="min-w-0 space-y-6">
+        <nav class="flex flex-wrap items-center gap-2 text-sm text-(--ui-text-muted)">
+          <template v-for="membership in video.collections" :key="membership.collectionId">
+            <NuxtLink
+              :to="collectionPath(membership.collection)"
+              class="transition-colors hover:text-(--ui-text)"
             >
-              Previous
-            </UButton>
-            <UButton
-              :to="nextTo ?? undefined"
-              :disabled="!nextTo"
-              color="neutral"
-              variant="subtle"
-              trailing-icon="i-lucide-chevron-right"
-              aria-label="Next episode"
-            >
-              Next
-            </UButton>
+              {{ membership.collection.title }}
+            </NuxtLink>
+            <span aria-hidden="true">/</span>
           </template>
+          <NuxtLink :to="backTo" class="text-(--ui-text) transition-colors hover:text-white">
+            {{ video.title }}
+          </NuxtLink>
+        </nav>
 
+        <VideoPlayer
+          ref="player"
+          :video-id="video.id"
+          :title="video.title"
+          :duration-sec="video.durationSec"
+          :markers="video"
+          :next-to="nextTo"
+          @timeupdate="seconds => (currentTime = seconds)"
+        />
+
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-xl font-semibold tracking-tight">{{ video.title }}</h1>
+          <QualityBadge :width="video.width" :height="video.height" />
+          <UBadge v-if="video.state !== 'PUBLISHED'" color="warning" variant="subtle">
+            {{ video.state }}
+          </UBadge>
           <!--
-            Everything worth reading about this video is one click away — and for
-            an episode that is the series, not the episode. See `detailsTo`.
+            The controls are kept together in one `ml-auto` group rather than
+            pushed apart: with the margin on the first button, a second one lands
+            beside the title and the row reads as two unrelated halves.
           -->
-          <UButton :to="detailsTo" color="neutral" variant="subtle" icon="i-lucide-info">
-            Details
-          </UButton>
-          <!--
-            A wrong title or a misplaced marker is noticed here, with the video
-            playing — not on the page you came from. Admins only: the API
-            refuses either way, but offering a button that 403s is not an
-            interface.
-          -->
-          <UButton
-            v-if="isAdmin"
-            :to="`/admin/videos/${video.id}`"
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-pencil"
-          >
-            Edit
-          </UButton>
+          <div class="ml-auto flex items-center gap-2">
+            <!--
+              Stepping through the collection this was reached through.
+
+              Rendered as a pair and kept in place at the ends rather than
+              disappearing: a control that vanishes at the last episode moves
+              everything beside it, and the row you were aiming at shifts under
+              the pointer. Disabled says "this is the end of the show", which is
+              worth knowing; absent says nothing at all.
+
+              No `to` when there is nowhere to go, so this is a real disabled
+              `<button>` rather than a link that still navigates.
+            -->
+            <template v-if="hasStepper">
+              <UButton
+                :to="previousTo ?? undefined"
+                :disabled="!previousTo"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-chevron-left"
+                aria-label="Previous episode"
+              >
+                Previous
+              </UButton>
+              <UButton
+                :to="nextTo ?? undefined"
+                :disabled="!nextTo"
+                color="neutral"
+                variant="subtle"
+                trailing-icon="i-lucide-chevron-right"
+                aria-label="Next episode"
+              >
+                Next
+              </UButton>
+            </template>
+
+            <!--
+              Everything worth reading about this video is one click away — and for
+              an episode that is the series, not the episode. See `detailsTo`.
+            -->
+            <UButton :to="detailsTo" color="neutral" variant="subtle" icon="i-lucide-info">
+              Details
+            </UButton>
+            <!--
+              A wrong title or a misplaced marker is noticed here, with the video
+              playing — not on the page you came from. Admins only: the API
+              refuses either way, but offering a button that 403s is not an
+              interface.
+            -->
+            <UButton
+              v-if="isAdmin"
+              :to="`/admin/videos/${video.id}`"
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-pencil"
+            >
+              Edit
+            </UButton>
+          </div>
         </div>
       </div>
 
-      <USeparator />
-
       <!--
-        Comments stay with the player: one pinned to a moment seeks the video
-        that is on screen, which it cannot do from a page with no player on it.
+        The rest of the show, beside the picture rather than a page back. It
+        spans both rows so it stands the full height of the column on a wide
+        screen, and comes second in the source so a stacked phone gets it
+        between the player and the comments.
       -->
-      <CommentThread
-        :video-id="video.id"
-        :current-time="currentTime"
-        @seek="seconds => player?.seek?.(seconds)"
+      <EpisodeRail
+        v-if="hasRail && railCollection && from"
+        class="lg:col-start-2 lg:row-span-2 lg:row-start-1"
+        :groups="groups"
+        :collection="railCollection"
+        :current-video-id="video.id"
+        :from="from"
+        :progress="progressByVideo"
       />
+
+      <div class="min-w-0 space-y-6 lg:col-start-1 lg:row-start-2">
+        <USeparator />
+
+        <!--
+          Comments stay with the player: one pinned to a moment seeks the video
+          that is on screen, which it cannot do from a page with no player on it.
+        -->
+        <CommentThread
+          :video-id="video.id"
+          :current-time="currentTime"
+          @seek="seconds => player?.seek?.(seconds)"
+        />
+      </div>
     </div>
   </div>
 </template>

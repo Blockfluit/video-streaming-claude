@@ -967,6 +967,153 @@ test.describe('viewer', () => {
     await expect(page.getByRole('button', { name: 'Next episode' })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Previous episode' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Previous episode' })).toHaveCount(0)
+
+    // And no rail either: it is drawn from the same sequence the stepper walks,
+    // so a page that cannot offer one cannot honestly offer the other.
+    await expect(page.getByRole('complementary')).toHaveCount(0)
+  })
+
+  /**
+   * The rest of the collection, beside the player.
+   *
+   * The stepper answers "what is adjacent"; the rail answers "what is there",
+   * which is the question somebody has when they want the episode they skipped.
+   * Both are drawn from one sequence, and this pins that they agree — a rail
+   * listing a different order from the Next button renders perfectly either way.
+   *
+   * The collection is chosen from the **data**, never from `locator.count()`,
+   * which does not retry: a guard written with it runs before the list has
+   * rendered and therefore skips on every run. One did exactly that in this
+   * suite for weeks while reporting green.
+   */
+  test('the player lists the rest of the collection beside it', async ({ page }) => {
+    await visit(page, '/browse')
+    const found = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        if ((detail.videos ?? []).length > 1) {
+          return { slug: collection.slug as string, count: detail.videos.length as number }
+        }
+      }
+      return null
+    })
+    test.skip(found === null, 'no collection here holds two videos')
+
+    await visit(page, `/c/${found!.slug}`)
+
+    // Scoped past the hero, whose Play button is also a `/watch/` link.
+    const entry = page.locator('main section ~ div a[href^="/watch/"]').first()
+    await expect(entry).toBeVisible()
+    await entry.click()
+    await page.waitForURL(/\/watch\//)
+
+    const rail = page.getByRole('complementary')
+    await expect(rail).toBeVisible()
+
+    /*
+     * A row per video, and no more. The rail is fed the whole sequence, so a
+     * short list means the ordering dropped something — which is the failure
+     * that looks fine on screen, because a show missing one episode still
+     * reads as a show.
+     */
+    const rows = rail.locator('a[href^="/watch/"]')
+    await expect(rows).toHaveCount(found!.count)
+
+    /*
+     * Every link carries the collection on. Without it the first click out of
+     * the rail is the last one — the rail and the stepper both vanish from the
+     * page it lands on, which reads as the app breaking.
+     */
+    const hrefs = await rows.evaluateAll(links =>
+      links.map(link => link.getAttribute('href') ?? ''),
+    )
+    for (const href of hrefs) {
+      expect(
+        new URL(href, page.url()).searchParams.get('from'),
+        'a rail link that drops the collection ends the rail',
+      ).toBe(found!.slug)
+    }
+
+    /*
+     * And it says which one is playing — announced, not merely tinted. A list
+     * of everything with nothing marked is a list you have to read your own
+     * address bar to use, and a background colour says that to sighted users
+     * only.
+     */
+    const playing = new URL(page.url()).pathname
+    await expect(rail.locator('[aria-current="true"]')).toHaveCount(1)
+    await expect(rail.locator(`a[href^="${playing}"]`)).toHaveAttribute('aria-current', 'true')
+
+    // Following a row plays it, rather than describing it.
+    const otherHref = hrefs.find(href => !href.startsWith(playing))
+    expect(otherHref, 'every row points at the episode already playing').toBeTruthy()
+    await rail.locator(`a[href="${otherHref}"]`).click()
+    await page.waitForURL(url => url.pathname + url.search === otherHref)
+    await expect(page.locator('video')).toBeVisible()
+
+    // The rail survives the trip, which is the whole point of carrying `from`.
+    await expect(page.getByRole('complementary')).toBeVisible()
+  })
+
+  /**
+   * The picture must not resize once the rail's data lands.
+   *
+   * The player is 16:9 and takes its size from its grid column, so a column
+   * decided by the loaded collection is not a control appearing beside some
+   * text — it is the video changing size under whoever just pressed Play. It
+   * measured 1550px wide and then snapped to 1216px.
+   *
+   * A **client-side** arrival, because that is the only one that can shift and
+   * the reason this went unnoticed: a fresh load is server-rendered, and Nitro
+   * fetches the sequence even though it is `lazy` and ships it in the payload,
+   * so the rail is in the first paint and nothing moves. Pressing Play on
+   * `/v/:slug` is a client navigation into a collection whose sequence is not
+   * cached, and there the data genuinely arrives late.
+   *
+   * The read is held open rather than raced. Without that, "before the data
+   * arrives" is a window a fast machine closes before the first measurement,
+   * and the test passes by measuring the settled state twice.
+   */
+  test('the player is one size while the rail is still loading', async ({ page }) => {
+    await visit(page, '/browse')
+    const found = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        const videos = detail.videos ?? []
+        if (videos.length > 1) {
+          return { slug: collection.slug as string, first: videos[0].slug as string }
+        }
+      }
+      return null
+    })
+    test.skip(found === null, 'no collection here holds two videos')
+
+    await page.route(`**/api/collections/${found!.slug}`, async (route) => {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      await route.continue()
+    })
+
+    await visit(page, `/v/${found!.first}`)
+    await page.getByRole('link', { name: /^(Play|Resume)/ }).first().click()
+    await page.waitForURL(/\/watch\//)
+
+    await page.locator('video').waitFor({ state: 'attached' })
+    const early = await page.locator('video').boundingBox()
+
+    // The measurement is only worth anything taken before the rail exists.
+    expect(
+      await page.getByRole('complementary').count(),
+      'the rail arrived before this could measure without it',
+    ).toBe(0)
+
+    await expect(page.getByRole('complementary')).toBeVisible({ timeout: 20_000 })
+    const settled = await page.locator('video').boundingBox()
+
+    expect(Math.round(early!.width), 'the player resized as the rail arrived').toBe(
+      Math.round(settled!.width),
+    )
   })
 
   /**
