@@ -249,6 +249,84 @@ test.describe('admin', () => {
   })
 
   /**
+   * A person's own page opens from the directory.
+   *
+   * It did not. The page had been committed to `apps/web/apps/web/app/pages/…`
+   * — a duplicated `apps/web/` that Nuxt never scans — so the directory was the
+   * app's only link to `/people/:slug` and it went to a 404. Nothing caught it:
+   * the file matched no glob in the repo, and no test had ever clicked the link.
+   *
+   * Clicked rather than navigated to, because the pairing of the link with its
+   * route is the whole of what broke.
+   */
+  test("a person's page opens from the directory", async ({ page }) => {
+    await visit(page, '/admin/people')
+
+    // Decided from the data. `locator.count()` does not retry, so a guard
+    // written on it runs before the route has rendered and skips every time.
+    const person = await page.evaluate(async () => {
+      const body = await (await fetch('/api/people?limit=1')).json()
+      const found = body.items?.[0]
+      return found ? { name: found.name as string, slug: found.slug as string } : null
+    })
+    test.skip(person === null, 'this library holds no people')
+
+    const link = page.getByRole('link', { name: person!.name }).first()
+    await expect(link).toBeVisible()
+    await link.click()
+    await page.waitForURL(`/people/${person!.slug}`)
+
+    await expect(page.getByRole('heading', { level: 1, name: person!.name })).toBeVisible()
+  })
+
+  /**
+   * The directory reaches past its first window.
+   *
+   * It could not: one request at `limit=100` — the API's ceiling — and stop.
+   * `total` and `hasMore` both arrived in that response and neither was ever
+   * read, so person 101 was reachable only by already knowing their name.
+   */
+  test('the person directory loads more than one page', async ({ page }) => {
+    await visit(page, '/admin/people')
+
+    const total = await page.evaluate(async () => {
+      const body = await (await fetch('/api/people?limit=1')).json()
+      return body.total as number
+    })
+
+    const button = page.getByRole('button', { name: /Load \d+ more/ })
+    const cards = page.locator('main a[href^="/people/"]')
+
+    // Both directions are real assertions: past one window the button has to
+    // fetch the next, and within one window it must not be offered at all.
+    if (total <= 100) {
+      await expect(cards).toHaveCount(total)
+      await expect(button).toHaveCount(0)
+      return
+    }
+
+    await expect(cards).toHaveCount(100)
+    await expect(button).toBeVisible()
+    await expectsRequest(page, /\/people\?.*offset=100/, 'GET', () => button.click())
+    await expect(cards).toHaveCount(Math.min(total, 200))
+  })
+
+  /**
+   * A new search drops the windows loaded for the old one.
+   *
+   * The accumulator's one real hazard: the first window is replaced by the
+   * refetch, and anything appended to it was fetched at an offset that means
+   * nothing once the filter moves.
+   */
+  test('a search drops the pages loaded before it', async ({ page }) => {
+    await visit(page, '/admin/people')
+
+    await fillStable(page, 'input[placeholder="Search"]', 'zzz-nobody-by-this-name')
+    await expect(page.getByText('Nobody matches.')).toBeVisible()
+    await expect(page.locator('main a[href^="/people/"]')).toHaveCount(0)
+  })
+
+  /**
    * The credits editor, driven through its real controls.
    *
    * Worth covering carefully: the credits API shipped in step 16 and nothing in

@@ -19,6 +19,10 @@ export interface LinkableVideo {
   slug: string
 }
 
+export interface LinkablePerson {
+  slug: string
+}
+
 export function collectionPath(collection: LinkableCollection): string {
   return `/c/${collection.slug}`
 }
@@ -64,6 +68,22 @@ export function videoPath(video: LinkableVideo): string {
  */
 export function playPath(video: LinkableVideo): string {
   return `/watch/${video.slug}`
+}
+
+/**
+ * A person's page — their filmography, and what they are known for.
+ *
+ * Keyed on the slug like everything else addressable here.
+ *
+ * The page this points at spent a long time unreachable. It had been committed
+ * to `apps/web/apps/web/app/pages/…` — a duplicated `apps/web/` that Nuxt never
+ * scans, and that no glob in the repo matches — so the route did not exist and
+ * the directory's link went to a 404. It is a helper now because three surfaces
+ * build this URL, and because the pairing of a link with its page is exactly
+ * what broke: a link lands with its page, or it is not a link.
+ */
+export function personPath(person: LinkablePerson): string {
+  return `/people/${person.slug}`
 }
 
 /**

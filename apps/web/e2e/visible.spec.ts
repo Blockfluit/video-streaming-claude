@@ -226,6 +226,29 @@ test.describe('legibility', () => {
     ).toEqual([])
   })
 
+  /**
+   * A person's page too — the one that shipped with `text-white/40` on its
+   * empty state, at 3.5:1, below the AA floor. It could not be audited before
+   * this: the file sat outside the routed tree, so there was no page to open.
+   */
+  test('a person page too', async ({ page }) => {
+    await visit(page, '/admin/people')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/people?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    test.skip(slug === null, 'this library holds no people')
+
+    await visit(page, `/people/${slug}`)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `person page:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
   test('a collection page too', async ({ page }) => {
     await visit(page, '/browse')
     const card = page.locator('main a[href^="/c/"]').first()

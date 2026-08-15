@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest'
 
-import { collectionPath, imdbPersonUrl, imdbTitleUrl, playPath, videoPath } from './links'
+import {
+  collectionPath,
+  imdbPersonUrl,
+  imdbTitleUrl,
+  personPath,
+  playPath,
+  videoPath,
+} from './links'
 
 describe('collectionPath', () => {
   it('points at the collection page', () => {
     expect(collectionPath({ slug: 'the-big-sky' })).toBe('/c/the-big-sky')
+  })
+})
+
+/**
+ * The route this builds did not exist for a long time: the page had been
+ * committed one directory too deep, so every link here was a 404.
+ */
+describe('personPath', () => {
+  it('points at the person page', () => {
+    expect(personPath({ slug: 'ada-lovelace' })).toBe('/people/ada-lovelace')
   })
 })
 
