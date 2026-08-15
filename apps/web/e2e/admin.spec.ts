@@ -151,6 +151,55 @@ test.describe('admin', () => {
   })
 
   /**
+   * The subtitles panel moved out of this page into its own component, and a
+   * panel that renders but no longer does anything looks identical in a
+   * screenshot. Extraction is the control that proves it is still wired.
+   */
+  test('the subtitles panel still queues an extraction', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.getByRole('link', { name: 'Edit' }).first().click()
+    await page.waitForURL(/\/admin\/videos\//)
+
+    await expect(page.getByRole('heading', { name: 'Subtitles' })).toBeVisible()
+
+    await expectsRequest(page, /\/extract-subtitles$/, 'POST', () =>
+      page.getByRole('button', { name: 'Extract embedded' }).click())
+    await expect(toast(page, 'Extraction queued')).toBeVisible()
+  })
+
+  /**
+   * The find button is hidden rather than disabled when the server has no
+   * OpenSubtitles key — a control that always fails is worse than one that is
+   * not there.
+   *
+   * Which case this asserts is decided from the API's own answer rather than
+   * from the DOM, because `locator.count()` does not retry: written the other
+   * way round this passes on a page that has not rendered yet, and reports
+   * green for a button that is missing because the panel is missing.
+   */
+  test('offers subtitle search only when the server is configured', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await page.getByRole('link', { name: 'Edit' }).first().click()
+    await page.waitForURL(/\/admin\/videos\//)
+    await expect(page.getByRole('heading', { name: 'Subtitles' })).toBeVisible()
+
+    const configured = await page.evaluate(async () => {
+      const response = await fetch('/api/subtitles/search/status')
+      return response.ok ? ((await response.json()) as { configured: boolean }).configured : false
+    })
+
+    const button = page.getByRole('button', { name: 'Find subtitles' })
+    if (configured) {
+      await expect(button).toBeVisible()
+      await expectsRequest(page, /\/subtitle-candidates/, 'GET', () => button.click())
+      await expect(page.getByRole('dialog')).toBeVisible()
+    }
+    else {
+      await expect(button).toHaveCount(0)
+    }
+  })
+
+  /**
    * Both shapes, and each on its own.
    *
    * The sources are tracked per shape so an admin can hand-pick a poster and

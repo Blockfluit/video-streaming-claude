@@ -642,13 +642,48 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `sourceKey` holds the media path the sidecar came from; without it, reconcile cannot notice a deletion.
 - Decide a subtitle's charset **before** converting, not after. Legacy `.srt` is often Windows-1252, and
   ffmpeg either fails or emits mojibake — a conversion that already threw cannot be rescued by a retry.
-- An uploaded subtitle is sniffed for the `WEBVTT` signature. An SRT accepted as a `.vtt` loads as an empty
-  track: the viewer sees the language listed and nothing ever appears.
+- A subtitle that claims to be WebVTT is sniffed for the `WEBVTT` signature — on upload, and on a download a
+  provider labelled `.vtt`. An SRT accepted as a `.vtt` loads as an empty track: the viewer sees the language
+  listed and nothing ever appears. (Upload refuses anything else outright; a download converts instead,
+  because nobody chose its format.)
 - Exactly one `isDefault` per video. `<track default>` on two tracks is undefined behaviour.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
 - Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can
   have two three-letter codes — `dut`/`nld`, `ger`/`deu` — and subtitle files in the wild use both.
+- The conversion writes to `derived/tmp/` and is **renamed into place**, like a transcode and for the same
+  reason as thumbnails: ffmpeg truncates its output the moment it opens it, so converting straight to the
+  final key leaves the live track empty for as long as it takes, and empty for good if it fails. The player
+  requests that URL the instant it mounts.
+
+**Finding subtitles** (`subtitles/providers/`, admin-initiated, off by default)
+- The whole feature is **off unless `OPENSUBTITLES_API_KEY` is set**. Searching sends a title or a file hash
+  to a third party, which is a change of posture for a private library, so it is opt-in and **nothing fetches
+  on its own** — the same rule that stops anything transcoding by itself.
+- `GET /subtitles/search/status` exists so the editor can *hide* the button rather than offer one that always
+  fails. Deliberately not a 503: a screen that has to catch an error to draw itself flickers. Same shape and
+  same reasoning as `/admin/metadata/status`.
+- Search and install are **synchronous routes, not `MediaJob`s**. That queue is concurrency 1 and shared with
+  transcoding, so a 20 KB download queued behind a forty-minute encode waits forty minutes to do a second of
+  work. Both are one round trip and an admin is waiting.
+- The **hash is asked first, the title only if it found nothing.** A hash match was timed against this exact
+  release; a title match was timed against some other cut and may drift by seconds. An admin who types a
+  query is overriding the derived question, so the hash is skipped entirely — answering with hash matches
+  would ignore what they asked.
+- Hash the **source** (`storageKey`), never `playbackKey`. A transcode is not a release anyone else holds, so
+  its hash matches nothing and hashing it would silently turn the good half of the feature off.
+- The OSDb hash is `size + every LE uint64 in the first and last 64 KB`, and is **undefined below 128 KB** —
+  `osdbHashOfFile` returns null there and the title search covers it. Like `contentTag` it reads only the
+  ends: never use it for deduplication or integrity. Test fixtures must be padded past 128 KB or the hash
+  path never runs and the test proves the title fallback twice.
+- A downloaded track is `origin: DOWNLOADED`, never `INGEST`, or reconcile's sidecar sweep reaps every one of
+  them on the next scan. It is its own value rather than `UPLOAD` because the panel shows an admin where a
+  track came from, and "uploaded" is a lie about a file nobody chose off their own disk.
+- Provider failures are an `HttpException` with **502**, not a plain `Error` — `TmdbError` records why: as a
+  plain Error it becomes a 500 and the one sentence the admin could act on never leaves the process. The
+  upstream body is logged and never rendered.
+- The provider is injected behind `SUBTITLE_PROVIDER`, which is also the seam the db suite replaces —
+  talking to opensubtitles.com in a test would be testing their uptime.
 
 **Data**
 - Prisma cannot express CHECK constraints. `ListItem`, `Credit`, and `WatchlistItem` each need a hand-added

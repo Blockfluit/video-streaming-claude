@@ -35,7 +35,7 @@ Decisions settled during planning:
 | Workflow | `DRAFT → PUBLISHED`, plus `ARCHIVED` and auto-set `MISSING` |
 | Thumbnails | Auto-generated at 10% of duration; manual upload overrides and is never clobbered |
 | Credits | Shared `Person` table; credits attach to **collections and videos**, merged on display |
-| Subtitles | Sidecar files discovered on ingest; embedded MKV tracks extracted; non-VTT converted |
+| Subtitles | Sidecar files discovered on ingest; embedded MKV tracks extracted; non-VTT converted; optional OpenSubtitles search |
 | Transcoding | Browser-triggered MKV→MP4 (H.264/AAC, faststart), manual with auto-flagging |
 | Quality badge | Shown only at 1080p and above — `HD` / `QHD` / `4K` / `8K` |
 | Chapters | Per-video intro/outro markers driving Skip Intro / Skip Outro buttons |
@@ -802,6 +802,7 @@ All routes require an authenticated session except `POST /auth/login` and `POST 
 | Videos | `GET /videos` (filters: `state`, `collectionId`, `q`, `tag`) · `GET /videos/:id` · `POST /videos/upload` · `PATCH/DELETE /videos/:id` · `POST /videos/:id/publish\|archive\|reprobe` · `PATCH /videos/:id/markers` |
 | Thumbnails | `POST /videos/:id/thumbnail` · `POST /videos/:id/thumbnail/capture` · `DELETE /videos/:id/thumbnail` |
 | Subtitles | `GET /videos/:id/subtitles` · `GET /videos/:id/subtitles/:sid.vtt` · `POST /videos/:id/subtitles` (manual upload) · `PATCH/DELETE /subtitles/:id` |
+| Subtitle search | `GET /subtitles/search/status` · `GET /subtitles/languages` · `GET /videos/:id/subtitle-candidates` · `POST /videos/:id/subtitles/fetch` — all ADMIN, all 503 without a provider key |
 | Streaming | `GET /videos/:id/stream` (Range) · `GET /videos/:id/thumbnail` · `GET /collections/:id/poster` |
 | Conversion | `POST /videos/:id/convert` · `POST /videos/:id/extract-subtitles` · `DELETE /videos/:id/source` |
 | Jobs | `GET /admin/jobs` (filter `status`, `videoId`) · `GET /admin/jobs/:id` · `POST /admin/jobs/:id/cancel` · `POST /admin/jobs/:id/retry` |
@@ -908,7 +909,7 @@ account's comments, watch history and watchlist; `PATCH { isActive: false }` is 
 
 ## Configuration
 
-`apps/api/.env` — `DATABASE_URL`, `SESSION_SECRET`, `MEDIA_ROOT`, `DERIVED_ROOT`, `PORT=4000`, `NODE_ENV`, `MAX_UPLOAD_BYTES`, `INGEST_WATCHER_ENABLED`, `TRANSCODE_CONCURRENCY=1`, `TRANSCODE_PRESET=medium`, `TRANSCODE_CRF=25`, `FFMPEG_PATH`, `FFPROBE_PATH`, and — all optional, the feature being simply off without the first — `TMDB_API_TOKEN`, `TMDB_LANGUAGE`, `TMDB_CERTIFICATION_COUNTRY`, `TMDB_IMAGE_SIZE`.
+`apps/api/.env` — `DATABASE_URL`, `SESSION_SECRET`, `MEDIA_ROOT`, `DERIVED_ROOT`, `PORT=4000`, `NODE_ENV`, `MAX_UPLOAD_BYTES`, `INGEST_WATCHER_ENABLED`, `TRANSCODE_CONCURRENCY=1`, `TRANSCODE_PRESET=medium`, `TRANSCODE_CRF=25`, `FFMPEG_PATH`, `FFPROBE_PATH`, and — all optional, the feature being simply off without the first — `TMDB_API_TOKEN`, `TMDB_LANGUAGE`, `TMDB_CERTIFICATION_COUNTRY`, `TMDB_IMAGE_SIZE`, `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD`, `OPENSUBTITLES_USER_AGENT` (the account is needed to download, not to search).
 `.env.example` committed; `.env`, `.bootstrap-token`, `media/`, `derived/` gitignored.
 
 Cookie: `httpOnly: true`, `sameSite: 'lax'`, `secure: NODE_ENV === 'production'`, `maxAge` 7 days, rolling.

@@ -15,7 +15,8 @@ dropped on disk, stages it as drafts, and lets an admin enrich and publish it.
 - **Draft → Published workflow.** Ingested files are staged with a missing-field checklist before going live.
 - **Real streaming.** HTTP `206` range responses, so seeking in a 4 GB file is instant.
 - **Transcoding.** Browser-triggered MKV → MP4 (H.264/AAC, faststart) with live progress.
-- **Subtitles.** Sidecar files and embedded MKV tracks, both normalised to WebVTT.
+- **Subtitles.** Sidecar files and embedded MKV tracks, both normalised to WebVTT. An admin can also
+  search OpenSubtitles for a video that has none — off unless a key is configured, and never automatic.
 - **Watch tracking.** Resume where you left off, per-video stats, continue-watching.
 - **Skip intro / outro**, cast and crew, comments, curated rows, and a personal My List.
 
