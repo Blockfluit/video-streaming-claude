@@ -53,24 +53,12 @@ interface VideoDetail {
   missingFields?: string[]
 }
 
-interface SubtitleTrack {
-  id: string
-  language: string
-  label: string
-  isDefault: boolean
-  origin: string
-}
-
 const route = useRoute()
 const api = useApi()
 const toast = useToast()
 const id = String(route.params.id)
 
 const { data: video, refresh } = await useApiData<VideoDetail>(`adm-video-${id}`, `/videos/${id}`)
-const { data: subtitles, refresh: refreshSubs } = await useApiData<{ items: SubtitleTrack[] }>(
-  `adm-subs-${id}`,
-  `/videos/${id}/subtitles`,
-)
 
 const form = reactive({ title: '', description: '', year: undefined as number | undefined, tags: '', trailer: '' })
 
@@ -297,23 +285,6 @@ async function metadataApplied(replaced: ArtworkShape[]) {
   await refresh()
 }
 
-async function uploadSubtitle(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-
-  const body = new FormData()
-  body.append('file', file)
-  body.append('language', 'en')
-  try {
-    await api(`/videos/${id}/subtitles`, { method: 'POST', body })
-    await refreshSubs()
-  } catch (error) {
-    // An SRT accepted as .vtt loads as an empty track, so the API sniffs for
-    // the WEBVTT signature and this is where that rejection surfaces.
-    toast.add({ title: apiMessage(error, 'Could not add that subtitle'), color: 'error' })
-  }
-}
-
 const markers = [
   { field: 'introStartSec', label: 'Intro start' },
   { field: 'introEndSec', label: 'Intro end' },
@@ -484,41 +455,10 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         </UCard>
 
         <UCard>
-          <template #header><h2 class="font-semibold">Subtitles</h2></template>
-          <ul v-if="subtitles?.items?.length" class="mb-4 divide-y divide-(--ui-border)">
-            <li
-              v-for="track in subtitles.items"
-              :key="track.id"
-              class="flex items-center gap-3 py-2 text-sm"
-            >
-              <span class="font-medium">{{ track.label }}</span>
-              <UBadge color="neutral" variant="subtle" size="sm">{{ track.language }}</UBadge>
-              <UBadge v-if="track.isDefault" color="primary" variant="subtle" size="sm">
-                default
-              </UBadge>
-              <span class="ml-auto text-xs text-(--ui-text-dimmed)">{{ track.origin }}</span>
-            </li>
-          </ul>
-          <p v-else class="mb-4 text-sm text-(--ui-text-muted)">No subtitle tracks.</p>
-
-          <div class="flex flex-wrap gap-2">
-            <label class="cursor-pointer">
-              <input type="file" accept=".vtt" class="hidden" @change="uploadSubtitle">
-              <span
-                class="inline-flex items-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
-              >
-                <UIcon name="i-lucide-upload" class="size-4" /> Upload .vtt
-              </span>
-            </label>
-            <UButton
-              variant="subtle"
-              color="neutral"
-              icon="i-lucide-scissors"
-              @click="act('/extract-subtitles', 'POST', 'Extraction queued')"
-            >
-              Extract embedded
-            </UButton>
-          </div>
+          <SubtitleTracks
+            :video-id="id"
+            @extract="act('/extract-subtitles', 'POST', 'Extraction queued')"
+          />
         </UCard>
       </div>
 
