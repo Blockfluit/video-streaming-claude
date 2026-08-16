@@ -111,7 +111,7 @@ async function loadMore(): Promise<void> {
     // The answer to a question nobody is asking any more is dropped rather than
     // appended: `q` can move while this is in flight.
     if (asked !== q.value) return
-    more.value = appendPeople(more.value, page.items, people.value)
+    more.value = appendWindow(more.value, page.items, people.value)
   }
   catch (failure) {
     toast.add({ title: apiMessage(failure, 'Could not load more people'), color: 'error' })
