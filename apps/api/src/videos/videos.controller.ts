@@ -19,7 +19,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import {
-  MAX_THUMBNAIL_BYTES,
   captureThumbnailSchema,
   deleteWithFilesSchema,
   listVideosSchema,

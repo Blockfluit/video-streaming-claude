@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { toPage, type Page } from '@video/shared';
 import type { CreateCreditInput, ReorderCreditsInput, UpdateCreditInput } from '@video/shared';
 
-import { whereVisible } from '../common/publishing';
 import { requireVisibleCollection, requireVisibleVideo } from '../common/require';
 import type { CreditRole, Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';

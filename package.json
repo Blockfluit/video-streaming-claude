@@ -24,6 +24,8 @@
     "test:web": "npm run test -w @video/web",
     "test:browser": "npm run test:e2e -w @video/web",
     "test:all": "npm test && npm run test:e2e && npm run test:db && npm run test:web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "db:migrate": "npm run db:migrate -w apps/api",
     "db:generate": "npm run db:generate -w apps/api",
     "db:studio": "npm run db:studio -w apps/api",
@@ -32,8 +34,12 @@
     "pretest:db": "npm run build -w packages/shared"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "concurrently": "^10.0.4",
-    "typescript": "^5.9.3"
+    "eslint": "^10.8.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
   },
   "allowScripts": {
     "vue-demi@0.14.10": true,

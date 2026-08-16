@@ -1,6 +1,9 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MAX_SUBTITLE_CANDIDATES, type SubtitleCandidate } from '@video/shared';
+
+import { describeError } from '../../common/errors';
+import { UpstreamError, fetchUpstream } from '../../common/upstream';
 
 import type {
   DownloadedSubtitle,
@@ -8,13 +11,13 @@ import type {
   SubtitleQuery,
   SubtitleQuota,
 } from './provider';
-import { describeError } from '../../common/errors';
 
 /**
  * OpenSubtitles, over the REST API.
  *
- * This is the only outbound network call the API makes, which shapes three
- * decisions.
+ * One of the API's two outbound clients — the other is `TmdbClient` — which
+ * shapes three decisions. Both once opened by declaring themselves the only one;
+ * what they genuinely share now lives in `common/upstream.ts`.
  *
  * **No HTTP client dependency.** Node's `fetch` with `AbortSignal.timeout` does
  * everything needed here, and a library that exists to add retries and
@@ -39,14 +42,14 @@ const DEFAULT_USER_AGENT = 'video-streaming-claude v1.0';
 /**
  * A provider failure carrying a message already safe to show an admin.
  *
- * An `HttpException` rather than a plain `Error`, for the reason `TmdbError`
- * records: as a plain Error it becomes a 500 "Internal server error" and the
- * one sentence the admin could act on never leaves the process. 502 because the
- * failure is upstream — this server is fine and the one it asked is not.
+ * A named subclass of `UpstreamError`, which is where the 502 and the reasoning
+ * for it live. This used to restate both, citing `TmdbError` as its precedent —
+ * which was the clearest sign the two clients wanted a shared base rather than a
+ * shared comment.
  */
-export class OpenSubtitlesError extends HttpException {
+export class OpenSubtitlesError extends UpstreamError {
   constructor(message: string) {
-    super(message, HttpStatus.BAD_GATEWAY);
+    super(message);
     this.name = 'OpenSubtitlesError';
   }
 }
@@ -232,15 +235,25 @@ export class OpenSubtitlesClient implements SubtitleProvider {
     }
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-    try {
-      return await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    } catch (cause) {
+  /**
+   * Returns the response whatever its status, because one of them is not a
+   * failure here: `requestDownloadLink` reads a 401 as "our cached session token
+   * aged out" and retries once before blaming the operator.
+   */
+  private fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    return fetchUpstream({
+      url,
+      init,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      logger: this.logger,
       // A timeout and a DNS failure are the same thing to an admin: the service
       // is not answering, and nothing they type into this app will change it.
-      this.logger.warn(`OpenSubtitles request failed: ${describeError(cause)}`);
-      throw new OpenSubtitlesError('OpenSubtitles did not respond.');
-    }
+      onUnreachable: cause => ({
+        log: `OpenSubtitles request failed: ${describeError(cause)}`,
+        message: 'OpenSubtitles did not respond.',
+      }),
+      error: message => new OpenSubtitlesError(message),
+    });
   }
 
   private headers(): Record<string, string> {

@@ -31,7 +31,6 @@ describe('Library (real database)', () => {
   let banner: jest.SpyInstance;
   let admin: request.Agent;
 
-  const http = () => request(app.getHttpServer());
 
   async function startApp(): Promise<void> {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

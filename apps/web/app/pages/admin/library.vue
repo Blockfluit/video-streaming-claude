@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { MAX_PAGE_LIMIT, type Page } from '@video/shared'
-import type { ComputedRef, Ref } from 'vue'
+import type { Ref } from 'vue'
 
 import type { LibraryResource } from '~/utils/admin-library'
 
@@ -55,8 +55,6 @@ const STATES = [
 
 const route = useRoute()
 const router = useRouter()
-const api = useApi()
-const toast = useToast()
 
 /** What the controls hold. The search box types locally; the select does not. */
 const q = ref(String(route.query.q ?? ''))

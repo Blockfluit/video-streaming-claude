@@ -24,6 +24,15 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm run typecheck
 
+  # Its own job rather than a step on `typecheck`: they answer different
+  # questions and a failure in one should not hide the state of the other.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: npm run lint
+
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -83,6 +92,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm run test:db
 
+  # Vitest only, and that is a known gap rather than the whole web story.
+  #
+  # `apps/web/e2e` is the tier that can actually catch a frontend bug — a control
+  # rendered at `opacity: 0`, text below WCAG AA, a page that 200s to curl and
+  # dies on hydration — and it does not run here. It is not merely unwired: run
+  # against a real library it currently reports nine failures on `main`, so a job
+  # added today would be red on arrival and deleted by Friday.
+  #
+  # What it needs first, in order: those nine triaged (several look like tests
+  # that outlived the markup they assert on — one waits for a control no version
+  # of the component has), then a seeded fixture library, which is buildable
+  # because the specs discover content through the API rather than hardcoding
+  # slugs. `npm run test:browser` runs it locally against two dev servers.
   web:
     runs-on: ubuntu-latest
     steps:
