@@ -58,6 +58,20 @@ const accountItems = computed(() => [
 ])
 
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
+
+/**
+ * The nav drawer, for the widths the bar cannot hold.
+ *
+ * Closed by watching the route rather than by a handler on each link. A link
+ * pointing at the page you are already on fires no navigation at all, so a
+ * click handler would leave the panel sitting open having apparently done
+ * nothing — and `fullPath` rather than `path` because moving around `/browse`
+ * is a query-string change, which `path` does not see.
+ */
+const menuOpen = ref(false)
+watch(() => route.fullPath, () => {
+  menuOpen.value = false
+})
 </script>
 
 <template>
@@ -66,12 +80,63 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
       class="fixed inset-x-0 top-0 z-50 transition-colors duration-300"
       :class="scrolled ? 'bg-[#08080a]/95 backdrop-blur border-b border-(--ui-border)' : 'bg-gradient-to-b from-black/80 to-transparent'"
     >
-      <div class="page-shell flex h-16 items-center gap-8">
+      <div class="page-shell flex h-16 items-center gap-4 lg:gap-8">
         <NuxtLink to="/" class="shrink-0 text-xl font-bold tracking-tight text-(--ui-primary)">
           LIBRARY
         </NuxtLink>
 
-        <nav class="flex grow items-center gap-6">
+        <!--
+          The same destinations, in a panel, at the widths the bar cannot hold.
+
+          The five links and the account trigger want about 560px of a bar that
+          has 343px on a phone, and nothing here shrank: the account trigger
+          was simply pushed off the right-hand edge, which made signing out
+          unreachable rather than merely awkward.
+
+          `USlideover` is Reka's dialog — the same primitive `TrailerModal`
+          already sits on — rather than `UDrawer`, whose vaul-vue drag physics
+          are a second overlay library to keep working and fight the suite's
+          `reducedMotion: 'reduce'`. It is `modal: true` by default and stays
+          that way: the account menu opts out of the focus trap because a menu
+          is not a modal, but a panel covering the page is one.
+
+          It renders `links` rather than a second copy of them, and it is
+          hidden with `lg:hidden` rather than `sr-only`: `visible.spec.ts`
+          skips `display: none`, while `sr-only` is a 1×1 box that it walks and
+          contrast-checks.
+        -->
+        <USlideover
+          v-model:open="menuOpen"
+          side="left"
+          title="Menu"
+          :ui="{ content: 'w-72 max-w-[85vw]' }"
+        >
+          <button
+            type="button"
+            aria-label="Menu"
+            class="tap -ml-2 flex items-center justify-center rounded px-2 text-(--ui-text) transition-colors hover:text-(--ui-text-highlighted) lg:hidden"
+          >
+            <UIcon name="i-lucide-menu" class="size-6" />
+          </button>
+
+          <template #body>
+            <nav class="flex flex-col gap-1">
+              <NuxtLink
+                v-for="link in links"
+                :key="link.to"
+                :to="link.to"
+                class="flex min-h-11 items-center rounded-md px-3 text-base transition-colors"
+                :class="isActive(link.to)
+                  ? 'bg-(--ui-bg-elevated) font-semibold text-white'
+                  : 'text-(--ui-text-toned) hover:bg-(--ui-bg-elevated) hover:text-(--ui-text-highlighted)'"
+              >
+                {{ link.label }}
+              </NuxtLink>
+            </nav>
+          </template>
+        </USlideover>
+
+        <nav class="hidden grow items-center gap-6 lg:flex">
           <NuxtLink
             v-for="link in links"
             :key="link.to"
@@ -115,10 +180,16 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
               Reka gives the trigger `aria-haspopup`/`aria-expanded` but no name,
               so without this it announces as the two initials inside it.
             -->
+            <!--
+              `ml-auto shrink-0` is the whole fix for the trigger that used to
+              be pushed off the edge: below `lg` the nav beside it is
+              `display: none`, so nothing is left to push it to the right, and
+              nothing may shrink it into the wordmark either.
+            -->
             <button
               type="button"
               aria-label="Your account"
-              class="flex items-center gap-2 rounded text-sm text-(--ui-text) transition-colors hover:text-(--ui-text-highlighted)"
+              class="ml-auto flex shrink-0 items-center gap-2 rounded text-sm text-(--ui-text) transition-colors hover:text-(--ui-text-highlighted)"
             >
               <span
                 class="grid size-8 place-items-center rounded bg-red-700 text-xs font-bold text-white"

@@ -75,6 +75,66 @@ test.describe('the phone viewport itself', () => {
   })
 })
 
+test.describe('the nav drawer', () => {
+
+  /*
+   * The bug this replaced: the header packed a wordmark, five links and the
+   * account trigger into one unwrapped row, and the trigger — last in the
+   * flex — was what went off the right edge. Signing out was not awkward on a
+   * phone, it was unreachable. So this asserts the trigger is *there* as much
+   * as it asserts the drawer opens.
+   */
+  test('opens the destinations the bar cannot hold, and keeps the account reachable', async ({ page }) => {
+    await visit(page, '/')
+
+    await expect(page.getByRole('button', { name: 'Your account' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Menu' }).click()
+    const drawer = page.getByRole('dialog')
+    await expect(drawer).toBeVisible()
+    await expect(drawer.getByRole('link', { name: 'Browse' })).toBeVisible()
+  })
+
+  test('closes when a link takes you somewhere', async ({ page }) => {
+    await visit(page, '/')
+    await page.getByRole('button', { name: 'Menu' }).click()
+
+    await page.getByRole('dialog').getByRole('link', { name: 'Browse' }).click()
+
+    await expect(page).toHaveURL(/\/browse$/)
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
+  test('closes on Escape', async ({ page }) => {
+    await visit(page, '/')
+    await page.getByRole('button', { name: 'Menu' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
+  /*
+   * Audited with the panel open, because nothing else can reach it: the audit
+   * skips `display: none`, and the drawer is both behind a breakpoint and
+   * behind an interaction. Reka unmounts it when hidden, so a closed drawer is
+   * not merely invisible to the walk — it is not in the document at all.
+   */
+  test('has nothing unreadable or invisible in it', async ({ page }) => {
+    await visit(page, '/')
+    await page.getByRole('button', { name: 'Menu' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `nav drawer:\n${problems.map((p: { kind: string, value: number, detail: string }) =>
+        `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+})
+
 test.describe('the poster wall', () => {
 
   /*
