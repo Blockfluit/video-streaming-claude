@@ -294,8 +294,15 @@ test.describe('the home hero', () => {
     const count = await entryCount(page)
     test.skip(count < 2, 'the library has only one recent entry to show')
 
+    /*
+     * The button is the target and the span inside it is the bullet — they
+     * stopped being the same element when the bullet gained a 44px touch
+     * target it draws nothing into. So the track is that span, not the button
+     * around it, and the fill is the span inside the track.
+     */
     const pill = page.locator('[aria-current="true"]')
-    const progress = pill.locator('span')
+    const track = pill.locator('span').first()
+    const progress = track.locator('span')
     await expect(progress).toHaveCount(1)
 
     // Away from the hero, or hovering would hold the rotation still and the
@@ -311,7 +318,7 @@ test.describe('the home hero', () => {
       (await locator.boundingBox())?.width ?? 0
 
     const started = await widthOf(progress)
-    const track = await widthOf(pill)
+    const full = await widthOf(track)
 
     await page.waitForTimeout(2000)
 
@@ -319,7 +326,7 @@ test.describe('the home hero', () => {
 
     // Grown, and not yet finished: two seconds into a ten-second turn.
     expect(later).toBeGreaterThan(started)
-    expect(later).toBeLessThan(track)
+    expect(later).toBeLessThan(full)
   })
 
   /**

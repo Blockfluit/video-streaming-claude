@@ -286,12 +286,18 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
           </p>
         </div>
 
+        <!--
+          Three icon buttons at ~24px, two of them a mis-tap away from the one
+          that removes the credit. `.tap` is a coarse-pointer floor, so the
+          desktop row is unchanged.
+        -->
         <template v-if="!filtering">
           <UButton
             size="xs"
             color="neutral"
             variant="subtle"
             icon="i-lucide-arrow-up"
+            class="tap justify-center"
             :disabled="isFirst(credit)"
             :aria-label="`Move ${credit.person.name} up`"
             @click="move(credit, -1)"
@@ -301,6 +307,7 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
             color="neutral"
             variant="subtle"
             icon="i-lucide-arrow-down"
+            class="tap justify-center"
             :disabled="isLast(credit)"
             :aria-label="`Move ${credit.person.name} down`"
             @click="move(credit, 1)"
@@ -311,6 +318,7 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
           color="error"
           variant="subtle"
           icon="i-lucide-x"
+          class="tap justify-center"
           :aria-label="`Remove ${credit.person.name}`"
           @click="remove(credit)"
         />

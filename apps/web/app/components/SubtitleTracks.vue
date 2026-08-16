@@ -370,6 +370,7 @@ function openFinder() {
           color="error"
           variant="subtle"
           icon="i-lucide-trash-2"
+          class="tap justify-center"
           :aria-label="`Remove the ${track.label} subtitle track`"
           @click="removing = track"
         />

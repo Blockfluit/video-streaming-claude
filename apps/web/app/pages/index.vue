@@ -456,32 +456,50 @@ useHead({ title: 'Home' })
           fill (which explains itself) but must not rename the button, which is
           the exact fault the old play button had.
         -->
+        <!--
+          The bullet is drawn by the span; the button around it is the target.
+
+          A 10px dot is a 10px thing to hit with a thumb, and this one is also
+          the stop control for content that moves on its own — the worst of both,
+          since you reach for it precisely when something is about to change
+          under you. `.tap` gives it 44px on a coarse pointer and nothing at all
+          on a fine one, so the row is unchanged with a mouse.
+
+          The dot keeps its **colour**-based dimming rather than gaining an
+          opacity: `visible.spec.ts` multiplies opacity up the ancestor chain
+          and fails a control under 0.35, and an inactive bullet is meant to be
+          quiet rather than absent.
+        -->
         <button
           v-for="(entry, index) in entries"
           :key="entry.id"
           type="button"
-          class="h-2.5 rounded-full transition-[width,background-color]"
-          :class="index === active
-            ? 'w-10 bg-(--ui-border-accented)'
-            : 'w-2.5 bg-(--ui-border-accented) hover:bg-(--ui-text-dimmed)'"
+          class="tap group grid place-items-center"
           :aria-label="index === active
             ? (stopped ? 'Resume the rotation' : 'Pause the rotation')
             : `Show ${entry.title}`"
           :aria-current="index === active ? 'true' : undefined"
           @click="index === active ? togglePause() : show(index)"
         >
-          <!--
-            Decoration: `aria-current` is what announces which entry is showing,
-            and a progressbar nested inside a button is an ambiguity nobody
-            needs. No transition on the width — it is rewritten every frame, and
-            a transition would smear it a third of a second behind the truth.
-          -->
           <span
-            v-if="index === active"
             aria-hidden="true"
-            class="block h-full rounded-full bg-(--ui-primary)"
-            :style="{ width: `${fill * 100}%` }"
-          />
+            class="block h-2.5 rounded-full transition-[width,background-color]"
+            :class="index === active
+              ? 'w-10 bg-(--ui-border-accented)'
+              : 'w-2.5 bg-(--ui-border-accented) group-hover:bg-(--ui-text-dimmed)'"
+          >
+            <!--
+              Decoration: `aria-current` is what announces which entry is showing,
+              and a progressbar nested inside a button is an ambiguity nobody
+              needs. No transition on the width — it is rewritten every frame, and
+              a transition would smear it a third of a second behind the truth.
+            -->
+            <span
+              v-if="index === active"
+              class="block h-full rounded-full bg-(--ui-primary)"
+              :style="{ width: `${fill * 100}%` }"
+            />
+          </span>
         </button>
       </div>
     </HeroBackdrop>

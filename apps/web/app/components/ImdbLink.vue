@@ -42,7 +42,7 @@ const ariaLabel = computed(() =>
     :title="ariaLabel"
     target="_blank"
     rel="noopener noreferrer"
-    class="inline-flex shrink-0 items-center rounded-sm text-(--ui-text-muted) transition-colors hover:text-[#f5c518] focus-visible:text-[#f5c518] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ui-border-accented)"
+    class="tap inline-flex shrink-0 items-center justify-center rounded-sm text-(--ui-text-muted) transition-colors hover:text-[#f5c518] focus-visible:text-[#f5c518] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ui-border-accented)"
   >
     <!--
       IMDb's own yellow only on hover and focus. Colour marks things here and
