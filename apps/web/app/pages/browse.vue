@@ -52,21 +52,11 @@ function apply(change: Partial<BrowseFilters>): void {
   router.replace({ query: browseFiltersToQuery({ ...filters.value, ...change }) })
 }
 
-/*
- * The search box types locally and lands in the URL 250ms later.
- *
- * Debounced by hand — `refDebounced` is VueUse and not a dependency. Without
- * it every keystroke is a request and the answers can arrive out of order, so
- * the list settles on whatever the slowest one returned.
- */
+// The search box types locally and lands in the URL 250ms later — see
+// `useDebounced` for why that wait is not optional.
 const search = ref(filters.value.q)
-let timer: ReturnType<typeof setTimeout> | undefined
 
-watch(search, (value) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => apply({ q: value }), 250)
-})
-onBeforeUnmount(() => clearTimeout(timer))
+useDebounced(search, (value) => apply({ q: value }))
 
 // The back button moves the URL without touching the box, so it is followed.
 watch(
@@ -301,12 +291,8 @@ function rememberPlace(): void {
   )
 }
 
-let placeTimer: ReturnType<typeof setTimeout> | undefined
-
-function onScroll(): void {
-  clearTimeout(placeTimer)
-  placeTimer = setTimeout(rememberPlace, 200)
-}
+// Not per scroll event: this writes to sessionStorage and reads layout.
+const onScroll = useDebouncedCallback(rememberPlace, 200)
 
 async function restorePlace(): Promise<void> {
   const place = parseBrowsePlace(sessionStorage.getItem(placeKey.value))
@@ -355,9 +341,9 @@ watch(sentinel, (element) => {
 onBeforeUnmount(() => {
   observer?.disconnect()
   window.removeEventListener('scroll', onScroll)
-  clearTimeout(placeTimer)
-  // The last scroll may not have settled into a save yet, and leaving is
-  // precisely when the position is worth having.
+  // `useDebouncedCallback` clears its own pending timer on unmount. The last
+  // scroll may not have settled into a save yet, and leaving is precisely when
+  // the position is worth having.
   rememberPlace()
 })
 

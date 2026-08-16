@@ -79,12 +79,7 @@ const inherited = computed(() => (data.value?.items ?? []).filter(c => c.inherit
 const filterInput = ref('')
 const filter = ref('')
 
-let filterTimer: ReturnType<typeof setTimeout> | undefined
-watch(filterInput, (value) => {
-  clearTimeout(filterTimer)
-  filterTimer = setTimeout(() => { filter.value = value.trim().toLowerCase() }, 250)
-})
-onBeforeUnmount(() => clearTimeout(filterTimer))
+useDebounced(filterInput, (value) => { filter.value = value.trim().toLowerCase() })
 
 const filtering = computed(() => filter.value.length > 0)
 
@@ -128,46 +123,25 @@ function creditLabel(credit: Credit): string {
  * no character. `RowEntryPicker` cites this as its reason for a plain input with
  * results underneath, which has no popover to get stuck.
  */
-const personSearch = ref('')
-const personResults = ref<Person[]>([])
 const chosen = ref<Person | null>(null)
-const searching = ref(false)
 
 const PEOPLE_LIMIT = 8
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(personSearch, () => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(runPersonSearch, 250)
-})
-onBeforeUnmount(() => clearTimeout(searchTimer))
-
-/** Only the newest search may write the results, whatever order they arrive in. */
-let latest = 0
-
-async function runPersonSearch(): Promise<void> {
-  const mine = (latest += 1)
-  const q = personSearch.value.trim()
-  if (q.length === 0) {
-    personResults.value = []
-    return
-  }
-
-  searching.value = true
-  try {
-    const page = await api<Page<Person>>(
-      `/people?limit=${PEOPLE_LIMIT}&q=${encodeURIComponent(q)}`,
-    )
-    if (mine !== latest) return
-    personResults.value = page.items
-  }
-  catch {
-    if (mine === latest) personResults.value = []
-  }
-  finally {
-    if (mine === latest) searching.value = false
-  }
-}
+/**
+ * `useRemoteSearch` owns the debounce and the only-the-newest-answer-wins rule.
+ *
+ * No `searchBlank`: every person in the library is not a useful answer to having
+ * typed nothing, so a blank box simply clears the list without asking.
+ */
+const {
+  query: personSearch,
+  results: personResults,
+  busy: searching,
+} = useRemoteSearch<Person[]>(
+  async term =>
+    (await api<Page<Person>>(`/people?limit=${PEOPLE_LIMIT}&q=${encodeURIComponent(term)}`)).items,
+  { empty: [] },
+)
 
 function choose(person: Person) {
   chosen.value = person

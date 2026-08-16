@@ -49,18 +49,6 @@ const search = ref('')
 const q = ref('')
 
 /**
- * The windows after the first.
- *
- * `useApiData` is `useAsyncData`: one key, one slot, and a refetch replaces its
- * `data` wholesale — so the first window stays where it is, server-rendered and
- * transferred in the payload, and only what has been *added* to it lives here.
- * Nothing has to seed this from `data`, and the markup matches on both sides of
- * hydration because this is empty on the server and empty on the client's first
- * render.
- */
-const more = ref<Person[]>([])
-
-/**
  * Asks a different question, dropping the answers to the old one.
  *
  * The single place `q` changes, which is what makes the reset impossible to
@@ -68,16 +56,11 @@ const more = ref<Person[]>([])
  */
 function ask(term: string): void {
   if (term === q.value) return
-  more.value = []
+  reset()
   q.value = term
 }
 
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(search, (value) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => ask(value.trim()), 250)
-})
-onBeforeUnmount(() => clearTimeout(timer))
+useDebounced(search, (value) => ask(value.trim()))
 
 const { data, refresh, error } = await useApiData<Page<Person>>(
   'admin-people',
@@ -85,41 +68,23 @@ const { data, refresh, error } = await useApiData<Page<Person>>(
   { watch: [q] },
 )
 
-const people = computed(() => [...(data.value?.items ?? []), ...more.value])
+/** The count is what says whether searching is worth it. Rendered in the header. */
 const total = computed(() => data.value?.total ?? 0)
 
-/**
- * `hasMore` answers "is there more after the **first** window", which stopped
- * being the question the moment a second one was appended. Counted against
- * `total` instead, which is the count matching the current filter.
- */
-const moreLabel = computed(() => loadMoreLabel(people.value.length, total.value, PAGE_SIZE))
-
-const loadingMore = ref(false)
-
-async function loadMore(): Promise<void> {
-  if (loadingMore.value || moreLabel.value === null) return
-  loadingMore.value = true
-
-  // Asked for by what is on screen, so somebody added or removed between
-  // presses shifts the next window by exactly what they shifted the list by.
-  const asked = q.value
-  const offset = people.value.length
-
-  try {
-    const page = await api<Page<Person>>(peopleQuery(asked, offset, PAGE_SIZE))
-    // The answer to a question nobody is asking any more is dropped rather than
-    // appended: `q` can move while this is in flight.
-    if (asked !== q.value) return
-    more.value = appendWindow(more.value, page.items, people.value)
-  }
-  catch (failure) {
-    toast.add({ title: apiMessage(failure, 'Could not load more people'), color: 'error' })
-  }
-  finally {
-    loadingMore.value = false
-  }
-}
+const {
+  items: people,
+  label: moreLabel,
+  loading: loadingMore,
+  loadMore,
+  reset,
+} = useLoadMore<Person>({
+  first: () => data.value?.items ?? [],
+  total: () => data.value?.total ?? 0,
+  pageSize: PAGE_SIZE,
+  question: () => q.value,
+  query: offset => peopleQuery(q.value, offset, PAGE_SIZE),
+  failure: 'Could not load more people',
+})
 
 /**
  * Back to one window, and re-ask.
@@ -130,7 +95,7 @@ async function loadMore(): Promise<void> {
  * it looking wrong. Every mutation goes through here rather than `refresh`.
  */
 async function reload(): Promise<void> {
-  more.value = []
+  reset()
   await refresh()
 }
 

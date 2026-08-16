@@ -236,7 +236,7 @@ const ARTWORK = [
   },
 ]
 
-const artwork = useArtworkBust('videos', id)
+const artwork = useArtworkEditor('videos', id, refresh)
 
 function artworkSource(shape: ArtworkShape): string {
   return shape === 'poster' ? (video.value?.posterSource ?? '') : (video.value?.bannerSource ?? '')
@@ -256,36 +256,18 @@ async function captureArtwork(shape: ArtworkShape) {
   }
 }
 
-async function uploadArtwork(event: Event, shape: ArtworkShape) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
+const uploadArtwork = (event: Event, shape: ArtworkShape) => artwork.upload(event, shape)
 
-  const body = new FormData()
-  body.append('file', file)
-  try {
-    await api(`/videos/${id}/${shape}`, { method: 'POST', body })
-    artwork.replaced(shape)
-    await refresh()
-  } catch (error) {
-    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
-  }
-}
-
+/**
+ * Back to automatic, through `act` rather than the composable: this one also
+ * refreshes the jobs panel, since the next probe is what regenerates the frame.
+ */
 async function resetArtwork(shape: ArtworkShape) {
   await act(`/${shape}`, 'DELETE', 'Back to automatic')
   artwork.replaced(shape)
 }
 
-/**
- * An import can replace either shape, both, or neither — the dialog says which, because
- * the refreshed record reads the same either way. Bumping more than it names would reload
- * a picture the import never touched, and the panel would stop telling the truth about
- * what the import just did.
- */
-async function metadataApplied(replaced: ArtworkShape[]) {
-  artwork.replaced(...replaced)
-  await refresh()
-}
+const metadataApplied = artwork.applied
 
 const markers = [
   { field: 'introStartSec', label: 'Intro start' },
