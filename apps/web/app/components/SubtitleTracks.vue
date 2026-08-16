@@ -354,9 +354,12 @@ function openFinder() {
       <li
         v-for="track in subtitles.items"
         :key="track.id"
-        class="flex items-center gap-3 py-2 text-sm"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm"
       >
-        <span class="font-medium">{{ track.label }}</span>
+        <!-- A label like "English (SDH) - forced" plus two badges, an origin
+             and a delete button is past 343px on its own, and the label is the
+             only part that can give. -->
+        <span class="min-w-0 truncate font-medium">{{ track.label }}</span>
         <UBadge color="neutral" variant="subtle" size="sm">{{ track.language }}</UBadge>
         <UBadge v-if="track.isDefault" color="primary" variant="subtle" size="sm">
           default

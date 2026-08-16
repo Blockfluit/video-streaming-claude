@@ -12,7 +12,7 @@
  * is made of, and `still` is for the few places a wide frame is the point.
  *
  * Width is not set here, also like `MediaCard` — it comes from the parent, which
- * is `w-56 sm:w-64` on a shelf and `w-full` in a grid.
+ * is `w-40 sm:w-64` on a shelf and `w-full` in a grid.
  */
 defineProps<{ shape?: 'still' | 'poster' }>()
 </script>

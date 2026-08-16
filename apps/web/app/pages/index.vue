@@ -535,7 +535,7 @@ useHead({ title: 'Home' })
         class="rise"
         :style="`animation-delay: ${index * 80}ms`"
       >
-        <MediaCard v-for="item in row.items" :key="item.id" class="w-56 sm:w-64" v-bind="card(item)" />
+        <MediaCard v-for="item in row.items" :key="item.id" class="w-40 sm:w-64" v-bind="card(item)" />
       </MediaRow>
     </div>
 

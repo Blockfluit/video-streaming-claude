@@ -22,7 +22,7 @@ withDefaults(defineProps<{ count?: number }>(), { count: 6 })
     </div>
 
     <div class="flex gap-3 overflow-hidden px-1 py-3">
-      <SkeletonCard v-for="index in count" :key="index" class="w-56 sm:w-64" />
+      <SkeletonCard v-for="index in count" :key="index" class="w-40 sm:w-64" />
     </div>
   </section>
 </template>

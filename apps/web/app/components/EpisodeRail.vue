@@ -174,7 +174,7 @@ onMounted(() => {
       beside the player and takes a plain, shorter cap — a rail as tall as the
       phone would push the comments off the bottom of a scroll people do reach.
     -->
-    <div ref="list" class="max-h-[28rem] overflow-y-auto rounded-lg lg:max-h-[calc(100dvh-16rem)]">
+    <div ref="list" class="scroll-pane max-h-[28rem] overflow-y-auto rounded-lg lg:max-h-[calc(100dvh-16rem)]">
       <div v-for="(group, index) in groups" :key="group.season?.id ?? `loose-${index}`">
         <!--
           Sticky, because the heading answering "which season am I looking at"

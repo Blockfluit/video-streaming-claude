@@ -271,7 +271,7 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
     -->
     <ul
       v-if="shown.length"
-      class="max-h-[28rem] space-y-2 overflow-y-auto rounded-md border border-(--ui-border) p-2"
+      class="scroll-pane max-h-[28rem] space-y-2 overflow-y-auto rounded-md border border-(--ui-border) p-2"
     >
       <li
         v-for="credit in shown"

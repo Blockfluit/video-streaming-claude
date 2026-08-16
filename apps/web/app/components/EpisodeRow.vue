@@ -73,9 +73,17 @@ const numberClass = computed(() => [
   props.dense ? 'w-4 pt-3 text-sm' : 'w-6 pt-6 text-lg',
   props.current ? 'text-(--ui-text-muted)' : 'text-(--ui-text-dimmed)',
 ])
-/** Fixed rather than responsive: the rail is one width at every breakpoint. */
+/**
+ * The dense variant is one width at every breakpoint — it lives in a rail
+ * whose own width does not change. The full one steps, and now steps *down*
+ * as well as up: at `w-40` the fixed chrome of a non-dense row (padding, the
+ * episode number, two gaps, the still) came to 240px of a 343px screen,
+ * leaving about 103px for a title, a runtime badge and two lines of synopsis.
+ * That is roughly twelve characters a line, on the page where the description
+ * is the reason the row is that shape at all.
+ */
 const stillClass = computed(() =>
-  props.dense ? 'w-28' : 'w-40 sm:w-48 lg:w-64',
+  props.dense ? 'w-28' : 'w-28 sm:w-48 lg:w-64',
 )
 const titleClass = computed(() => (props.dense ? 'text-sm' : ''))
 </script>

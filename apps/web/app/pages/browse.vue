@@ -379,7 +379,7 @@ useHead({ title: 'Browse' })
         v-model="search"
         icon="i-lucide-search"
         placeholder="Search titles, genres and cast"
-        class="w-72"
+        class="w-full sm:w-72"
       />
     </div>
 
@@ -396,14 +396,14 @@ useHead({ title: 'Browse' })
         multiple
         placeholder="Any genre"
         aria-label="Filter by genre"
-        class="w-52"
+        class="w-full sm:w-52"
         @update:model-value="(genres: string[]) => apply({ genres })"
       />
       <USelect
         :model-value="filters.kind"
         :items="KIND_OPTIONS"
         aria-label="Filter by films or shows"
-        class="w-36"
+        class="w-full sm:w-36"
         @update:model-value="(value: string) => apply({ kind: asKind(value) })"
       />
       <USelect
@@ -411,7 +411,7 @@ useHead({ title: 'Browse' })
         :items="SORT_OPTIONS"
         icon="i-lucide-arrow-up-down"
         aria-label="Sort the library"
-        class="w-44"
+        class="w-full sm:w-44"
         @update:model-value="(value: string) => apply({ sort: asSort(value) })"
       />
       <!--
@@ -424,7 +424,7 @@ useHead({ title: 'Browse' })
         :model-value="filters.state"
         :items="STATE_OPTIONS"
         aria-label="Filter by lifecycle state"
-        class="w-40"
+        class="w-full sm:w-40"
         @update:model-value="(value: string) => apply({ state: asState(value) })"
       />
 

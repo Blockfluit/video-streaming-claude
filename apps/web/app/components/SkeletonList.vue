@@ -16,17 +16,23 @@ withDefaults(defineProps<{ count?: number }>(), { count: 8 })
 
 <template>
   <ul class="divide-y divide-(--ui-border)">
-    <li v-for="index in count" :key="index" class="flex items-center gap-4 py-3">
+    <!--
+      Laid out exactly like the history row it stands in for, phone rules
+      included. A placeholder that reflows differently from its content is a
+      layout shift on every load, which is the one thing a skeleton exists to
+      prevent.
+    -->
+    <li v-for="index in count" :key="index" class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
       <div class="min-w-0 grow">
         <div class="skeleton h-5 w-2/5" />
         <div class="skeleton mt-1.5 h-4 w-1/4" />
       </div>
 
-      <div class="w-40 shrink-0">
+      <div class="order-last w-full sm:order-none sm:w-40 sm:shrink-0">
         <div class="skeleton h-1.5 rounded-full" />
       </div>
 
-      <div class="w-24 shrink-0">
+      <div class="w-16 shrink-0 sm:w-24">
         <div class="skeleton ml-auto h-4 w-14" />
       </div>
     </li>

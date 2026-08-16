@@ -55,7 +55,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
     <div class="relative">
       <div
         ref="track"
-        class="no-scrollbar flex gap-3 overflow-x-auto scroll-smooth px-1 py-3"
+        class="rail no-scrollbar flex gap-3 scroll-smooth px-1 py-3"
         @scroll.passive="measure"
       >
         <slot />
