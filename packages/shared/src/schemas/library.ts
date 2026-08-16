@@ -454,6 +454,59 @@ export type SetDefaultSubtitleInput = z.infer<typeof setDefaultSubtitleSchema>;
 
 export const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Asking a provider what subtitles exist for a video.
+ *
+ * `query` overrides the title the API would have derived itself — a release is
+ * often catalogued under a name nobody would guess from the library's title,
+ * and the admin can see the results and try again where the server cannot.
+ */
+export const subtitleSearchSchema = z.object({
+  /** ISO 639-1/2, as everywhere else a language is named. */
+  language: z.string().trim().min(2).max(3).toLowerCase(),
+  query: optionalText(200).optional(),
+});
+export type SubtitleSearchInput = z.infer<typeof subtitleSearchSchema>;
+
+/**
+ * Installing one of the candidates a search returned.
+ *
+ * No `isDefault`, for the same reason upload lost one: the default belongs to
+ * the **video** and is set through `PUT /videos/:id/subtitles/default`. A
+ * downloaded track still lights up automatically when the video has no
+ * hand-picked default — `refreshAutoDefault` decides that once, from the whole
+ * set, rather than each way of adding a track having its own opinion.
+ */
+export const fetchSubtitleSchema = z.object({
+  fileId: nonEmptyText(64),
+  language: z.string().trim().min(2).max(3).toLowerCase(),
+  /** Defaults to the language's own name when the picker does not name it. */
+  label: nonEmptyText(100).optional(),
+});
+export type FetchSubtitleInput = z.infer<typeof fetchSubtitleSchema>;
+
+/** How many candidates are worth showing. Beyond this the picker is a haystack. */
+export const MAX_SUBTITLE_CANDIDATES = 25;
+
+/**
+ * One row in the picker.
+ *
+ * `fromHash` is the field that earns its place: a candidate matched on the file
+ * hash was timed against this exact release, and one matched on title was not.
+ * That difference is the whole reason the picker shows more than a list of
+ * languages.
+ */
+export interface SubtitleCandidate {
+  fileId: string;
+  language: string;
+  releaseName: string;
+  fileName: string | null;
+  format: string;
+  downloadCount: number;
+  hearingImpaired: boolean;
+  fromHash: boolean;
+}
+
 export const jobTypeSchema = z.enum(['PROBE', 'THUMBNAIL', 'TRANSCODE', 'SUBTITLE_EXTRACT']);
 export const jobStatusSchema = z.enum(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED']);
 export type JobStatus = z.infer<typeof jobStatusSchema>;

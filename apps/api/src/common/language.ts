@@ -71,3 +71,29 @@ export function toIso6391(code: string): string | null {
 export function languageNativeName(code: string): string | null {
   return lookup(code)?.local ?? null;
 }
+
+export interface LanguageOption {
+  /** The two-letter code, which is what `<track srclang>` and providers want. */
+  code: string;
+  name: string;
+  nativeName: string;
+}
+
+/**
+ * The languages a picker can offer, by name.
+ *
+ * Narrowed to ISO 639-1 — the ~185 languages with a two-letter code — because
+ * that is both what subtitle providers index by and a list a person can scroll.
+ * The full 639-3 set runs to thousands, nearly none of which anyone has ever
+ * subtitled a film in.
+ *
+ * Derived from the package rather than typed out here. A hand-written list of
+ * languages is wrong the moment someone needs the one that was left out.
+ */
+export function listLanguages(): LanguageOption[] {
+  return langs
+    .all()
+    .filter((language) => typeof language['1'] === 'string' && language['1'].length === 2)
+    .map((language) => ({ code: language['1'], name: language.name, nativeName: language.local }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
