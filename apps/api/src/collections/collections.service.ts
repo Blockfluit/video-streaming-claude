@@ -16,8 +16,8 @@ import {
   videoMissingFields,
   whereVisible,
 } from '../common/publishing';
-import { isUniqueViolation } from '../common/prisma-errors';
-import { slugify, uniqueSlug } from '../common/slug';
+import { isUniqueViolation } from '../common/errors';
+import { freeSlug, slugify } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleData, titleUpdate } from '../common/title';
 import { savedToList } from '../common/watchlist';
@@ -565,16 +565,9 @@ export class CollectionsService {
   }
 
   /** Collection slugs are unique library-wide, unlike season and video slugs. */
-  private async freeCollectionSlug(base: string, exceptId?: string): Promise<string> {
-    const taken = await this.prisma.collection.findMany({
-      where: exceptId ? { NOT: { id: exceptId } } : undefined,
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  /** Library-wide: a collection is addressed at `/c/<slug>` with no parent above it. */
+  private freeCollectionSlug(base: string, exceptId?: string): Promise<string> {
+    return freeSlug(this.prisma.collection, base, { exceptId });
   }
 
   /**

@@ -6,7 +6,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { toPage, type Page } from '@video/shared';
 
 import { isKnownLanguage } from '../common/language';
-import { isUniqueViolation } from '../common/prisma-errors';
+import { describeError, isUniqueViolation } from '../common/errors';
 import { StorageService } from '../common/storage.service';
 import { FfmpegService } from '../media/ffmpeg.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -161,7 +161,7 @@ export class SubtitlesService {
       return 'created';
     } catch (error) {
       this.logger.warn(
-        `Could not bind ${binding.sourceKey}: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not bind ${binding.sourceKey}: ${describeError(error)}`,
       );
       return 'unchanged';
     }
@@ -235,7 +235,7 @@ export class SubtitlesService {
     } catch (error) {
       await this.storage.delete('derived', staging);
       throw new BadRequestException(
-        `Could not convert ${input.describe}: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not convert ${input.describe}: ${describeError(error)}`,
       );
     }
   }
@@ -419,7 +419,7 @@ export class SubtitlesService {
       // A sidecar may already claim this language and label. That is a
       // duplicate, not a reason to fail the extraction job.
       this.logger.warn(
-        `Could not register extracted track: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not register extracted track: ${describeError(error)}`,
       );
     }
   }
@@ -649,10 +649,6 @@ export class SubtitlesService {
  */
 function sanitiseExtension(format: string): string {
   return /^[a-z0-9]{2,4}$/i.test(format) ? format.toLowerCase() : 'srt';
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** A stable, filesystem-safe name per track, so re-binding overwrites rather than accumulating. */

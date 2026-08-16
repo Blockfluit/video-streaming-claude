@@ -15,7 +15,7 @@ import {
 } from '@video/shared';
 
 import type { AuthUser } from '../auth/auth.types';
-import { isUniqueViolation } from '../common/prisma-errors';
+import { isUniqueViolation } from '../common/errors';
 import { whereVisible } from '../common/publishing';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';

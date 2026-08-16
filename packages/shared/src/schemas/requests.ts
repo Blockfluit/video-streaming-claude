@@ -44,10 +44,6 @@ export type RequestStatus = z.infer<typeof requestStatusSchema>;
 export const OPEN_REQUEST_STATUSES = ['NEW', 'SEEN', 'PROCESSING'] as const;
 export type OpenRequestStatus = (typeof OPEN_REQUEST_STATUSES)[number];
 
-export function isOpenStatus(status: RequestStatus): status is OpenRequestStatus {
-  return (OPEN_REQUEST_STATUSES as readonly string[]).includes(status);
-}
-
 export const MAX_REQUEST_TITLE_LENGTH = 200;
 export const MAX_REQUEST_COMMENT_LENGTH = 2000;
 export const MAX_ADMIN_NOTE_LENGTH = 2000;

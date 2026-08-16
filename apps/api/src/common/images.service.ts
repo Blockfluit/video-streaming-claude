@@ -8,7 +8,7 @@ import { type ArtworkResolution, resolveArtwork } from './artwork-resolution';
 import { whereVisible } from './publishing';
 import { StorageService } from './storage.service';
 import { MEMBERSHIP_ORDER } from '../collections/membership';
-import type { ArtworkShape } from '../media/artwork';
+import { artworkKeyOf, type ArtworkShape } from '../media/artwork';
 import { FALLBACK_CONTENT_TYPE, fallbackArtwork } from '../media/fallback-artwork';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -64,7 +64,7 @@ export class ImagesService {
     if (!video) throw new NotFoundException('No such video');
 
     await this.sendResolved(
-      resolveArtwork(shape === 'poster' ? video.posterKey : video.bannerKey),
+      resolveArtwork(artworkKeyOf(video, shape)),
       shape,
       response,
     );
@@ -93,7 +93,7 @@ export class ImagesService {
     });
     if (!collection) throw new NotFoundException('No such collection');
 
-    const own = shape === 'poster' ? collection.posterKey : collection.bannerKey;
+    const own = artworkKeyOf(collection, shape);
 
     // Only asked for when it would be used — the override is the common case
     // once a library has been curated, and this is a second query per card.
@@ -104,7 +104,7 @@ export class ImagesService {
         orderBy: [...MEMBERSHIP_ORDER],
         select: { video: { select: { posterKey: true, bannerKey: true } } },
       });
-      inherited = (shape === 'poster' ? first?.video.posterKey : first?.video.bannerKey) ?? null;
+      inherited = artworkKeyOf(first?.video, shape);
     }
 
     await this.sendResolved(resolveArtwork(own, inherited), shape, response);

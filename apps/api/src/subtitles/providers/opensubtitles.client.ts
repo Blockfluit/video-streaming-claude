@@ -8,6 +8,7 @@ import type {
   SubtitleQuery,
   SubtitleQuota,
 } from './provider';
+import { describeError } from '../../common/errors';
 
 /**
  * OpenSubtitles, over the REST API.
@@ -237,7 +238,7 @@ export class OpenSubtitlesClient implements SubtitleProvider {
     } catch (cause) {
       // A timeout and a DNS failure are the same thing to an admin: the service
       // is not answering, and nothing they type into this app will change it.
-      this.logger.warn(`OpenSubtitles request failed: ${describe(cause)}`);
+      this.logger.warn(`OpenSubtitles request failed: ${describeError(cause)}`);
       throw new OpenSubtitlesError('OpenSubtitles did not respond.');
     }
   }
@@ -318,8 +319,4 @@ async function safeBody(response: Response): Promise<string> {
   } catch {
     return '<unreadable>';
   }
-}
-
-function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

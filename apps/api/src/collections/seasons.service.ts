@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateSeasonInput, UpdateSeasonInput } from '@video/shared';
 
-import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
+import { freeSlug, seasonSlug, slugify } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -144,15 +144,7 @@ export class SeasonsService {
   }
 
   /** Season slugs are unique within their collection, not library-wide. */
-  private async freeSlug(collectionId: string, base: string, exceptId?: string): Promise<string> {
-    const taken = await this.prisma.season.findMany({
-      where: { collectionId, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  private freeSlug(collectionId: string, base: string, exceptId?: string): Promise<string> {
+    return freeSlug(this.prisma.season, base, { scope: { collectionId }, exceptId });
   }
 }

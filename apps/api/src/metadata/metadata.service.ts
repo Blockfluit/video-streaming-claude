@@ -16,7 +16,7 @@ import {
 import { buildDiff, COLLECTION_FIELDS, VIDEO_FIELDS, type FieldDiff } from './diff';
 import { TmdbClient } from './tmdb.client';
 import { mapEpisodes, mapSearchResults, mapTitle, type MetadataProposal } from './tmdb.mapper';
-import { isUniqueViolation } from '../common/prisma-errors';
+import { isUniqueViolation } from '../common/errors';
 import { titleUpdate } from '../common/title';
 import { CollectionArtworkService, MediaService } from '../media/media.service';
 import { PeopleService } from '../people/people.service';

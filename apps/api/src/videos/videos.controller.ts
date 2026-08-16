@@ -36,7 +36,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { ImagesService } from '../common/images.service';
 import { validate } from '../common/zod-validation.pipe';
-import type { ArtworkShape } from '../media/artwork';
+import { manualArtworkPatch, type ArtworkShape } from '../media/artwork';
 import { MediaService } from '../media/media.service';
 import { JobsService } from '../transcode/jobs.service';
 import { StreamingService } from './streaming.service';
@@ -251,7 +251,7 @@ export class VideosController {
     @Body(validate(captureThumbnailSchema)) dto: CaptureThumbnailInput,
   ) {
     const key = await this.media.captureArtwork(id, dto.atSeconds, 'poster');
-    return { posterKey: key, posterSource: 'MANUAL' };
+    return manualArtworkPatch('poster', key);
   }
 
   @ThrottleExpensive()
@@ -263,7 +263,7 @@ export class VideosController {
     @Body(validate(captureThumbnailSchema)) dto: CaptureThumbnailInput,
   ) {
     const key = await this.media.captureArtwork(id, dto.atSeconds, 'banner');
-    return { bannerKey: key, bannerSource: 'MANUAL' };
+    return manualArtworkPatch('banner', key);
   }
 
   /**
@@ -333,8 +333,6 @@ export class VideosController {
       shape,
     );
 
-    return shape === 'poster'
-      ? { posterKey: key, posterSource: 'MANUAL' }
-      : { bannerKey: key, bannerSource: 'MANUAL' };
+    return manualArtworkPatch(shape, key);
   }
 }

@@ -5,6 +5,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { StorageService } from '../common/storage.service';
 import { ReconcileService } from './reconcile.service';
 import { isHiddenEntry } from './watch-ignore';
+import { describeError } from '../common/errors';
 
 /**
  * Watches `MEDIA_ROOT` and reconciles after things settle.
@@ -39,7 +40,7 @@ export class WatcherService implements OnApplicationBootstrap, OnModuleDestroy {
   async onApplicationBootstrap(): Promise<void> {
     // The startup pass owns the first look at the tree, watcher or not.
     await this.reconcile.run().catch((error: unknown) => {
-      this.logger.error(`Startup reconcile failed: ${describe(error)}`);
+      this.logger.error(`Startup reconcile failed: ${describeError(error)}`);
     });
 
     if (this.config.get<string>('INGEST_WATCHER_ENABLED') === 'false') {
@@ -67,7 +68,7 @@ export class WatcherService implements OnApplicationBootstrap, OnModuleDestroy {
       .on('unlink', () => this.schedule())
       .on('addDir', () => this.schedule())
       .on('unlinkDir', () => this.schedule())
-      .on('error', (error) => this.logger.error(`Watcher error: ${describe(error)}`));
+      .on('error', (error) => this.logger.error(`Watcher error: ${describeError(error)}`));
 
     this.logger.log(`Watching ${root}`);
   }
@@ -87,15 +88,11 @@ export class WatcherService implements OnApplicationBootstrap, OnModuleDestroy {
       // `run()` joins an in-flight pass rather than starting a second one, so
       // this cannot pile up even if events keep arriving.
       void this.reconcile.run().catch((error: unknown) => {
-        this.logger.error(`Reconcile after watcher event failed: ${describe(error)}`);
+        this.logger.error(`Reconcile after watcher event failed: ${describeError(error)}`);
       });
     }, this.settleMs);
 
     // Not keeping the event loop alive for a scan nobody is waiting on.
     this.pending.unref?.();
   }
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

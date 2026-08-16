@@ -16,11 +16,15 @@ import {
   type ArtworkShape,
   artworkDirectory,
   artworkKey,
+  artworkKeyOf,
+  artworkKeyPatch,
   captureFilter,
+  manualArtworkPatch,
 } from './artwork';
 import { NoFrameError } from './ffmpeg-error';
 import { FfmpegService } from './ffmpeg.service';
 import { needsConversion } from './needs-conversion';
+import { describeError } from '../common/errors';
 
 /**
  * Probing and thumbnails.
@@ -113,7 +117,7 @@ export class MediaService implements OnModuleDestroy {
       void this.processOne(videoId)
         .catch((error: unknown) => {
           // Already handled per-video below; this is the last resort.
-          this.logger.error(`Probe of ${videoId} failed: ${describe(error)}`);
+          this.logger.error(`Probe of ${videoId} failed: ${describeError(error)}`);
         })
         .finally(() => {
           this.active -= 1;
@@ -179,10 +183,10 @@ export class MediaService implements OnModuleDestroy {
     } catch (error) {
       // Recorded rather than thrown: one unreadable file must not stop a scan,
       // and the admin needs to see which file and why.
-      this.logger.warn(`Probe failed for ${key}: ${describe(error)}`);
+      this.logger.warn(`Probe failed for ${key}: ${describeError(error)}`);
       await this.prisma.video.update({
         where: { id: video.id },
-        data: { probeError: describe(error).slice(0, 1000), probedAt: new Date() },
+        data: { probeError: describeError(error).slice(0, 1000), probedAt: new Date() },
       });
       return;
     }
@@ -256,7 +260,7 @@ export class MediaService implements OnModuleDestroy {
               : { bannerKey: key, bannerSource: 'AUTO' },
         });
       } catch (error) {
-        this.logger.warn(`${shape} failed for ${video.storageKey}: ${describe(error)}`);
+        this.logger.warn(`${shape} failed for ${video.storageKey}: ${describeError(error)}`);
       }
     }
   }
@@ -466,25 +470,17 @@ export class CollectionArtworkService {
     });
     if (!collection) throw new NotFoundException('No such collection');
 
-    const existing = shape === 'poster' ? collection.posterKey : collection.bannerKey;
+    const existing = artworkKeyOf(collection, shape);
     if (existing) {
       await this.storage.delete('derived', existing);
     }
 
     await this.prisma.collection.update({
       where: { id: collection.id },
-      data: shape === 'poster' ? { posterKey: null } : { bannerKey: null },
+      data: artworkKeyPatch(shape, null),
     });
   }
 }
 
 /** The update for "an admin chose this one", for whichever shape they chose. */
-function manual(shape: ArtworkShape, key: string) {
-  return shape === 'poster'
-    ? { posterKey: key, posterSource: 'MANUAL' as const }
-    : { bannerKey: key, bannerSource: 'MANUAL' as const };
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const manual = manualArtworkPatch;

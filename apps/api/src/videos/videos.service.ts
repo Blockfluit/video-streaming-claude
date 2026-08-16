@@ -9,7 +9,7 @@ import {
 
 import { whereEpisode, whereFilm } from '../common/films';
 import { narrowToVisibleStates, videoMissingFields, whereVisible } from '../common/publishing';
-import { slugify, uniqueSlug } from '../common/slug';
+import { freeSlug, slugify } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
@@ -455,16 +455,8 @@ export class VideosService {
    * has to be the library — and `pilot-2` is what the shared numbering gives the
    * second one.
    */
-  private async freeSlug(base: string, exceptId?: string): Promise<string> {
-    const taken = await this.prisma.video.findMany({
-      where: exceptId ? { NOT: { id: exceptId } } : undefined,
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  private freeSlug(base: string, exceptId?: string): Promise<string> {
+    return freeSlug(this.prisma.video, base, { exceptId });
   }
 
   /** The publish checklist is admin-facing; a USER only ever sees published videos anyway. */

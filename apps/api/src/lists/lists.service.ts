@@ -18,9 +18,9 @@ import {
 } from '@video/shared';
 
 import { withNestedCountsHere } from '../common/films';
-import { isUniqueViolation } from '../common/prisma-errors';
+import { isUniqueViolation } from '../common/errors';
 import { whereVisible } from '../common/publishing';
-import { slugify, uniqueSlug } from '../common/slug';
+import { freeSlug, slugify } from '../common/slug';
 import type { Role, RowSource } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { WatchService } from '../watch/watch.service';
@@ -287,7 +287,7 @@ export class ListsService {
    */
   async addItem(listId: string, dto: AddListItemInput) {
     await this.requireHandPicked(listId);
-    const target = await this.requireTarget(dto);
+    const target = await this.requireAnyTarget(dto);
 
     const count = await this.prisma.listItem.count({ where: { listId } });
     if (count >= MAX_ITEMS_PER_LIST) {
@@ -384,7 +384,21 @@ export class ListsService {
     return items.map(withNestedCountsHere);
   }
 
-  private async requireTarget(
+  /**
+   * The referenced record, whatever its state — **no visibility filter**, and
+   * named to say so.
+   *
+   * This differs from `watchlist.requireTarget`, which is the same lookup
+   * through `whereVisible(role)` so that saving something cannot be used to
+   * probe for drafts. Both are correct: a curated row is admin-made and may
+   * legitimately hold a draft, because `listItems` filters per item on the way
+   * out and that is the only thing standing between a home-page shelf and an
+   * unpublished title.
+   *
+   * They were both called `requireTarget`, which is the shape that gets copied
+   * from the wrong one. The name carries the difference now.
+   */
+  private async requireAnyTarget(
     dto: AddListItemInput,
   ): Promise<{ collectionId: string } | { videoId: string }> {
     if (dto.collectionId !== undefined) {
@@ -445,15 +459,7 @@ export class ListsService {
     return last._max.position === null ? 0 : last._max.position + 1;
   }
 
-  private async freeSlug(base: string, exceptId?: string): Promise<string> {
-    const taken = await this.prisma.curatedList.findMany({
-      where: exceptId ? { NOT: { id: exceptId } } : {},
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  private freeSlug(base: string, exceptId?: string): Promise<string> {
+    return freeSlug(this.prisma.curatedList, base, { exceptId });
   }
 }

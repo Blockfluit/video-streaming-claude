@@ -15,6 +15,7 @@ import {
 
 import type { AuthUser } from '../auth/auth.types';
 import { whereVisible } from '../common/publishing';
+import { requireVisibleVideo } from '../common/require';
 import { PrismaService } from '../prisma/prisma.service';
 import { toCommentView, type CommentView } from './serialize';
 
@@ -205,13 +206,7 @@ export class CommentsService {
     return comment;
   }
 
-  private async requireVideo(id: string, role: AuthUser['role']) {
-    const video = await this.prisma.video.findFirst({
-      where: { id, ...whereVisible(role) },
-      select: { id: true, durationSec: true },
-    });
-    if (!video) throw new NotFoundException('No such video');
-
-    return video;
+  private requireVideo(id: string, role: AuthUser['role']) {
+    return requireVisibleVideo(this.prisma, id, role, { id: true, durationSec: true });
   }
 }

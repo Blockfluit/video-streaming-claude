@@ -216,7 +216,7 @@ export class TmdbClient {
     }
 
     if (!response.ok) {
-      throw new TmdbError(await describe(response), response.status);
+      throw new TmdbError(await describeResponse(response), response.status);
     }
 
     return response;
@@ -234,7 +234,7 @@ const IMAGE_TYPES: Record<string, string> = {
  * a status code — but only its explanation is kept, never the URL that produced
  * it.
  */
-async function describe(response: Response): Promise<string> {
+async function describeResponse(response: Response): Promise<string> {
   if (response.status === 401) return 'TMDB rejected the API token.';
   if (response.status === 404) return 'TMDB has no such title.';
   if (response.status === 429) return 'TMDB is rate-limiting this server. Try again shortly.';

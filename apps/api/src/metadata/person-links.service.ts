@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 
 import { TmdbClient } from './tmdb.client';
 import { PrismaService } from '../prisma/prisma.service';
+import { describeError } from '../common/errors';
 
 /**
  * Filling in people's IMDb ids, behind the read rather than during the import.
@@ -124,4 +125,4 @@ export class PersonLinksService implements OnModuleDestroy {
 }
 
 const describe = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+  describeError(error);

@@ -23,7 +23,7 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
     if (!result.success) {
       throw new BadRequestException({
         message: 'Validation failed',
-        errors: describe(result.error),
+        errors: describeZodError(result.error),
       });
     }
 
@@ -38,7 +38,7 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
  * straight onto the input that caused it, instead of showing everything at the
  * top of the page.
  */
-function describe(error: ZodError): { field: string; message: string }[] {
+function describeZodError(error: ZodError): { field: string; message: string }[] {
   return error.issues.map((issue) => ({
     field: issue.path.map(String).join('.') || '(body)',
     message: issue.message,
