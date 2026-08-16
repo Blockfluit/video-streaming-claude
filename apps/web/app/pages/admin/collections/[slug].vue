@@ -584,9 +584,9 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             <UFormField label="Description">
               <UTextarea v-model="form.description" :rows="4" class="w-full" />
             </UFormField>
-            <div class="flex gap-4">
+            <div class="flex flex-wrap gap-4">
               <UFormField label="Year">
-                <UInput v-model.number="form.year" type="number" class="w-32" />
+                <UInput v-model.number="form.year" type="number" class="w-full sm:w-32" />
               </UFormField>
               <UFormField label="Tags" class="grow" hint="Comma separated">
                 <UInput v-model="form.tags" class="w-full" />
@@ -614,13 +614,13 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         <UCard>
           <template #header><h2 class="font-semibold">Seasons and episodes</h2></template>
 
-          <div class="mb-4 flex items-end gap-2">
+          <div class="mb-4 flex flex-wrap items-end gap-2">
             <UFormField label="Add a season" hint="Leave blank for specials">
               <UInput
                 v-model.number="newSeasonNumber"
                 type="number"
                 placeholder="Number"
-                class="w-32"
+                class="w-full sm:w-32"
               />
             </UFormField>
             <UButton color="neutral" variant="subtle" @click="addSeason">Add</UButton>

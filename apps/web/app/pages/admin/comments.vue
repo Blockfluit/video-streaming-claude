@@ -90,7 +90,7 @@ useHead({ title: 'Comments' })
         v-model="q"
         icon="i-lucide-search"
         placeholder="Search comments"
-        class="w-72"
+        class="w-full sm:w-72"
       />
       <UCheckbox v-model="includeDeleted" label="Show removed" />
       <span class="ml-auto text-sm text-(--ui-text-muted)">

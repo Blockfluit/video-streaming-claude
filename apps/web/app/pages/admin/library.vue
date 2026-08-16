@@ -234,8 +234,8 @@ useHead({ title: 'All titles' })
     <h1 class="text-2xl font-bold tracking-tight">Library</h1>
 
     <div class="flex flex-wrap gap-3">
-      <UInput v-model="q" icon="i-lucide-search" placeholder="Search titles" class="w-64" />
-      <USelect v-model="state" :items="STATES" aria-label="Filter by state" class="w-40" />
+      <UInput v-model="q" icon="i-lucide-search" placeholder="Search titles" class="w-full sm:w-64" />
+      <USelect v-model="state" :items="STATES" aria-label="Filter by state" class="w-full sm:w-40" />
     </div>
 
     <section v-if="collectionRows.length" class="space-y-2">

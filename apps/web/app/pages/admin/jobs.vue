@@ -41,7 +41,7 @@ useHead({ title: 'Jobs' })
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-end gap-3">
+    <div class="flex flex-wrap items-end gap-3">
       <div class="grow">
         <h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
         <p class="text-sm text-(--ui-text-muted)">

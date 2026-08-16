@@ -250,7 +250,7 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
         icon="i-lucide-search"
         placeholder="Filter by name, role or job"
         aria-label="Filter cast and crew"
-        class="w-64"
+        class="w-full sm:w-64"
       />
     </div>
 
@@ -352,10 +352,10 @@ const isLast = (credit: Credit) => own.value[own.value.length - 1]?.id === credi
           />
         </UFormField>
         <UFormField label="Role">
-          <USelect v-model="role" :items="ROLES" class="w-40" />
+          <USelect v-model="role" :items="ROLES" class="w-full sm:w-40" />
         </UFormField>
         <UFormField label="Character">
-          <UInput v-model="characterName" placeholder="Optional" class="w-44" />
+          <UInput v-model="characterName" placeholder="Optional" class="w-full sm:w-44" />
         </UFormField>
         <UButton :loading="busy" :disabled="!chosen" @click="add">Add credit</UButton>
       </div>

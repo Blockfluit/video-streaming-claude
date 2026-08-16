@@ -468,7 +468,7 @@ function openFinder() {
               <USelectMenu
                 v-model="language"
                 :items="languageItems"
-                class="w-48"
+                class="w-full sm:w-48"
                 aria-label="Which language to look for"
               />
             </UFormField>

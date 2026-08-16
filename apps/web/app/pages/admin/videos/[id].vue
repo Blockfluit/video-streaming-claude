@@ -314,7 +314,10 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
           <QualityBadge :width="video.width" :height="video.height" />
           <span>{{ runtime(video.durationSec) ?? 'not probed' }}</span>
           <span>{{ video.videoCodec }} / {{ video.audioCodec }}</span>
-          <span>{{ video.storageKey }}</span>
+          <!-- A full path with no break opportunity is a single unbreakable
+               word as wide as the filename, which pushes the whole header
+               past the edge of a phone screen. -->
+          <span class="break-all">{{ video.storageKey }}</span>
         </div>
       </div>
 
@@ -380,7 +383,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
                 metadata columns landed; there was simply no control for it.
               -->
               <UFormField label="Year">
-                <UInput v-model.number="form.year" type="number" class="w-28" />
+                <UInput v-model.number="form.year" type="number" class="w-full sm:w-28" />
               </UFormField>
               <UFormField label="Tags" hint="Comma separated" class="grow">
                 <UInput v-model="form.tags" class="w-full" />
@@ -612,7 +615,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
           <p>
             <strong>{{ video.title }}</strong> — {{ sizeGb }} GB
           </p>
-          <p class="font-mono text-xs text-(--ui-text-muted)">{{ video.storageKey }}</p>
+          <p class="font-mono text-xs break-all text-(--ui-text-muted)">{{ video.storageKey }}</p>
 
           <p class="text-(--ui-text-muted)">
             Its poster, banner, converted file and subtitle tracks go either way.
@@ -646,7 +649,10 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         </div>
       </template>
       <template #footer>
-        <div class="flex w-full gap-2">
+        <!-- Three buttons, two of them long enough to name what they delete.
+             Without the wrap they run off the side of the dialog on a phone,
+             which is the one place you want to read them before pressing. -->
+        <div class="flex w-full flex-wrap gap-2">
           <UButton color="neutral" variant="subtle" @click="confirmingDelete = false">
             Cancel
           </UButton>

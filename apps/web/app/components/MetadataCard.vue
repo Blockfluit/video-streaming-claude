@@ -165,13 +165,13 @@ async function unmatch() {
 
       <div class="flex flex-wrap gap-4">
         <UFormField label="Age rating">
-          <UInput v-model="form.certification" class="w-32" placeholder="PG-13" />
+          <UInput v-model="form.certification" class="w-full sm:w-32" placeholder="PG-13" />
         </UFormField>
         <UFormField label="Released">
-          <UInput v-model="form.releaseDate" type="date" class="w-44" />
+          <UInput v-model="form.releaseDate" type="date" class="w-full sm:w-44" />
         </UFormField>
         <UFormField label="Original language">
-          <UInput v-model="form.originalLanguage" class="w-24" placeholder="en" />
+          <UInput v-model="form.originalLanguage" class="w-full sm:w-24" placeholder="en" />
         </UFormField>
       </div>
 

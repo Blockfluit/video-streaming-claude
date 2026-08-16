@@ -116,13 +116,13 @@ useHead({ title: 'Requests' })
         v-model="q"
         icon="i-lucide-search"
         placeholder="Search titles"
-        class="w-72"
+        class="w-full sm:w-72"
       />
       <USelect
         v-model="statusFilter"
         :items="requestStatusFilterOptions"
         aria-label="Filter requests by status"
-        class="w-44"
+        class="w-full sm:w-44"
       />
       <span class="ml-auto text-sm text-(--ui-text-muted)">
         {{ data?.total ?? 0 }} total
@@ -214,7 +214,7 @@ useHead({ title: 'Requests' })
             :model-value="request.status"
             :items="requestStatusOptions"
             :aria-label="`Set the status of the request for ${request.title}`"
-            class="w-44"
+            class="w-full sm:w-44"
             @update:model-value="value => setStatus(request, value as RequestStatus)"
           />
 

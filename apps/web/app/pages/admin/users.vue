@@ -291,7 +291,7 @@ useHead({ title: 'Accounts' })
             v-model="expiresInHours"
             :items="EXPIRY_OPTIONS"
             aria-label="How long the invite lasts"
-            class="w-40"
+            class="w-full sm:w-40"
           />
         </UFormField>
         <UFormField label="Grants">
@@ -299,7 +299,7 @@ useHead({ title: 'Accounts' })
             v-model="grantsRole"
             :items="ROLE_OPTIONS"
             aria-label="Role the invite grants"
-            class="w-32"
+            class="w-full sm:w-32"
           />
         </UFormField>
         <UButton icon="i-lucide-plus" :loading="minting" @click="mint">Mint a token</UButton>
