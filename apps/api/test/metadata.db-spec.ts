@@ -1,17 +1,11 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { MOVIE, SEASON, SERIES } from '../src/metadata/tmdb.fixtures';
 import { TmdbClient, TmdbError } from '../src/metadata/tmdb.client';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 /**
  * Importing metadata, against a real database.
@@ -28,13 +22,11 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * `auth.e2e-spec.ts` uses for Prisma.
  */
 describe('Metadata import (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-metadata-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'metadata', workspace: true, configure: builder => builder.overrideProvider(TmdbClient).useValue(tmdbStub) });
 
-  let workspace: string;
+
   let app: INestApplication;
   let prisma: PrismaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let viewer: request.Agent;
   let collectionId: string;
@@ -53,27 +45,10 @@ describe('Metadata import (real database)', () => {
     fetchImage: jest.fn(),
   };
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(TmdbClient)
-      .useValue(tmdbStub)
-      .compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-  }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'metadata-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
+    await harness.start();
+    ({ app, prisma, admin } = harness);
 
     tmdbStub.isConfigured = true;
     tmdbStub.titleDetail.mockReset().mockResolvedValue(MOVIE);
@@ -84,24 +59,8 @@ describe('Metadata import (real database)', () => {
       .mockReset()
       .mockResolvedValue({ body: Buffer.from('not really a jpeg'), extension: '.jpg' });
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "Person" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
 
-    await startApp();
 
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({
-        token: (await readFile(tokenFile, 'utf8')).trim(),
-        username: 'root',
-        password: PASSWORD,
-      })
-      .expect(201);
 
     const invite = await admin.post('/admin/invites').send({}).expect(201);
     viewer = request.agent(app.getHttpServer());
@@ -134,12 +93,7 @@ describe('Metadata import (real database)', () => {
     videoId = video.id;
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   const applyToVideo = (body: Record<string, unknown>) =>
     admin.post(`/admin/metadata/videos/${videoId}/apply`).send({

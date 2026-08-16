@@ -1,19 +1,15 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { MediaService } from '../src/media/media.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 import { JobsService } from '../src/transcode/jobs.service';
 
 const run = promisify(execFile);
@@ -24,16 +20,14 @@ const run = promisify(execFile);
  * and none of that means anything against a mock.
  */
 describe('Transcoding (real ffmpeg)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-transcode-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'transcode', workspace: true, admin: 'ada' });
 
-  let workspace: string;
+
   let mediaRoot: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let storage: StorageService;
   let media: MediaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
 
   /** An MKV with H.265 video and, optionally, embedded subtitle tracks. */
@@ -47,7 +41,7 @@ describe('Transcoding (real ffmpeg)', () => {
 
     const srtPaths: string[] = [];
     for (const [index, track] of subtitles.entries()) {
-      const srtPath = join(workspace, `track-${index}.srt`);
+      const srtPath = join(harness.workspace, `track-${index}.srt`);
       await writeFile(
         srtPath,
         `1\n00:00:00,500 --> 00:00:01,500\n${track.title} line one\n\n2\n00:00:01,600 --> 00:00:02,000\n${track.title} line two\n`,
@@ -106,16 +100,6 @@ describe('Transcoding (real ffmpeg)', () => {
     return video.id;
   }
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    storage = app.get(StorageService);
-    media = app.get(MediaService);
-  }
 
   /** Polls a job until it stops running. */
   async function waitForJob(jobId: string, timeoutMs = 120_000) {
@@ -146,42 +130,21 @@ describe('Transcoding (real ffmpeg)', () => {
   }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'transcode-'));
-    mediaRoot = join(workspace, 'media');
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    storage = app.get(StorageService);
+    media = app.get(MediaService);
+    mediaRoot = join(harness.workspace, 'media');
     await mkdir(mediaRoot, { recursive: true });
 
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = mediaRoot;
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
     // Fastest encode that still exercises the real pipeline.
     process.env.TRANSCODE_PRESET = 'ultrafast';
-    await rm(tokenFile, { force: true });
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "IngestIssue", "Subtitle", "MediaJob" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
 
-    await startApp();
 
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   describe('the plan checkpoint — convert a real MKV', () => {
     it('flags the mkv, converts it, and plays the result', async () => {

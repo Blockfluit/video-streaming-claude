@@ -1,15 +1,8 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 /**
  * `GET /library` — the catalogue as one list, against a real Postgres.
@@ -24,62 +17,20 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * has no business honouring.
  */
 describe('Catalogue (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  // Its own path: the token file is a live credential and two suites sharing
-  // one delete each other's.
-  const tokenFile = join(tmpdir(), 'video-streaming-catalogue-test.bootstrap-token');
+  // Its own token path: the file is a live credential and two suites sharing one
+  // delete each other's.
+  const harness = new DbHarness({ name: 'catalogue', workspace: true, admin: 'ada' });
 
-  let workspace: string;
   let app: INestApplication;
   let prisma: PrismaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-  }
-
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'catalogue-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "Person", "Credit" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({
-        token: (await readFile(tokenFile, 'utf8')).trim(),
-        username: 'ada',
-        password: PASSWORD,
-      })
-      .expect(201);
+    await harness.start();
+    ({ app, prisma, admin } = harness);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   async function asUser(): Promise<request.Agent> {
     const invite = await admin.post('/admin/invites').send({}).expect(201);

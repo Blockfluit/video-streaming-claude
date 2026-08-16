@@ -1,15 +1,7 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness } from './db/harness';
 
 /**
  * Comments under the player.
@@ -20,27 +12,14 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * exists.
  */
 describe('Comments (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-comments-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'comments', workspace: true });
 
-  let workspace: string;
-  let app: INestApplication;
   let prisma: PrismaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let ada: request.Agent;
   let grace: request.Agent;
   let collectionId: string;
   let videoId: string;
-
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-  }
 
   let seeded = 0;
 
@@ -66,46 +45,15 @@ describe('Comments (real database)', () => {
     return video.id;
   }
 
-  async function invite(username: string): Promise<request.Agent> {
-    const minted = await admin.post('/admin/invites').send({}).expect(201);
-    const agent = request.agent(app.getHttpServer());
-    await agent
-      .post('/auth/redeem')
-      .send({ token: minted.body.token, username, password: PASSWORD })
-      .expect(201);
-    return agent;
-  }
-
   const post = (agent: request.Agent, body: Record<string, unknown>, id: string = videoId) =>
     agent.post(`/videos/${id}/comments`).send(body);
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'comments-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
+    await harness.start();
+    ({ prisma, admin } = harness);
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'root', password: PASSWORD })
-      .expect(201);
-
-    ada = await invite('ada');
-    grace = await invite('grace');
+    ada = await harness.invite('ada');
+    grace = await harness.invite('grace');
 
     const collection = await prisma.collection.create({
       data: { slug: 'films', title: 'Films', folderKey: 'Films', state: 'PUBLISHED' },
@@ -116,12 +64,7 @@ describe('Comments (real database)', () => {
     videoId = await seedVideo();
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   describe('posting', () => {
     it('records a comment with its author', async () => {

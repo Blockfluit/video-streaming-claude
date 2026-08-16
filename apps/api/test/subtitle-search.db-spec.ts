@@ -1,18 +1,14 @@
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 import { SUBTITLE_PROVIDER, type SubtitleProvider, type SubtitleQuery } from '../src/subtitles/providers/provider';
 
 const run = promisify(execFile);
@@ -37,15 +33,13 @@ General Kenobi.
  * reconcile cannot reap it, and is the whole thing shut to a USER.
  */
 describe('Subtitle search (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-subsearch-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'subsearch', workspace: true, admin: 'ada', configure: builder => builder.overrideProvider(SUBTITLE_PROVIDER).useValue(provider) });
 
-  let workspace: string;
+
   let mediaRoot: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let storage: StorageService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
 
   /** What the stub was asked, so the hash-before-title rule can be asserted. */
@@ -101,19 +95,6 @@ describe('Subtitle search (real database)', () => {
     await appendFile(absolute, Buffer.alloc(200_000));
   }
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(SUBTITLE_PROVIDER)
-      .useValue(provider)
-      .compile();
-
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    storage = app.get(StorageService);
-  }
 
   const scan = () => admin.post('/admin/ingest/scan').expect(200);
 
@@ -126,43 +107,21 @@ describe('Subtitle search (real database)', () => {
   }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    // Both before the app is built: `configure` reads `provider` when the
+    // container is compiled, so a stub assigned afterwards is a stub the app
+    // never saw.
     asked = [];
     provider = stubProvider();
 
-    workspace = await mkdtemp(join(tmpdir(), 'subsearch-'));
-    mediaRoot = join(workspace, 'media');
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    storage = app.get(StorageService);
+
+    mediaRoot = join(harness.workspace, 'media');
     await mkdir(mediaRoot, { recursive: true });
-
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = mediaRoot;
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "IngestIssue", "Subtitle" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   describe('searching', () => {
     it('asks by file hash before asking by title', async () => {
@@ -190,10 +149,11 @@ describe('Subtitle search (real database)', () => {
           ];
         },
       });
-      await app.close();
-      await startApp();
-      admin = request.agent(app.getHttpServer());
-      await admin.post('/auth/login').send({ username: 'ada', password: PASSWORD }).expect(200);
+      // The provider stub has been swapped, so the container is rebuilt around
+      // the new one. The database is left alone.
+      await harness.restart();
+      ({ app, prisma, admin } = harness);
+      storage = app.get(StorageService);
 
       const response = await admin.get(`/videos/${id}/subtitle-candidates?language=en`).expect(200);
 
@@ -232,10 +192,11 @@ describe('Subtitle search (real database)', () => {
   describe('when the server has no provider key', () => {
     beforeEach(async () => {
       provider = stubProvider({ isConfigured: false });
-      await app.close();
-      await startApp();
-      admin = request.agent(app.getHttpServer());
-      await admin.post('/auth/login').send({ username: 'ada', password: PASSWORD }).expect(200);
+      // The provider stub has been swapped, so the container is rebuilt around
+      // the new one. The database is left alone.
+      await harness.restart();
+      ({ app, prisma, admin } = harness);
+      storage = app.get(StorageService);
     });
 
     it('says so rather than failing at the provider', async () => {
@@ -329,10 +290,11 @@ describe('Subtitle search (real database)', () => {
           return { bytes: Buffer.from(SRT, 'utf8'), format: 'vtt' };
         },
       });
-      await app.close();
-      await startApp();
-      admin = request.agent(app.getHttpServer());
-      await admin.post('/auth/login').send({ username: 'ada', password: PASSWORD }).expect(200);
+      // The provider stub has been swapped, so the container is rebuilt around
+      // the new one. The database is left alone.
+      await harness.restart();
+      ({ app, prisma, admin } = harness);
+      storage = app.get(StorageService);
 
       const response = await admin
         .post(`/videos/${id}/subtitles/fetch`)
@@ -415,10 +377,11 @@ describe('Subtitle search (real database)', () => {
      */
     it('says so explicitly when there is no such number', async () => {
       provider = stubProvider({ async quota() { return null; } });
-      await app.close();
-      await startApp();
-      admin = request.agent(app.getHttpServer());
-      await admin.post('/auth/login').send({ username: 'ada', password: PASSWORD }).expect(200);
+      // The provider stub has been swapped, so the container is rebuilt around
+      // the new one. The database is left alone.
+      await harness.restart();
+      ({ app, prisma, admin } = harness);
+      storage = app.get(StorageService);
 
       const response = await admin.get('/subtitles/search/quota').expect(200);
 
