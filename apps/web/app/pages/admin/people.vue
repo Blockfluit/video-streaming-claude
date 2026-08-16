@@ -189,8 +189,10 @@ async function create() {
     // which case nothing would refetch at all.
     if (q.value === name) await reload()
   } catch (failure) {
-    const message = (failure as { data?: { message?: string } }).data?.message
-    toast.add({ title: message ?? 'Could not add that person.', color: 'error' })
+    // Through `apiMessage`, like everything else on this screen: a zod refusal
+    // arrives as `errors[]`, which reading `data.message` by hand misses — so a
+    // named field and its reason became "Could not add that person."
+    toast.add({ title: apiMessage(failure, 'Could not add that person.'), color: 'error' })
   }
 }
 

@@ -14,7 +14,6 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
-  MAX_UPLOAD_BYTES,
   MAX_UPLOAD_FILES,
   uploadVideoSchema,
   type UploadVideoInput,
@@ -25,6 +24,7 @@ import { diskStorage } from 'multer';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { maxUploadBytes, resolveRoot } from '../common/env';
 import { validate } from '../common/zod-validation.pipe';
 import { UPLOAD_STAGING_DIRECTORY, UploadsService, type UploadedVideoFile } from './uploads.service';
 import { ThrottleExpensive } from '../common/throttling';
@@ -43,8 +43,11 @@ import { ThrottleExpensive } from '../common/throttling';
  * file still appears under its final name only once it is complete.
  */
 function stagingPath(): string {
-  const mediaRoot = resolve(process.cwd(), process.env.MEDIA_ROOT ?? '../../media');
-  const staging = resolve(mediaRoot, UPLOAD_STAGING_DIRECTORY);
+  // Through `resolveRoot`, which `StorageService` also uses — this module cannot
+  // reach that service (a decorator argument runs before DI exists), and the
+  // second copy of the default it used to carry is exactly the one that must not
+  // drift from the first.
+  const staging = resolve(resolveRoot('media', process.env.MEDIA_ROOT), UPLOAD_STAGING_DIRECTORY);
   mkdirSync(staging, { recursive: true });
   return staging;
 }
@@ -71,7 +74,10 @@ export class UploadsController {
         filename: (_request, _file, callback) =>
           callback(null, `${Date.now()}-${Math.random().toString(36).slice(2)}.part`),
       }),
-      limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_UPLOAD_FILES },
+      // From the environment, defaulting to the shared constant the browser also
+      // checks against. Documented as configuration since the first release and
+      // read for the first time here.
+      limits: { fileSize: maxUploadBytes(), files: MAX_UPLOAD_FILES },
       fileFilter: (_request, file, callback) => {
         // Judged on the extension only. The browser's `mimetype` comes from the
         // OS registry rather than the file, and is wrong often enough that

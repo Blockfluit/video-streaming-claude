@@ -6,6 +6,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { toPage, type Page } from '@video/shared';
 
 import { isKnownLanguage } from '../common/language';
+import { isUniqueViolation } from '../common/prisma-errors';
 import { StorageService } from '../common/storage.service';
 import { FfmpegService } from '../media/ffmpeg.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -289,43 +290,78 @@ export class SubtitlesService {
       select: { id: true },
     });
 
+    /*
+     * The same rule an upload follows: downloading an English track into a
+     * video that had no default should light it up, rather than leaving the
+     * admin to go and say so separately. It respects a MANUAL choice, so an
+     * admin who has already picked one keeps it. `storeTrack` does that half.
+     */
+    return this.storeTrack(
+      { videoId: input.videoId, language, label: input.label, storageKey },
+      // Only a fresh row owns the file it just wrote. On the update path the
+      // existing row still points at `storageKey`, so removing it on a clash
+      // would leave that row pointing at nothing.
+      { removeFileOnClash: existing === null },
+      () =>
+        existing
+          ? this.prisma.subtitle.update({
+              where: { id: existing.id },
+              data: { language, label: input.label, sourceFormat: input.format },
+              select: SUBTITLE_SELECT,
+            })
+          : this.prisma.subtitle.create({
+              data: {
+                videoId: input.videoId,
+                language,
+                label: input.label,
+                storageKey,
+                sourceFormat: input.format,
+                origin: 'DOWNLOADED',
+                isDefault: false,
+              },
+              select: SUBTITLE_SELECT,
+            }),
+    );
+  }
+
+  /**
+   * The half of installing a track that is the same however the file arrived.
+   *
+   * Writes the row, re-derives the auto default, and turns the one collision
+   * that is a user error into a sentence an admin can act on.
+   *
+   * Both callers need this and only one of them had it. `(videoId, language,
+   * label)` is unique, so a second track with the same language and label is a
+   * duplicate rather than a fault — but `upload` caught nothing, and with no
+   * global exception filter Prisma's `P2002` reached the client as a 500 while
+   * the `.vtt` it had already written stayed in `derived` with no row pointing
+   * at it.
+   *
+   * Narrowed to `isUniqueViolation` rather than catching everything: the wider
+   * version reported *any* failure here — including one from
+   * `refreshAutoDefault` — as "this video already has a track in that
+   * language", which sends the admin to fix something that is not wrong.
+   */
+  private async storeTrack<T extends object>(
+    track: { videoId: string; language: string; label: string; storageKey: string },
+    options: { removeFileOnClash: boolean },
+    write: () => Promise<T>,
+  ): Promise<T & { languageKnown: boolean }> {
     try {
-      const saved = existing
-        ? await this.prisma.subtitle.update({
-            where: { id: existing.id },
-            data: { language, label: input.label, sourceFormat: input.format },
-            select: SUBTITLE_SELECT,
-          })
-        : await this.prisma.subtitle.create({
-            data: {
-              videoId: input.videoId,
-              language,
-              label: input.label,
-              storageKey,
-              sourceFormat: input.format,
-              origin: 'DOWNLOADED',
-              isDefault: false,
-            },
-            select: SUBTITLE_SELECT,
-          });
+      const saved = await write();
+      await this.refreshAutoDefault(track.videoId);
 
-      /*
-       * The same rule an upload follows: downloading an English track into a
-       * video that had no default should light it up, rather than leaving the
-       * admin to go and say so separately. It respects a MANUAL choice, so an
-       * admin who has already picked one keeps it.
-       */
-      await this.refreshAutoDefault(input.videoId);
-
-      return { ...saved, languageKnown: isKnownLanguage(language) };
+      return { ...saved, languageKnown: isKnownLanguage(track.language) };
     } catch (error) {
-      // `(videoId, language, label)` is unique, and the same language and label
-      // arriving from a different file is a duplicate rather than a failure the
-      // admin can do anything about without being told what happened.
-      await this.storage.delete('derived', storageKey);
-      this.logger.warn(`Could not install downloaded subtitle: ${describeError(error)}`);
+      if (!isUniqueViolation(error)) throw error;
+
+      if (options.removeFileOnClash) {
+        await this.storage.delete('derived', track.storageKey);
+      }
+      this.logger.warn(`Could not install subtitle: ${describeError(error)}`);
+
       throw new BadRequestException(
-        `This video already has a "${input.label}" track in that language. Rename or remove it first.`,
+        `This video already has a "${track.label}" track in that language. Rename or remove it first.`,
       );
     }
   }
@@ -433,24 +469,27 @@ export class SubtitlesService {
     const storageKey = `subtitles/${videoId}/upload-${Date.now()}.vtt`;
     await this.storage.save('derived', storageKey, file);
 
-    const created = await this.prisma.subtitle.create({
-      data: {
-        videoId,
-        language,
-        label: input.label,
-        storageKey,
-        sourceFormat: 'vtt',
-        origin: 'UPLOAD',
-        isDefault: false,
-      },
-      select: SUBTITLE_SELECT,
-    });
-
     // Uploading an English track into a video that had none should light it up,
-    // rather than leaving the admin to go and say so separately.
-    await this.refreshAutoDefault(videoId);
-
-    return { ...created, languageKnown: isKnownLanguage(language) };
+    // rather than leaving the admin to go and say so separately. `storeTrack`
+    // does that, and turns a duplicate language-and-label into a 400 instead of
+    // the 500 this used to raise.
+    return this.storeTrack(
+      { videoId, language, label: input.label, storageKey },
+      { removeFileOnClash: true },
+      () =>
+        this.prisma.subtitle.create({
+          data: {
+            videoId,
+            language,
+            label: input.label,
+            storageKey,
+            sourceFormat: 'vtt',
+            origin: 'UPLOAD',
+            isDefault: false,
+          },
+          select: SUBTITLE_SELECT,
+        }),
+    );
   }
 
   /**

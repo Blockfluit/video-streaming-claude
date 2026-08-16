@@ -26,6 +26,7 @@ import { UsersModule } from './users/users.module';
 import { VideosModule } from './videos/videos.module';
 import { WatchModule } from './watch/watch.module';
 import { WatchlistModule } from './watchlist/watchlist.module';
+import { validateEnv } from './common/env';
 import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
 
 @Module({
@@ -33,6 +34,9 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env'],
+      // Checks the shape of what is set and hands back the same strings —
+      // see `common/env.ts` for why it validates without transforming.
+      validate: validateEnv,
     }),
     ThrottlerModule.forRoot({ throttlers: THROTTLERS }),
     PrismaModule,
