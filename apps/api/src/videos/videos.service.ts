@@ -100,6 +100,8 @@ const VIDEO_SELECT = {
   posterSource: true,
   bannerKey: true,
   bannerSource: true,
+  // So the editor can say whether the default track is a choice or a rule.
+  subtitleDefaultSource: true,
   trailerYoutubeId: true,
   introStartSec: true,
   introEndSec: true,
