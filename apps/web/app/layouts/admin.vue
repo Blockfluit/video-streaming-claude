@@ -34,6 +34,25 @@ async function signOut() {
   user.value = null
   await navigateTo('/login')
 }
+
+/**
+ * Keep the section you are in visible in the phone nav strip.
+ *
+ * Queried out of the container rather than collected as a `v-for` ref array:
+ * the ref array's order is not guaranteed to match the source list, and the
+ * only thing wanted here is "the active one", which the DOM already knows.
+ *
+ * After `nextTick`, because the route changes before the class that marks the
+ * new pill does — reading it any earlier finds the pill you just left.
+ */
+const strip = ref<HTMLElement | null>(null)
+const revealActiveSection = async () => {
+  await nextTick()
+  reveal(strip.value?.querySelector('[data-active]'))
+}
+
+onMounted(revealActiveSection)
+watch(() => route.path, revealActiveSection)
 </script>
 
 <template>
@@ -86,13 +105,26 @@ async function signOut() {
         one all along.
       -->
       <main class="min-w-0 grow">
-        <!-- The sidebar is hidden below lg; this is the way back on a phone. -->
-        <div class="mb-4 flex gap-2 overflow-x-auto lg:hidden">
+        <!--
+          The sidebar is hidden below lg; this is the way back on a phone.
+
+          Twelve pills in one scrolling strip, and the one you are on is
+          usually not the one you can see — `Accounts` sits eleven pills along,
+          so arriving there left the strip showing `Overview` and no clue that
+          the current section was off to the right. `reveal` scrolls it into
+          the strip and, because it asks for `nearest` on both axes, moves the
+          page itself not at all.
+
+          `.scroll-pane` keeps the sideways overscroll here rather than handing
+          it to the browser as a back-swipe at the end of the strip.
+        -->
+        <div ref="strip" class="scroll-pane mb-4 flex gap-2 overflow-x-auto lg:hidden">
           <UButton
             v-for="section in sections"
             :key="section.to"
             :to="section.to"
             size="xs"
+            :data-active="isActive(section.to) || undefined"
             :color="isActive(section.to) ? 'primary' : 'neutral'"
             variant="subtle"
           >

@@ -370,7 +370,7 @@ useHead({ title: 'Accounts' })
         the page and left a sticky header nothing to stick to. Capping it gives
         the header a scrollport of its own.
       -->
-      <div v-if="invites?.items?.length" class="max-h-[65vh] overflow-auto">
+      <div v-if="invites?.items?.length" class="scroll-pane max-h-[65vh] overflow-auto">
         <table aria-label="Invites" class="w-full text-sm">
           <thead class="sticky top-0 z-10 border-b border-(--ui-border) bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
             <tr>
@@ -507,48 +507,55 @@ useHead({ title: 'Accounts' })
 
     <UCard>
       <template #header><h2 class="font-semibold">People</h2></template>
-      <table class="w-full text-sm">
-        <tbody class="divide-y divide-(--ui-border)">
-          <tr v-for="account in users?.items ?? []" :key="account.id">
-            <td class="py-3">
-              <p class="font-medium">
-                {{ account.displayName }}
-                <span v-if="account.id === user?.id" class="text-xs text-(--ui-text-muted)">(you)</span>
-              </p>
-              <p class="text-xs text-(--ui-text-muted)">{{ account.username }}</p>
-            </td>
-            <td class="py-3">
-              <UBadge :color="account.role === 'ADMIN' ? 'primary' : 'neutral'" variant="subtle">
-                {{ account.role }}
-              </UBadge>
-            </td>
-            <td class="py-3">
-              <UBadge :color="account.isActive ? 'success' : 'error'" variant="subtle">
-                {{ account.isActive ? 'active' : 'disabled' }}
-              </UBadge>
-            </td>
-            <td class="py-3 text-right">
-              <div class="flex justify-end gap-2">
-                <UButton
-                  size="xs"
-                  color="neutral" variant="subtle"
-                  @click="update(account, { role: account.role === 'ADMIN' ? 'USER' : 'ADMIN' })"
-                >
-                  Make {{ account.role === 'ADMIN' ? 'viewer' : 'admin' }}
-                </UButton>
-                <UButton
-                  size="xs"
-                  variant="subtle"
-                  :color="account.isActive ? 'error' : 'neutral'"
-                  @click="update(account, { isActive: !account.isActive })"
-                >
-                  {{ account.isActive ? 'Disable' : 'Enable' }}
-                </UButton>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <!--
+        The one table in the admin with no scroll container at all. Four
+        columns ending in two full-text buttons ("Make viewer", "Disable") do
+        not fit 343px, and without this the row simply ran off the card.
+      -->
+      <div class="table-scroll">
+        <table class="w-full min-w-max text-sm">
+          <tbody class="divide-y divide-(--ui-border)">
+            <tr v-for="account in users?.items ?? []" :key="account.id">
+              <td class="py-3">
+                <p class="font-medium">
+                  {{ account.displayName }}
+                  <span v-if="account.id === user?.id" class="text-xs text-(--ui-text-muted)">(you)</span>
+                </p>
+                <p class="text-xs text-(--ui-text-muted)">{{ account.username }}</p>
+              </td>
+              <td class="py-3">
+                <UBadge :color="account.role === 'ADMIN' ? 'primary' : 'neutral'" variant="subtle">
+                  {{ account.role }}
+                </UBadge>
+              </td>
+              <td class="py-3">
+                <UBadge :color="account.isActive ? 'success' : 'error'" variant="subtle">
+                  {{ account.isActive ? 'active' : 'disabled' }}
+                </UBadge>
+              </td>
+              <td class="py-3 text-right">
+                <div class="flex justify-end gap-2">
+                  <UButton
+                    size="xs"
+                    color="neutral" variant="subtle"
+                    @click="update(account, { role: account.role === 'ADMIN' ? 'USER' : 'ADMIN' })"
+                  >
+                    Make {{ account.role === 'ADMIN' ? 'viewer' : 'admin' }}
+                  </UButton>
+                  <UButton
+                    size="xs"
+                    variant="subtle"
+                    :color="account.isActive ? 'error' : 'neutral'"
+                    @click="update(account, { isActive: !account.isActive })"
+                  >
+                    {{ account.isActive ? 'Disable' : 'Enable' }}
+                  </UButton>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </UCard>
 
     <!--

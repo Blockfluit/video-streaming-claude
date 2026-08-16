@@ -1029,6 +1029,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
   middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
   page.
+- **An admin table that does not fit scrolls sideways; it does not restack.** `.table-scroll` *replaces*
+  the wrapper's `overflow-hidden` rather than nesting inside it — that one keyword was the whole defect,
+  since any non-`visible` overflow still clips the rounded corners, and the border then stays put while the
+  content moves under it. The `<table>` needs `min-w-max` alongside `w-full`: `w-full` alone re-clips,
+  `min-w-max` alone lets a short table shrink. Sideways rather than a card view below `sm` because the
+  invite table on `/admin/users` has always done this deliberately, and two table idioms in one admin area
+  is worse than one imperfect one — a `display: block` card view also drops the table's implicit ARIA roles
+  and doubles the markup `visible.spec.ts` walks, half of it markup nobody looks at on a desktop. The
+  identifying column is first in all of them, so the useful half is on screen before anyone scrolls.
 - **No media query reaches JavaScript.** Every responsive decision is CSS — a `sm:` prefix,
   `@media (pointer: coarse)`, `@media (hover: hover)`. A `matchMedia` branch deciding *what to render*
   disagrees with the server, and a hydration mismatch is a `pageerror`, which the suite's

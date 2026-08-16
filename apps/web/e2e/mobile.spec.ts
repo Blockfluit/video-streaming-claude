@@ -135,6 +135,31 @@ test.describe('the nav drawer', () => {
   })
 })
 
+test.describe('the admin tables', () => {
+
+  /*
+   * They were wrapped in `overflow-hidden` for their rounded corners, so the
+   * columns that did not fit were not awkward to reach — they were unreachable,
+   * clipped at the edge of the card with nothing to scroll. This asserts the
+   * container can actually move, which is the difference between the two and
+   * is invisible in a screenshot.
+   */
+  test('scroll sideways rather than clipping the columns off', async ({ page }) => {
+    await visit(page, '/admin/library')
+
+    const scroller = page.locator('.table-scroll').first()
+    await expect(scroller).toBeVisible()
+
+    const room = await scroller.evaluate(el => ({
+      overflowing: el.scrollWidth > el.clientWidth,
+      scrolls: getComputedStyle(el).overflowX,
+    }))
+
+    expect(room.scrolls).toBe('auto')
+    expect(room.overflowing).toBe(true)
+  })
+})
+
 test.describe('the poster wall', () => {
 
   /*

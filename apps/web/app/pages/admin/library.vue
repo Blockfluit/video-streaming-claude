@@ -284,8 +284,8 @@ useHead({ title: 'All titles' })
       <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
         Videos ({{ videos?.total ?? 0 }})
       </h2>
-      <div class="overflow-hidden rounded-lg border border-(--ui-border)">
-        <table class="w-full text-sm">
+      <div class="table-scroll rounded-lg border border-(--ui-border)">
+        <table class="w-full min-w-max text-sm">
           <tbody class="divide-y divide-(--ui-border)">
             <tr v-for="video in videoRows" :key="video.id" class="hover:bg-white/[0.03]">
               <td class="p-3">

@@ -282,11 +282,15 @@ body {
  *
  * The admin tables were wrapped in `overflow-hidden` for their rounded corners,
  * which meant the columns that did not fit were not merely awkward to reach —
- * they were **clipped**, with no way to scroll to them at all. That wrapper
- * stays and keeps clipping the corners; this goes inside it, and the table
- * itself needs `min-w-max` so it sizes to its content rather than to the box.
- * Both halves are required: `w-full` alone re-clips, `min-w-max` alone lets a
- * short table shrink below its container.
+ * they were **clipped**, with no way to scroll to them at all. The whole defect
+ * was that one keyword, so this replaces it on the same element rather than
+ * nesting a second one: any non-`visible` overflow still clips the corners, and
+ * the border stays put while the content moves under it, which is the look the
+ * radius was there for.
+ *
+ * The table itself needs `min-w-max` so it sizes to its content rather than to
+ * the box. Both that and `w-full` are required: `w-full` alone re-clips, and
+ * `min-w-max` alone lets a short table shrink below its container.
  *
  * Sideways scrolling, rather than a card view below `sm`, because the invite
  * table on `/admin/users` has always worked this way deliberately — and two
