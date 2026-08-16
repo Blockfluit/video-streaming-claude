@@ -67,11 +67,6 @@ export function toIso6391(code: string): string | null {
   return twoLetter !== undefined && twoLetter.length > 0 ? twoLetter : null;
 }
 
-/** The language's own name for itself — what a viewer picking a track would rather read. */
-export function languageNativeName(code: string): string | null {
-  return lookup(code)?.local ?? null;
-}
-
 export interface LanguageOption {
   /** The two-letter code, which is what `<track srclang>` and providers want. */
   code: string;

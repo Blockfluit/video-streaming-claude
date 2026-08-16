@@ -2,6 +2,7 @@ import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@ne
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { PrismaClient } from './generated/client';
+import { describeError } from '../common/errors';
 
 /**
  * Prisma 7 talks to Postgres through a driver adapter rather than its own query
@@ -31,7 +32,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     } catch (cause) {
       this.logger.error(
         `Cannot reach Postgres. Is it running? Try \`docker compose up -d\`. (${
-          cause instanceof Error ? cause.message : String(cause)
+          describeError(cause)
         })`,
       );
       throw cause;

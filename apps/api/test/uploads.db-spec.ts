@@ -4,15 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 const run = promisify(execFile);
 
@@ -30,28 +27,17 @@ const run = promisify(execFile);
  * be ingested, and a finished one must not be created twice.
  */
 describe('Uploads (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-upload-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'upload', workspace: true, admin: 'ada' });
+
   const DRIVE = 'disk1';
 
-  let workspace: string;
   let mediaRoot: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let storage: StorageService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let videoBytes: Buffer;
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    storage = app.get(StorageService);
-  }
 
   const scan = () => admin.post('/admin/ingest/scan').expect(200);
 
@@ -70,42 +56,20 @@ describe('Uploads (real database)', () => {
   }, 60000);
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'upload-'));
-    mediaRoot = join(workspace, 'media');
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    storage = app.get(StorageService);
+    mediaRoot = join(harness.workspace, 'media');
     // The drive an upload targets. In production this is a symlink to a disk;
     // here a plain directory, which the browse and placement code treat alike.
     await mkdir(join(mediaRoot, DRIVE), { recursive: true });
 
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = mediaRoot;
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "CollectionVideo", "IngestIssue" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
 
-    await startApp();
 
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   /** Posts a multipart upload the way a browser would. */
   const upload = (

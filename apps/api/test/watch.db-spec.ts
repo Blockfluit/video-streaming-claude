@@ -1,16 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 /**
  * Watch tracking through the API.
@@ -23,27 +17,17 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * arrives as `text/plain` — is parsed at all.
  */
 describe('Watch tracking (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-watch-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'watch', workspace: true });
 
-  let workspace: string;
+  
   let app: INestApplication;
   let prisma: PrismaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let viewer: request.Agent;
   let collectionId: string;
   /** A published, 600-second video, so the completion threshold sits at 540. */
   let videoId: string;
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-  }
 
   let seeded = 0;
 
@@ -79,29 +63,8 @@ describe('Watch tracking (real database)', () => {
   ) => agent.post(`/videos/${id}/heartbeat`).send(body);
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'watch-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
+    await harness.start();
+    ({ app, prisma, admin } = harness);
 
     const invite = await admin.post('/admin/invites').send({}).expect(201);
     viewer = request.agent(app.getHttpServer());
@@ -119,12 +82,7 @@ describe('Watch tracking (real database)', () => {
     videoId = await seedVideo();
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   describe('a heartbeat', () => {
     it('creates the rollup on the first beat and returns it', async () => {

@@ -1,16 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 import { STREAM_CHUNK_BYTES } from '../src/videos/range';
 
 /**
@@ -21,34 +15,22 @@ import { STREAM_CHUNK_BYTES } from '../src/videos/range';
  * wire are the entire feature.
  */
 describe('Streaming (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-stream-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'stream', workspace: true, admin: 'ada' });
+
 
   /** Deterministic content so a byte range can be checked against what it should contain. */
   const BODY = Buffer.from(
     Array.from({ length: 5000 }, (_, index) => String.fromCharCode(97 + (index % 26))).join(''),
   );
 
-  let workspace: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let storage: StorageService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let collectionId: string;
 
   const http = () => request(app.getHttpServer());
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    storage = app.get(StorageService);
-  }
 
   /** A video row plus the file it points at. */
   async function seedVideo(
@@ -83,39 +65,18 @@ describe('Streaming (real database)', () => {
   }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'streaming-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    await rm(tokenFile, { force: true });
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    storage = app.get(StorageService);
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
 
-    await startApp();
 
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
 
     const collection = await admin.post('/collections').send({ title: 'Films' }).expect(201);
     collectionId = collection.body.id;
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   async function asUser(): Promise<request.Agent> {
     const invite = await admin.post('/admin/invites').send({}).expect(201);

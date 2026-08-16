@@ -1,15 +1,9 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 /**
  * The two lists on the home page.
@@ -20,26 +14,16 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * cannot half-apply, and that neither list becomes a way to see a draft.
  */
 describe('My List and curated rows (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-lists-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'lists', workspace: true });
 
-  let workspace: string;
+  
   let app: INestApplication;
   let prisma: PrismaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
   let viewer: request.Agent;
   let showId: string;
   let filmId: string;
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-  }
 
   let seeded = 0;
 
@@ -69,29 +53,8 @@ describe('My List and curated rows (real database)', () => {
   }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'lists-'));
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = join(workspace, 'media');
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "CuratedList" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'root', password: PASSWORD })
-      .expect(201);
+    await harness.start();
+    ({ app, prisma, admin } = harness);
 
     const invite = await admin.post('/admin/invites').send({}).expect(201);
     viewer = request.agent(app.getHttpServer());
@@ -109,12 +72,7 @@ describe('My List and curated rows (real database)', () => {
     filmId = await seedVideo(showId);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   describe('My List', () => {
     it('starts empty', async () => {

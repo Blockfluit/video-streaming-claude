@@ -16,6 +16,55 @@ export type ArtworkShape = 'poster' | 'banner';
 export const ARTWORK_SHAPES: readonly ArtworkShape[] = ['poster', 'banner'] as const;
 
 /**
+ * Turning a shape into the column it lives in.
+ *
+ * `shape === 'poster' ? … : …` was written six times across the two controllers,
+ * the images service and this module's own `manual()` — three of them reading a
+ * key and three writing one. Six copies of a two-branch mapping is how one of
+ * them ends up reading the poster and writing the banner.
+ */
+
+/** The stored key for one shape, off any row carrying both. */
+export function artworkKeyOf(
+  row: { posterKey: string | null; bannerKey: string | null } | null | undefined,
+  shape: ArtworkShape,
+): string | null {
+  if (!row) return null;
+
+  return shape === 'poster' ? row.posterKey : row.bannerKey;
+}
+
+/**
+ * The write for one shape: `{ posterKey }` or `{ bannerKey }`.
+ *
+ * Generic in the value so it covers both setting a key and clearing it — a
+ * collection returning to inherited artwork writes `null` through the same path.
+ */
+export function artworkKeyPatch<T extends string | null>(
+  shape: ArtworkShape,
+  key: T,
+): { posterKey: T } | { bannerKey: T } {
+  return shape === 'poster' ? { posterKey: key } : { bannerKey: key };
+}
+
+/**
+ * The same write for a video, which also records that a person chose it.
+ *
+ * `MANUAL` is what stops the next probe overwriting a hand-picked frame, and it
+ * is set per shape — replacing a banner must not silently un-choose a poster.
+ */
+export function manualArtworkPatch(
+  shape: ArtworkShape,
+  key: string,
+):
+  | { posterKey: string; posterSource: 'MANUAL' }
+  | { bannerKey: string; bannerSource: 'MANUAL' } {
+  return shape === 'poster'
+    ? { posterKey: key, posterSource: 'MANUAL' }
+    : { bannerKey: key, bannerSource: 'MANUAL' };
+}
+
+/**
  * Where the file lives under `DERIVED_ROOT` — `posters/` and `banners/`.
  *
  * The banner briefly kept the old `thumbnails/` directory, so that renaming the

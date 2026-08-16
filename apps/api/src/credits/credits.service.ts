@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { toPage, type Page } from '@video/shared';
 import type { CreateCreditInput, ReorderCreditsInput, UpdateCreditInput } from '@video/shared';
 
-import { whereVisible } from '../common/publishing';
+import { requireVisibleCollection, requireVisibleVideo } from '../common/require';
 import type { CreditRole, Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { mergeCredits, type MergeableCredit } from './merge';
@@ -233,21 +233,14 @@ export class CreditsService {
       : { videoId: credit.videoId as string };
   }
 
-  private async requireCollection(id: string, role: Role) {
-    const collection = await this.prisma.collection.findFirst({
-      where: { id, ...whereVisible(role) },
-      select: { id: true },
-    });
-    if (!collection) throw new NotFoundException('No such collection');
-    return collection;
+  private requireCollection(id: string, role: Role) {
+    return requireVisibleCollection(this.prisma, id, role, { id: true });
   }
 
-  private async requireVideo(id: string, role: Role) {
-    const video = await this.prisma.video.findFirst({
-      where: { id, ...whereVisible(role) },
-      select: { id: true, collections: { select: { collectionId: true } } },
+  private requireVideo(id: string, role: Role) {
+    return requireVisibleVideo(this.prisma, id, role, {
+      id: true,
+      collections: { select: { collectionId: true } },
     });
-    if (!video) throw new NotFoundException('No such video');
-    return video;
   }
 }

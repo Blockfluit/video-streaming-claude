@@ -1,12 +1,13 @@
 import { createWriteStream } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { BadRequestException, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { resolveRoot } from './env';
 import { StoragePathError, resolveWithinRoot } from './storage-path';
 
 /**
@@ -30,9 +31,11 @@ export class StorageService implements OnModuleInit {
 
   constructor(config: ConfigService) {
     // Relative paths resolve from apps/api, matching how the .env is written.
+    // `resolveRoot` owns that rule and the defaults, because the uploads
+    // controller needs the media root before DI can hand it this service.
     this.roots = {
-      media: resolve(process.cwd(), config.get<string>('MEDIA_ROOT') ?? '../../media'),
-      derived: resolve(process.cwd(), config.get<string>('DERIVED_ROOT') ?? '../../derived'),
+      media: resolveRoot('media', config.get<string>('MEDIA_ROOT')),
+      derived: resolveRoot('derived', config.get<string>('DERIVED_ROOT')),
     };
   }
 

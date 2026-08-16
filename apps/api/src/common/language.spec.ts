@@ -1,4 +1,4 @@
-import { isKnownLanguage, languageName, languageNativeName, toIso6391 } from './language';
+import { isKnownLanguage, languageName, toIso6391 } from './language';
 
 describe('isKnownLanguage', () => {
   it('knows the common two-letter codes', () => {
@@ -85,14 +85,3 @@ describe('toIso6391', () => {
   });
 });
 
-describe('languageNativeName', () => {
-  // What a viewer choosing a subtitle track would rather see.
-  it('gives the language its own name', () => {
-    expect(languageNativeName('nl')).toBe('Nederlands');
-    expect(languageNativeName('de')).toBe('Deutsch');
-  });
-
-  it('returns null for a code it does not know', () => {
-    expect(languageNativeName('zz')).toBeNull();
-  });
-});

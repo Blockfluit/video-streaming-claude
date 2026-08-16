@@ -42,6 +42,57 @@ export function uniqueSlug(base: string, taken: Iterable<string>): string {
 }
 
 /**
+ * Anything with a `slug` column, which is all the lookup below needs.
+ *
+ * Structural rather than a Prisma type: the six models this is called with have
+ * six different generated delegate types, and naming them here would drag the
+ * generated client into a module that is otherwise pure.
+ */
+interface SlugDelegate {
+  findMany(args: {
+    where: Record<string, unknown>;
+    select: { slug: true };
+  }): Promise<{ slug: string }[]>;
+}
+
+/**
+ * The first free slug for a new or renamed record.
+ *
+ * The pure half of this — `uniqueSlug` — was always shared. The lookup half was
+ * written six times: in lists, people, collections, videos, seasons and
+ * reconcile, identical but for the model, and differing only in cosmetics that
+ * gave the copying away (two spelled the empty filter `{}` and one `undefined`).
+ *
+ * `scope` is what a season needs and a collection does not: season slugs are
+ * unique within their collection, so two shows may both have a `pilot`, while a
+ * collection slug is unique library-wide. `exceptId` is what an update needs, so
+ * a record renaming to the slug it already holds does not collide with itself.
+ *
+ * Still reads every slug in scope, exactly as all six copies did. Narrowing it
+ * to `startsWith(base)` is the obvious improvement and is deliberately not made
+ * here — this change is meant to be invisible at runtime, and that one is worth
+ * making once, on purpose, with a test for the numbering.
+ */
+export async function freeSlug(
+  model: SlugDelegate,
+  base: string,
+  options: { scope?: Record<string, unknown>; exceptId?: string } = {},
+): Promise<string> {
+  const taken = await model.findMany({
+    where: {
+      ...options.scope,
+      ...(options.exceptId === undefined ? {} : { NOT: { id: options.exceptId } }),
+    },
+    select: { slug: true },
+  });
+
+  return uniqueSlug(
+    base,
+    taken.map((row) => row.slug),
+  );
+}
+
+/**
  * `season-1` for a numbered season, the slugified folder name otherwise.
  *
  * The number rather than the folder name, so `Season 01` and `Season 1` produce

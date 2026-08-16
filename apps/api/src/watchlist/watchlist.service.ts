@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { toPage, type ListWatchlistQuery, type Page, type WatchlistRefInput } from '@video/shared';
 
 import { withNestedCountsHere } from '../common/films';
-import { isUniqueViolation } from '../common/prisma-errors';
+import { isUniqueViolation } from '../common/errors';
 import { whereVisible } from '../common/publishing';
 import { COLLECTION_CARD_SELECT } from '../lists/sources/computed';
 import type { Role } from '../prisma/generated/enums';

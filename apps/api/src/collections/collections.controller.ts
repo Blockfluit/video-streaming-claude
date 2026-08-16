@@ -39,6 +39,7 @@ import type { Response } from 'express';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { validate } from '../common/zod-validation.pipe';
+import { artworkKeyPatch, type ArtworkShape } from '../media/artwork';
 import { ImagesService } from '../common/images.service';
 import { IMAGE_UPLOAD, MIME_TO_EXTENSION } from '../common/image-upload';
 import { ThrottleExpensive } from '../common/throttling';
@@ -153,12 +154,12 @@ export class CollectionsController {
   private async storeArtwork(
     id: string,
     file: { buffer: Buffer; mimetype: string } | undefined,
-    shape: 'poster' | 'banner',
+    shape: ArtworkShape,
   ) {
     if (!file) throw new BadRequestException('No image uploaded');
 
     const key = await this.artwork.set(id, file.buffer, MIME_TO_EXTENSION[file.mimetype], shape);
-    return shape === 'poster' ? { posterKey: key } : { bannerKey: key };
+    return artworkKeyPatch(shape, key);
   }
 
   @Get()

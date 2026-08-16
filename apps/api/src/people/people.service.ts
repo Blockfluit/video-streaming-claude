@@ -8,7 +8,7 @@ import {
 } from '@video/shared';
 
 import { whereVisible } from '../common/publishing';
-import { slugify, uniqueSlug } from '../common/slug';
+import { freeSlug, slugify, uniqueSlug } from '../common/slug';
 import type { Role } from '../prisma/generated/enums';
 import { PersonLinksService } from '../metadata/person-links.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -283,15 +283,7 @@ export class PeopleService {
     if (clash) throw new ConflictException('Somebody with that name is already in the library');
   }
 
-  private async freeSlug(base: string, exceptId?: string): Promise<string> {
-    const taken = await this.prisma.person.findMany({
-      where: exceptId ? { NOT: { id: exceptId } } : {},
-      select: { slug: true },
-    });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  private freeSlug(base: string, exceptId?: string): Promise<string> {
+    return freeSlug(this.prisma.person, base, { exceptId });
   }
 }

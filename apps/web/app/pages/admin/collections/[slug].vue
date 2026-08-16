@@ -195,28 +195,14 @@ async function confirmPublish() {
  * leave the shelf blank — which is why the panel says which of the two it is
  * currently showing.
  */
-const artwork = useArtworkBust('collections', () => collection.value?.id)
+const artwork = useArtworkEditor('collections', () => collection.value?.id, refresh)
 
 function isOwnArtwork(shape: ArtworkShape): boolean {
   return Boolean(shape === 'poster' ? collection.value?.posterKey : collection.value?.bannerKey)
 }
 
-async function uploadArtwork(event: Event, shape: ArtworkShape) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-
-  const body = new FormData()
-  body.append('file', file)
-  try {
-    await api(`/collections/${collection.value!.id}/${shape}`, { method: 'POST', body })
-    artwork.replaced(shape)
-    await refresh()
-    toast.add({ title: 'Artwork updated', color: 'success' })
-  }
-  catch (error) {
-    toast.add({ title: apiMessage(error, 'Could not upload that image'), color: 'error' })
-  }
-}
+const uploadArtwork = (event: Event, shape: ArtworkShape) =>
+  artwork.upload(event, shape, { success: 'Artwork updated' })
 
 async function resetArtwork(shape: ArtworkShape) {
   try {
@@ -231,14 +217,10 @@ async function resetArtwork(shape: ArtworkShape) {
 }
 
 /**
- * An import can replace either shape, both, or neither — the dialog says which, because
- * the refreshed record reads the same either way. A collection's `posterKey` may already
- * have been set, so "it has one now" is no evidence that this import gave it one.
+ * A collection's `posterKey` may already have been set, so "it has one now" is no
+ * evidence that this import gave it one — which is why the dialog names the shapes.
  */
-async function metadataApplied(replaced: ArtworkShape[]) {
-  artwork.replaced(...replaced)
-  await refresh()
-}
+const metadataApplied = artwork.applied
 
 /* --- seasons --------------------------------------------------------- */
 

@@ -1,12 +1,8 @@
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { TmdbType } from '@video/shared';
+
+import { UpstreamError, fetchUpstream, isTimeout } from '../common/upstream';
 
 import type {
   TmdbSearchResponse,
@@ -15,10 +11,12 @@ import type {
 } from './tmdb.types';
 
 /**
- * The one thing in this API that talks to another server.
+ * TMDB, for title metadata.
  *
- * Everything outbound goes through here so that the token, the timeout and the
- * error shape are decided once. It is also the seam the tests replace: there is
+ * One of the API's two outbound clients — the other is `OpenSubtitlesClient`.
+ * Everything TMDB-bound goes through here so that the token, the timeout and the
+ * error shape are decided once; what the two clients genuinely share lives in
+ * `common/upstream.ts`. It is also the seam the tests replace: there is
  * no HTTP mocking library in this project, and adding one to test a client this
  * thin would be testing the mock — `.overrideProvider(TmdbClient)` is how the
  * e2e and db suites exercise everything downstream of it.
@@ -43,24 +41,14 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
  * logged request URL is exactly the sort of thing that ends up in a response
  * body or a log aggregator. `FfmpegError` exists for the same reason: keep the
  * diagnosis, drop everything the reader cannot act on and should not see.
+ *
+ * A named subclass of `UpstreamError` rather than a copy of it: the 502 and the
+ * reasoning for it now live in one place, and the name survives so tests and
+ * call sites can still say which upstream they mean.
  */
-export class TmdbError extends HttpException {
-  /**
-   * An `HttpException`, not a plain `Error`.
-   *
-   * As a plain Error this became a 500 "Internal server error" and the message
-   * below — the one thing the admin could act on, such as "TMDB rejected the API
-   * token" — never left the process. Shipped that way and caught the first time
-   * the screen was opened in a browser with a bad token in the env.
-   *
-   * 502 rather than 500 because the failure is upstream: this server is fine and
-   * the one it asked is not, which is also what stops it reading as our bug.
-   */
-  constructor(
-    message: string,
-    readonly upstreamStatus?: number,
-  ) {
-    super(message, HttpStatus.BAD_GATEWAY);
+export class TmdbError extends UpstreamError {
+  constructor(message: string, upstreamStatus?: number) {
+    super(message, upstreamStatus);
     this.name = 'TmdbError';
   }
 }
@@ -199,24 +187,22 @@ export class TmdbClient {
       );
     }
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: { ...headers, Authorization: `Bearer ${token}` },
-        // Without this a hung provider holds a request open indefinitely, and
-        // the admin gets a spinner rather than a message.
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-    } catch (error) {
+    const response = await fetchUpstream({
+      url,
+      init: { headers: { ...headers, Authorization: `Bearer ${token}` } },
+      timeoutMs: TIMEOUT_MS,
+      logger: this.logger,
       // Never interpolate the error verbatim: a fetch failure can carry the
       // request, and the request carries the token.
-      const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'could not be reached';
-      this.logger.warn(`TMDB ${reason}`);
-      throw new TmdbError(`TMDB ${reason}. Try again in a moment.`);
-    }
+      onUnreachable: (cause) => {
+        const reason = isTimeout(cause) ? 'timed out' : 'could not be reached';
+        return { log: `TMDB ${reason}`, message: `TMDB ${reason}. Try again in a moment.` };
+      },
+      error: (message) => new TmdbError(message),
+    });
 
     if (!response.ok) {
-      throw new TmdbError(await describe(response), response.status);
+      throw new TmdbError(await describeResponse(response), response.status);
     }
 
     return response;
@@ -234,7 +220,7 @@ const IMAGE_TYPES: Record<string, string> = {
  * a status code — but only its explanation is kept, never the URL that produced
  * it.
  */
-async function describe(response: Response): Promise<string> {
+async function describeResponse(response: Response): Promise<string> {
   if (response.status === 401) return 'TMDB rejected the API token.';
   if (response.status === 404) return 'TMDB has no such title.';
   if (response.status === 429) return 'TMDB is rate-limiting this server. Try again shortly.';

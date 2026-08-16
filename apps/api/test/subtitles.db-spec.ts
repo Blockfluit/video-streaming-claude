@@ -1,19 +1,15 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { StorageService } from '../src/common/storage.service';
 import { MediaService } from '../src/media/media.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 const run = promisify(execFile);
 
@@ -31,16 +27,14 @@ General Kenobi.
  * ffmpeg, since "does a browser get valid WebVTT" is the entire feature.
  */
 describe('Subtitles (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-subs-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'subs', workspace: true, admin: 'ada' });
 
-  let workspace: string;
+
   let mediaRoot: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let storage: StorageService;
   let media: MediaService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
 
   const http = () => request(app.getHttpServer());
@@ -62,54 +56,23 @@ describe('Subtitles (real database)', () => {
     ]);
   }
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    storage = app.get(StorageService);
-    media = app.get(MediaService);
-  }
 
   const scan = () => admin.post('/admin/ingest/scan').expect(200);
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'subs-'));
-    mediaRoot = join(workspace, 'media');
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    storage = app.get(StorageService);
+    media = app.get(MediaService);
+    mediaRoot = join(harness.workspace, 'media');
     await mkdir(mediaRoot, { recursive: true });
 
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = mediaRoot;
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
 
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "IngestIssue", "Subtitle" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
 
-    await startApp();
 
-    admin = request.agent(app.getHttpServer());
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   const openIssues = () => prisma.ingestIssue.findMany({ where: { resolvedAt: null } });
 

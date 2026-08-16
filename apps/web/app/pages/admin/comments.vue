@@ -32,18 +32,10 @@ const toast = useToast()
 const q = ref('')
 const includeDeleted = ref(false)
 
-/*
- * Debounced by hand rather than with VueUse, which is not a dependency here.
- * Without it every keystroke is a request, and the answers can land out of
- * order — so the list settles on whatever the *slowest* request returned.
- */
+// What the list is actually filtered by, once the typing has settled.
 const searchTerm = ref('')
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(q, (value) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => { searchTerm.value = value }, 250)
-})
-onBeforeUnmount(() => clearTimeout(timer))
+
+useDebounced(q, (value) => { searchTerm.value = value })
 
 const query = computed(() => {
   const params = new URLSearchParams({ limit: '100' })

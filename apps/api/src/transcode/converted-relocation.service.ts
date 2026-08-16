@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { convertedKeyVariant, isLegacyConvertedKey } from './converted-key';
+import { describeError } from '../common/errors';
 
 export interface RelocationSummary {
   /** Rows whose converted file was not found under `MEDIA_ROOT`. */
@@ -93,7 +94,7 @@ export class ConvertedRelocationService {
       } catch (error) {
         summary.failed += 1;
         summary.errors.push(
-          `${video.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `${video.id}: ${describeError(error)}`,
         );
       }
     }

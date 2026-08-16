@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { MAX_PAGE_LIMIT, type Page } from '@video/shared'
-import type { ComputedRef, Ref } from 'vue'
+import type { Ref } from 'vue'
 
 import type { LibraryResource } from '~/utils/admin-library'
 
@@ -55,8 +55,6 @@ const STATES = [
 
 const route = useRoute()
 const router = useRouter()
-const api = useApi()
-const toast = useToast()
 
 /** What the controls hold. The search box types locally; the select does not. */
 const q = ref(String(route.query.q ?? ''))
@@ -72,31 +70,21 @@ const state = ref(String(route.query.state ?? ANY))
 const asked = ref({ q: q.value.trim(), state: state.value })
 
 /**
- * The windows after the first, per list.
- *
- * `useApiData` is `useAsyncData`: one key, one slot, and a refetch replaces its
- * `data` wholesale — so the first window stays where it is, server-rendered and
- * transferred in the payload, and only what has been *added* to it lives here.
- * Nothing seeds these from `data`, so the markup matches on both sides of
- * hydration because they are empty on the server and empty on the client's
- * first render.
- */
-const moreCollections = ref<CollectionRow[]>([])
-const moreVideos = ref<VideoRow[]>([])
-
-/**
  * Asks a different question, dropping the answers to the old one.
  *
  * The single place `asked` changes, which is what makes the reset impossible to
  * forget: windows fetched at an offset mean nothing once the filter moves, and
  * leaving them behind would show page seven of the old question underneath page
  * one of the new one.
+ *
+ * Safe to reference the resets declared below: this only ever runs from a
+ * watcher, which is to say after setup has finished.
  */
 function ask(nextQ: string, nextState: string): void {
   if (nextQ === asked.value.q && nextState === asked.value.state) return
 
-  moreCollections.value = []
-  moreVideos.value = []
+  resetCollections()
+  resetVideos()
   asked.value = { q: nextQ, state: nextState }
 }
 
@@ -111,12 +99,7 @@ function ask(nextQ: string, nextState: string): void {
  * window one while the appended windows were fetched for a different question.
  * The debounce is part of this fix rather than tidying up beside it.
  */
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(q, (value) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => ask(value.trim(), state.value), 250)
-})
-onBeforeUnmount(() => clearTimeout(timer))
+useDebounced(q, (value) => ask(value.trim(), state.value))
 
 // The select is a single deliberate choice rather than a stream of keystrokes,
 // so it asks at once.
@@ -133,68 +116,43 @@ const { data: videos, status: videosStatus } = await useApiData<Page<VideoRow>>(
   { watch: [asked] },
 )
 
-const collectionRows = computed(() => [...(collections.value?.items ?? []), ...moreCollections.value])
-const videoRows = computed(() => [...(videos.value?.items ?? []), ...moreVideos.value])
-
 /**
- * What each button offers, counted against `total` rather than `hasMore`.
+ * One `useLoadMore` per half, so the two cannot drift apart on when they reset,
+ * what they ask for, or what they do with an answer that arrived late.
  *
- * `hasMore` answers "is there more after the **first** window", which stopped
- * being the question the moment a second one was appended.
+ * `asked` is passed as the question by identity rather than by value: it is
+ * replaced wholesale, so a stale in-flight window is spotted with `!==`.
  */
-const collectionsLabel = computed(
-  () => loadMoreLabel(collectionRows.value.length, collections.value?.total ?? 0, PAGE_SIZE),
-)
-const videosLabel = computed(
-  () => loadMoreLabel(videoRows.value.length, videos.value?.total ?? 0, PAGE_SIZE),
-)
-
-const loadingCollections = ref(false)
-const loadingVideos = ref(false)
-
-/**
- * One more window of one list, appended.
- *
- * Written once and used for both, so the two halves of the page cannot drift
- * apart on when they reset, what they ask for, or what they do with an answer
- * that arrived late.
- */
-async function loadWindow<T extends { id: string }>(
+function libraryWindow<T extends { id: string }>(
   resource: LibraryResource,
-  more: Ref<T[]>,
-  onScreen: ComputedRef<T[]>,
-  label: ComputedRef<string | null>,
-  loading: Ref<boolean>,
-): Promise<void> {
-  if (loading.value || label.value === null) return
-  loading.value = true
-
-  // Asked for by what is on screen, so a record added or removed between
-  // presses shifts the next window by exactly what it shifted the list by.
-  const question = asked.value
-  const offset = onScreen.value.length
-
-  try {
-    const page = await api<Page<T>>(
-      libraryQuery(resource, question.q, question.state, offset, PAGE_SIZE),
-    )
-    // The answer to a question nobody is asking any more is dropped rather than
-    // appended: the filter can move while this is in flight.
-    if (question !== asked.value) return
-    more.value = appendWindow(more.value, page.items, onScreen.value)
-  }
-  catch (failure) {
-    toast.add({ title: apiMessage(failure, `Could not load more ${resource}`), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  page: Ref<Page<T> | null | undefined>,
+) {
+  return useLoadMore<T>({
+    first: () => page.value?.items ?? [],
+    total: () => page.value?.total ?? 0,
+    pageSize: PAGE_SIZE,
+    question: () => asked.value,
+    query: offset =>
+      libraryQuery(resource, asked.value.q, asked.value.state, offset, PAGE_SIZE),
+    failure: `Could not load more ${resource}`,
+  })
 }
 
-const loadMoreCollections = () =>
-  loadWindow('collections', moreCollections, collectionRows, collectionsLabel, loadingCollections)
-const loadMoreVideos = () =>
-  loadWindow('videos', moreVideos, videoRows, videosLabel, loadingVideos)
+const {
+  items: collectionRows,
+  label: collectionsLabel,
+  loading: loadingCollections,
+  loadMore: loadMoreCollections,
+  reset: resetCollections,
+} = libraryWindow('collections', collections)
+
+const {
+  items: videoRows,
+  label: videosLabel,
+  loading: loadingVideos,
+  loadMore: loadMoreVideos,
+  reset: resetVideos,
+} = libraryWindow('videos', videos)
 
 /**
  * Nothing at all, rather than one message per empty list.

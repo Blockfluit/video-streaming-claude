@@ -143,7 +143,10 @@ async function unmatch() {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="font-semibold">Metadata</h2>
         <p v-if="record.metadataUpdatedAt" class="text-xs text-(--ui-text-muted)">
-          Imported {{ new Date(record.metadataUpdatedAt).toLocaleDateString() }}
+          <!-- `shortDate`, not `toLocaleDateString`: the locale and time zone are
+               pinned there, and the ambient ones differ between Nitro and the
+               browser — which renders two different days and costs the subtree. -->
+          Imported {{ shortDate(record.metadataUpdatedAt) }}
         </p>
       </div>
     </template>

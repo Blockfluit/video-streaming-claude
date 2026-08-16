@@ -23,6 +23,7 @@ import {
 } from './converted-key';
 import { classifySubtitleStreams } from './subtitle-streams';
 import { CancelledError, Transcoder } from './transcoder';
+import { describeError } from '../common/errors';
 
 /**
  * The persistent job queue: conversions and subtitle extraction.
@@ -237,12 +238,12 @@ export class JobsService implements OnModuleInit {
         where: { id: jobId },
         data: {
           status: cancelled ? 'CANCELLED' : 'FAILED',
-          error: cancelled ? null : describe(error).slice(0, 2000),
+          error: cancelled ? null : describeError(error).slice(0, 2000),
           finishedAt: new Date(),
         },
       });
 
-      if (!cancelled) this.logger.error(`Job ${jobId} failed: ${describe(error)}`);
+      if (!cancelled) this.logger.error(`Job ${jobId} failed: ${describeError(error)}`);
     } finally {
       this.cancellations.delete(jobId);
     }
@@ -468,7 +469,7 @@ export class JobsService implements OnModuleInit {
         extracted += 1;
       } catch (error) {
         // One bad track must not lose the others.
-        this.logger.warn(`Could not extract stream ${track.index}: ${describe(error)}`);
+        this.logger.warn(`Could not extract stream ${track.index}: ${describeError(error)}`);
       }
     }
 
@@ -540,8 +541,4 @@ export class JobsService implements OnModuleInit {
 
     this.logger.log(`Reclaimed source for ${basename(video.storageKey)}${extname('')}`);
   }
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

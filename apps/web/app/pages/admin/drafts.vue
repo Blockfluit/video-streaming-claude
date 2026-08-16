@@ -38,7 +38,8 @@ const selected = ref<Set<string>>(new Set())
 
 function toggle(id: string) {
   const next = new Set(selected.value)
-  next.has(id) ? next.delete(id) : next.add(id)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
   selected.value = next
 }
 

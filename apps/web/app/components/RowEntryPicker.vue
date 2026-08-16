@@ -40,42 +40,28 @@ const emit = defineEmits<{ add: [entry: { collectionId: string } | { videoId: st
 
 const api = useApi()
 
-const search = ref('')
-const results = ref<{ kind: 'collection' | 'video', entry: Found }[]>([])
-const busy = ref(false)
-const failed = ref(false)
-
 /** How many matches are worth showing before the answer is "type more". */
 const LIMIT = 8
 
+type Entry = { kind: 'collection' | 'video', entry: Found }
+
 /**
- * Debounced by hand.
+ * `useRemoteSearch` owns the debounce and the only-the-newest-answer-wins rule;
+ * what is left here is the query itself.
  *
- * `refDebounced` is VueUse, which is not a dependency here. Without a debounce
- * every keystroke is a request and the answers can land out of order, leaving
- * the list showing whatever the *slowest* one returned — the same reason
- * `browse.vue` does this.
+ * `searchBlank` because a first look costs nothing on a small library and saves
+ * typing to see what exists — which is also why it is asked for on mount.
  */
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(search, () => {
-  clearTimeout(timer)
-  timer = setTimeout(run, 250)
-})
+const {
+  query: search,
+  results,
+  busy,
+  failed,
+  run,
+} = useRemoteSearch<Entry[]>(
+  async (term) => {
+    const query = term ? `&q=${encodeURIComponent(term)}` : ''
 
-onBeforeUnmount(() => clearTimeout(timer))
-
-/** Only the newest search may write the results, whatever order they come back in. */
-let latest = 0
-
-async function run(): Promise<void> {
-  const mine = (latest += 1)
-  const q = search.value.trim()
-  const query = q ? `&q=${encodeURIComponent(q)}` : ''
-
-  busy.value = true
-  failed.value = false
-
-  try {
     // Both, because "the library" is both. Films only for videos: an episode is
     // reachable through its show, and listing episodes would bury one show
     // under forty of its own instalments.
@@ -84,25 +70,14 @@ async function run(): Promise<void> {
       api<Page<Found>>(`/videos?film=true&limit=${LIMIT}${query}`),
     ])
 
-    if (mine !== latest) return
-
-    results.value = [
+    return [
       ...collections.items.map(entry => ({ kind: 'collection' as const, entry })),
       ...videos.items.map(entry => ({ kind: 'video' as const, entry })),
     ].sort((a, b) => a.entry.title.localeCompare(b.entry.title))
-  }
-  catch {
-    if (mine === latest) {
-      results.value = []
-      failed.value = true
-    }
-  }
-  finally {
-    if (mine === latest) busy.value = false
-  }
-}
+  },
+  { empty: [], searchBlank: true },
+)
 
-/** The first look costs nothing on a small library and saves typing to see what exists. */
 onMounted(run)
 
 const alreadyOn = (found: { kind: string, entry: Found }): boolean =>

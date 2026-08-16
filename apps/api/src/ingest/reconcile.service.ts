@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { seasonSlug, slugify, uniqueSlug } from '../common/slug';
+import { freeSlug, seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleData } from '../common/title';
 import { MediaService } from '../media/media.service';
@@ -13,6 +13,7 @@ import { scanMediaRoot, type ScannedFile } from './media-scanner';
 import type { MediaPath } from './path-parser';
 import { itemFolderKey, proposeStructure, type ProposedSeason } from './structure';
 import { matchSubtitles, type SubtitleCandidate, type VideoCandidate } from './subtitle-matcher';
+import { describeError } from '../common/errors';
 
 /**
  * Brings the database in line with what is actually on disk.
@@ -436,7 +437,7 @@ export class ReconcileService {
           seenIssues.push({
             kind: 'ORPHAN_SUBTITLE',
             path: source.relPath,
-            detail: error instanceof Error ? error.message : String(error),
+            detail: describeError(error),
           });
         }
       }
@@ -725,12 +726,7 @@ export class ReconcileService {
   }
 
   /** Library-wide: a video's slug is its own address, not one scoped to a parent. */
-  private async freeVideoSlug(base: string): Promise<string> {
-    const taken = await this.prisma.video.findMany({ select: { slug: true } });
-
-    return uniqueSlug(
-      base,
-      taken.map((row) => row.slug),
-    );
+  private freeVideoSlug(base: string): Promise<string> {
+    return freeSlug(this.prisma.video, base);
   }
 }

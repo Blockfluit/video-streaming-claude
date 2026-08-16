@@ -1,16 +1,12 @@
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { Logger, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { SessionStoreService } from '../src/auth/session-store.service';
-import { bigIntReplacer } from '../src/common/json';
 import { ReconcileService } from '../src/ingest/reconcile.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { DbHarness, PASSWORD } from './db/harness';
 
 /**
  * Reconcile against a real temp directory and a real Postgres — the plan asks
@@ -21,15 +17,13 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * a background watcher reconciling the same tree would race them.
  */
 describe('Ingest (real database)', () => {
-  const PASSWORD = 'correct horse battery staple';
-  const tokenFile = join(tmpdir(), 'video-streaming-ingest-test.bootstrap-token');
+  const harness = new DbHarness({ name: 'ingest', workspace: true, admin: 'ada' });
 
-  let workspace: string;
+
   let mediaRoot: string;
   let app: INestApplication;
   let prisma: PrismaService;
   let reconcile: ReconcileService;
-  let banner: jest.SpyInstance;
   let admin: request.Agent;
 
   /** Writes a file into the media tree, creating its folders. */
@@ -48,53 +42,16 @@ describe('Ingest (real database)', () => {
   const remove = (relPath: string): Promise<void> =>
     rm(join(mediaRoot, relPath), { force: true });
 
-  async function startApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
-    app.use(app.get(SessionStoreService).createMiddleware());
-    await app.init();
-    prisma = app.get(PrismaService);
-    reconcile = app.get(ReconcileService);
-  }
 
   beforeEach(async () => {
-    banner = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    workspace = await mkdtemp(join(tmpdir(), 'ingest-'));
-    mediaRoot = join(workspace, 'media');
+    await harness.start();
+    ({ app, prisma, admin } = harness);
+    reconcile = app.get(ReconcileService);
+    mediaRoot = join(harness.workspace, 'media');
     await mkdir(mediaRoot, { recursive: true });
-
-    process.env.SESSION_SECRET ??= 'db-spec-secret';
-    process.env.BOOTSTRAP_TOKEN_FILE = tokenFile;
-    process.env.MEDIA_ROOT = mediaRoot;
-    process.env.DERIVED_ROOT = join(workspace, 'derived');
-    process.env.INGEST_WATCHER_ENABLED = 'false';
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-    await prisma.$executeRawUnsafe(
-      'TRUNCATE "InviteToken", "User", "session", "Collection", "Season", "Video", "CollectionVideo", "IngestIssue" RESTART IDENTITY CASCADE',
-    );
-    await app.close();
-    await rm(tokenFile, { force: true });
-
-    await startApp();
-
-    admin = request.agent(app.getHttpServer());
-    const { readFile } = await import('node:fs/promises');
-    await admin
-      .post('/auth/redeem')
-      .send({ token: (await readFile(tokenFile, 'utf8')).trim(), username: 'ada', password: PASSWORD })
-      .expect(201);
   });
 
-  afterEach(async () => {
-    banner.mockRestore();
-    await app?.close();
-    await rm(tokenFile, { force: true });
-    await rm(workspace, { recursive: true, force: true });
-  });
+  afterEach(() => harness.stop());
 
   const videos = () =>
     prisma.video.findMany({ orderBy: { storageKey: 'asc' }, include: { collections: true } });
@@ -727,13 +684,13 @@ describe('Ingest (real database)', () => {
   describe('a drive that is a symlink to another disk', () => {
     /** Somewhere outside the media root, standing in for another disk. */
     async function onDisk(relPath: string, body = 'video-bytes'): Promise<void> {
-      const absolute = join(workspace, 'disks', relPath);
+      const absolute = join(harness.workspace, 'disks', relPath);
       await mkdir(dirname(absolute), { recursive: true });
       await writeFile(absolute, body);
     }
 
     const mount = (name = 'disk-a', as = 'disk1'): Promise<void> =>
-      symlink(join(workspace, 'disks', name), join(mediaRoot, as), 'dir');
+      symlink(join(harness.workspace, 'disks', name), join(mediaRoot, as), 'dir');
 
     it('ingests the whole drive behind the link', async () => {
       await onDisk('disk-a/South Park/Season 01/01 - Cartman.mp4');
@@ -791,7 +748,7 @@ describe('Ingest (real database)', () => {
      * reaches the screen.
      */
     it('files an issue naming what an unmounted drive points at', async () => {
-      const target = join(workspace, 'disks', 'disk-a');
+      const target = join(harness.workspace, 'disks', 'disk-a');
       await mount();
 
       await reconcile.run();

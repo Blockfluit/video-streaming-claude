@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { SessionStoreService } from './auth/session-store.service';
 import { bigIntReplacer } from './common/json';
+import { describeError } from './common/errors';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -95,7 +96,7 @@ void bootstrap().catch((error: unknown) => {
   // Without this, a failed boot (an unreachable database, most often) surfaces as
   // an unhandled rejection and Node prints the offending line of minified vendor
   // source — kilobytes of noise around a one-line cause.
-  Logger.error(error instanceof Error ? error.message : String(error), 'Bootstrap');
+  Logger.error(describeError(error), 'Bootstrap');
   if (error instanceof Error && error.stack) {
     Logger.error(error.stack, 'Bootstrap');
   }
