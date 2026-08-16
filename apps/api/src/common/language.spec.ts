@@ -1,4 +1,4 @@
-import { isKnownLanguage, languageName, languageNativeName } from './language';
+import { isKnownLanguage, languageName, languageNativeName, toIso6391 } from './language';
 
 describe('isKnownLanguage', () => {
   it('knows the common two-letter codes', () => {
@@ -42,6 +42,46 @@ describe('languageName', () => {
 
   it('returns null for a code it does not know', () => {
     expect(languageName('zz')).toBeNull();
+  });
+});
+
+describe('toIso6391', () => {
+  /**
+   * The reason this exists: an extracted track carries whatever the container
+   * tagged it with (`eng`), a sidecar carries whatever the filename said
+   * (`en`), and both are English. Comparing the raw strings makes them two
+   * different languages, which is how "prefer English" would silently skip
+   * every embedded track.
+   */
+  it('gives one answer for every form of the same language', () => {
+    expect(toIso6391('en')).toBe('en');
+    expect(toIso6391('eng')).toBe('en');
+  });
+
+  it('collapses both three-letter forms onto the same two-letter code', () => {
+    expect(toIso6391('dut')).toBe('nl');
+    expect(toIso6391('nld')).toBe('nl');
+    expect(toIso6391('ger')).toBe('de');
+    expect(toIso6391('deu')).toBe('de');
+  });
+
+  it('ignores casing and stray whitespace, as the other lookups do', () => {
+    expect(toIso6391('ENG')).toBe('en');
+    expect(toIso6391(' En ')).toBe('en');
+  });
+
+  it('returns null rather than guessing at a code it does not know', () => {
+    expect(toIso6391('zz')).toBeNull();
+    expect(toIso6391('qqq')).toBeNull();
+    expect(toIso6391('')).toBeNull();
+  });
+
+  /**
+   * `und` is what ffprobe reports for an untagged stream, so it arrives often
+   * enough to be worth pinning: it is not English, and must not become English.
+   */
+  it('does not turn an undetermined track into a real language', () => {
+    expect(toIso6391('und')).toBeNull();
   });
 });
 

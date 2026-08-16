@@ -209,4 +209,46 @@ describe('StorageService', () => {
       );
     });
   });
+
+  /**
+   * Moving a converted file out of `derived/` and in beside its source. The two
+   * roots are separate mounts in production, so this is a copy far more often
+   * than it is a rename.
+   */
+  describe('moveBetweenRoots', () => {
+    it('carries a file from one root to the other', async () => {
+      await storage.save('derived', 'converted/vid1.mp4', Buffer.from('body'));
+
+      await storage.moveBetweenRoots('derived', 'converted/vid1.mp4', 'media', 'disk1/F/f.mp4');
+
+      await expect(storage.exists('derived', 'converted/vid1.mp4')).resolves.toBe(false);
+      await expect(
+        readFile(storage.resolvePath('media', 'disk1/F/f.mp4'), 'utf8'),
+      ).resolves.toBe('body');
+    });
+
+    it('creates the destination folder', async () => {
+      await storage.save('derived', 'converted/vid1.mp4', Buffer.from('body'));
+
+      await storage.moveBetweenRoots('derived', 'converted/vid1.mp4', 'media', 'a/b/c/f.mp4');
+
+      await expect(storage.exists('media', 'a/b/c/f.mp4')).resolves.toBe(true);
+    });
+
+    it('leaves the source alone when the move cannot happen', async () => {
+      await storage.save('derived', 'converted/vid1.mp4', Buffer.from('body'));
+
+      await expect(
+        storage.moveBetweenRoots('derived', 'converted/missing.mp4', 'media', 'disk1/F/f.mp4'),
+      ).rejects.toThrow();
+      await expect(storage.exists('derived', 'converted/vid1.mp4')).resolves.toBe(true);
+      await expect(storage.exists('media', 'disk1/F/f.mp4')).resolves.toBe(false);
+    });
+
+    it('still refuses a key that escapes its root', async () => {
+      await expect(
+        storage.moveBetweenRoots('derived', 'converted/vid1.mp4', 'media', '../outside.mp4'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
 });

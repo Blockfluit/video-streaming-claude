@@ -8,6 +8,7 @@ import { SubtitlesService } from '../subtitles/subtitles.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
+import { withoutConvertedOutput } from './converted-output';
 import { scanMediaRoot, type ScannedFile } from './media-scanner';
 import type { MediaPath } from './path-parser';
 import { itemFolderKey, proposeStructure, type ProposedSeason } from './structure';
@@ -106,8 +107,19 @@ export class ReconcileService {
   private async reconcile(): Promise<ReconcileSummary> {
     const startedAt = new Date();
     const root = this.storage.rootPath('media');
-    const scan = await scanMediaRoot(root);
+    const rawScan = await scanMediaRoot(root);
 
+    /**
+     * The rows are read **after** the scan, and that order is load-bearing.
+     *
+     * A converted file lives beside its source inside the watched tree, and the
+     * only thing that marks it as ours is a row claiming it as `playbackKey`.
+     * The writer sets that column *before* the file appears at the path (see
+     * `transcode/jobs.service.ts`), so any converted file this scan could have
+     * seen already had its key written — and a query issued afterwards cannot
+     * miss it. Read the rows first and that guarantee is gone: a conversion
+     * finishing in between would be ingested as a brand-new video.
+     */
     const known = await this.prisma.video.findMany({
       select: {
         id: true,
@@ -122,6 +134,21 @@ export class ReconcileService {
         fileMtime: true,
       },
     });
+
+    /**
+     * A job part-way through writing its output has no `playbackKey` yet if it
+     * crashed between reserving and renaming, so its `outputKey` is the other
+     * half of the same claim.
+     */
+    const writing = await this.prisma.mediaJob.findMany({
+      where: { status: { in: ['QUEUED', 'RUNNING'] }, outputKey: { not: null } },
+      select: { outputKey: true },
+    });
+
+    const scan = withoutConvertedOutput(rawScan, [
+      ...known.map((video) => video.playbackKey),
+      ...writing.map((job) => job.outputKey),
+    ]);
 
     const byStorageKey = new Map(known.map((video) => [video.storageKey, video]));
     const onDisk = new Set(scan.videos.map((file) => file.relPath));
@@ -349,6 +376,14 @@ export class ReconcileService {
     }
 
     const boundSourceKeys = new Set<string>();
+    /**
+     * Videos whose track list actually changed this pass.
+     *
+     * The auto default is re-derived only for these, rather than for every
+     * video with a sidecar: a scan that bound nothing new is the normal case
+     * and must not write anything.
+     */
+    const touched = new Set<string>();
     let bound = 0;
 
     for (const [, group] of byFolder) {
@@ -383,7 +418,10 @@ export class ReconcileService {
             format: binding.extension,
           });
           boundSourceKeys.add(source.relPath);
-          if (outcome !== 'unchanged') bound += 1;
+          if (outcome !== 'unchanged') {
+            bound += 1;
+            touched.add(binding.videoId);
+          }
 
           // Accepted, but the code is not one we recognise — worth an admin's
           // attention without refusing a subtitle that probably works.
@@ -421,6 +459,19 @@ export class ReconcileService {
     }
 
     const removed = await this.subtitles.forgetMissingSidecars(boundSourceKeys);
+
+    /**
+     * A sidecar-only library has never had a default track, because binding one
+     * does not set the column and nothing else ever looked at the question.
+     * This is where an ingested English subtitle becomes the selected one.
+     *
+     * After `forgetMissingSidecars`, which re-derives the videos it emptied —
+     * running before it would decide from a list still holding rows whose files
+     * are gone.
+     */
+    for (const videoId of touched) {
+      await this.subtitles.refreshAutoDefault(videoId);
+    }
 
     return { bound, removed };
   }

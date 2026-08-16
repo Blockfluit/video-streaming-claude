@@ -13,6 +13,7 @@ import { whereVisible } from '../common/publishing';
 import { StorageService, type StorageRoot } from '../common/storage.service';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { playbackRoot } from '../transcode/converted-key';
 import { parseRangeHeader } from './range';
 
 /**
@@ -132,13 +133,17 @@ export class StreamingService {
    *
    * This is what lets the same URL keep working before and after conversion,
    * and why reclaiming a source (`sourceDeletedAt`) does not break playback.
+   *
+   * Both roots are `media` once an install has been relocated — the converted
+   * file lives beside its source. `playbackRoot` is what keeps a row still
+   * pointing at the old `derived/converted/` layout playable in the meantime.
    */
   private pickFile(video: { storageKey: string; playbackKey: string | null }): {
     root: StorageRoot;
     key: string;
   } {
     return video.playbackKey
-      ? { root: 'derived', key: video.playbackKey }
+      ? { root: playbackRoot(video.playbackKey), key: video.playbackKey }
       : { root: 'media', key: video.storageKey };
   }
 }

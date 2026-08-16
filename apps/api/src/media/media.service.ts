@@ -10,6 +10,7 @@ import {
 
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { playbackRoot } from '../transcode/converted-key';
 import {
   ARTWORK_SHAPES,
   type ArtworkShape,
@@ -139,7 +140,7 @@ export class MediaService implements OnModuleDestroy {
 
     // Probe what will actually be played, so a converted file reports its own
     // dimensions rather than the source's.
-    const root = video.playbackKey ? 'derived' : 'media';
+    const root = video.playbackKey ? playbackRoot(video.playbackKey) : 'media';
     const key = video.playbackKey ?? video.storageKey;
     const path = this.storage.resolvePath(root, key);
 
@@ -233,7 +234,7 @@ export class MediaService implements OnModuleDestroy {
     if (durationSec === null) return;
 
     const source = this.storage.resolvePath(
-      video.playbackKey ? 'derived' : 'media',
+      video.playbackKey ? playbackRoot(video.playbackKey) : 'media',
       video.playbackKey ?? video.storageKey,
     );
     const atSeconds = durationSec * THUMBNAIL_POSITION;
@@ -336,7 +337,7 @@ export class MediaService implements OnModuleDestroy {
     if (!video) throw new NotFoundException('No such video');
 
     const source = this.storage.resolvePath(
-      video.playbackKey ? 'derived' : 'media',
+      video.playbackKey ? playbackRoot(video.playbackKey) : 'media',
       video.playbackKey ?? video.storageKey,
     );
 

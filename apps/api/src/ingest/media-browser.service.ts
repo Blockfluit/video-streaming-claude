@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { StorageService } from '../common/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { parseMediaPath } from './path-parser';
+import { withoutConvertedOutput } from './converted-output';
 import { scanMediaRoot } from './media-scanner';
 import { proposeStructure, type Proposal } from './structure';
 
@@ -28,6 +29,11 @@ export interface BrowseEntry {
   /** For a video: whether the library already knows this file. */
   imported?: boolean;
   videoId?: string;
+  /**
+   * The library's own converted output, sitting beside the source it came from.
+   * Belongs to `videoId` but is not its archival copy, and is never placeable.
+   */
+  converted?: boolean;
 }
 
 export interface BrowseResult {
@@ -68,11 +74,25 @@ export class MediaBrowserService {
       kind: depth === 0 ? ('drive' as const) : ('folder' as const),
     }));
 
+    const paths = files.map((name) => (key === '' ? name : `${key}/${name}`));
+
+    /**
+     * Matched on the converted file as well as the source.
+     *
+     * A converted MP4 sits beside its source in this very folder. Looking only
+     * at `storageKey` leaves it showing as an unimported video the admin is
+     * invited to place, which would build a second row for a file the library
+     * wrote itself.
+     */
     const known = await this.prisma.video.findMany({
-      where: { storageKey: { in: files.map((name) => (key === '' ? name : `${key}/${name}`)) } },
-      select: { id: true, storageKey: true },
+      where: { OR: [{ storageKey: { in: paths } }, { playbackKey: { in: paths } }] },
+      select: { id: true, storageKey: true, playbackKey: true },
     });
+
     const byKey = new Map(known.map((video) => [video.storageKey, video.id]));
+    const convertedByKey = new Map(
+      known.flatMap((video) => (video.playbackKey ? [[video.playbackKey, video.id] as const] : [])),
+    );
 
     for (const name of files) {
       const filePath = key === '' ? name : `${key}/${name}`;
@@ -94,9 +114,14 @@ export class MediaBrowserService {
                 : 'other',
         ...(byKey.has(filePath)
           ? { imported: true, videoId: byKey.get(filePath) }
-          : isVideoName(name)
-            ? { imported: false }
-            : {}),
+          : convertedByKey.has(filePath)
+            ? // Generated, not placeable. Shown rather than hidden — an admin
+              // looking at a folder should be able to see what is in it — but
+              // it belongs to a row already, so it is never offered for import.
+              { imported: true, videoId: convertedByKey.get(filePath), converted: true }
+            : isVideoName(name)
+              ? { imported: false }
+              : {}),
       });
     }
 
@@ -122,7 +147,23 @@ export class MediaBrowserService {
   private async proposalFor(key: string, depth: number): Promise<Proposal | null> {
     if (depth !== 2) return null;
 
-    const scan = await scanMediaRoot(this.storage.rootPath('media'));
+    const rawScan = await scanMediaRoot(this.storage.rootPath('media'));
+
+    /**
+     * The same filter reconcile applies, for the same reason and one more.
+     *
+     * The shape rule counts the video files in a folder, so a converted MP4
+     * beside its source makes a one-film folder look like a two-episode
+     * collection. This screen exists to say what ingest will do with a folder;
+     * showing it a count ingest does not use would make the one screen whose
+     * whole job is explanation the one that lies.
+     */
+    const converted = await this.prisma.video.findMany({
+      where: { playbackKey: { not: null } },
+      select: { playbackKey: true },
+    });
+    const scan = withoutConvertedOutput(rawScan, converted.map((video) => video.playbackKey));
+
     const inFolder = scan.videos.filter((file) => file.relPath.startsWith(`${key}/`));
 
     const [proposal] = proposeStructure(inFolder.map((file) => file.parsed));

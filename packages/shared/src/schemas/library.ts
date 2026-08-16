@@ -417,7 +417,6 @@ export const uploadSubtitleSchema = z.object({
   /** ISO 639-1/2. Unknown codes are accepted and flagged, never rejected. */
   language: z.string().trim().min(2).max(3).toLowerCase(),
   label: nonEmptyText(100),
-  isDefault: booleanParam.optional().default(false),
 });
 export type UploadSubtitleInput = z.infer<typeof uploadSubtitleSchema>;
 
@@ -425,13 +424,33 @@ export const updateSubtitleSchema = z
   .object({
     language: z.string().trim().min(2).max(3).toLowerCase(),
     label: nonEmptyText(100),
-    isDefault: z.boolean(),
   })
   .partial()
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'Nothing to update',
   });
 export type UpdateSubtitleInput = z.infer<typeof updateSubtitleSchema>;
+
+/**
+ * Which track carries `default`, or that the choice goes back to being automatic.
+ *
+ * Scoped to the video rather than to a track, for two reasons. "No default at
+ * all" is a legitimate choice with no track to carry it — a video whose only
+ * subtitles are in a language the viewer does not read is better off with none.
+ * And AUTO has to be expressible, or a hand-picked default could never be
+ * handed back to the rule that picks English.
+ */
+export const setDefaultSubtitleSchema = z
+  .object({
+    mode: z.enum(['AUTO', 'MANUAL']),
+    /** The chosen track, or null for none. Required on MANUAL, ignored on AUTO. */
+    subtitleId: idSchema.nullable().optional(),
+  })
+  .refine((value) => value.mode === 'AUTO' || value.subtitleId !== undefined, {
+    message: 'Choose a track, or null for no default',
+    path: ['subtitleId'],
+  });
+export type SetDefaultSubtitleInput = z.infer<typeof setDefaultSubtitleSchema>;
 
 export const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 

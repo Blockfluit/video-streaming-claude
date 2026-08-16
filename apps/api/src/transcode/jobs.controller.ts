@@ -3,8 +3,10 @@ import { listJobsSchema, toPage, type ListJobsQuery, type Page } from '@video/sh
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { ThrottleExpensive } from '../common/throttling';
 import { validate } from '../common/zod-validation.pipe';
 import { PrismaService } from '../prisma/prisma.service';
+import { ConvertedRelocationService } from './converted-relocation.service';
 import { JobsService } from './jobs.service';
 
 @Controller('admin/jobs')
@@ -13,6 +15,7 @@ export class JobsController {
   constructor(
     private readonly jobs: JobsService,
     private readonly prisma: PrismaService,
+    private readonly relocation: ConvertedRelocationService,
   ) {}
 
   /** The admin UI polls this every couple of seconds for a live progress bar. */
@@ -41,6 +44,26 @@ export class JobsController {
   @Get(':id')
   get(@Param('id') id: string) {
     return this.jobs.get(id);
+  }
+
+  /**
+   * Moves converted files out of `derived/converted/` and in beside their
+   * sources — the one-shot for an install that predates that layout.
+   *
+   * Declared before `:id/…`, as the literal routes always are here: Express
+   * matches in order, and the other way round makes `relocate-conversions` a
+   * job id.
+   *
+   * An endpoint rather than a migration, because SQL cannot move a file, and
+   * rather than a boot hook, because copying a library across two filesystems
+   * with the whole bootstrap held open is how a healthcheck turns a slow start
+   * into a restart loop.
+   */
+  @Post('relocate-conversions')
+  @HttpCode(HttpStatus.OK)
+  @ThrottleExpensive()
+  relocateConversions() {
+    return this.relocation.run();
   }
 
   @Post(':id/cancel')

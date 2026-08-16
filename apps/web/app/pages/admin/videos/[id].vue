@@ -41,6 +41,7 @@ interface VideoDetail {
   probeError: string | null
   posterSource: string
   bannerSource: string
+  subtitleDefaultSource: 'AUTO' | 'MANUAL'
   trailerYoutubeId: string | null
   playbackKey: string | null
   storageKey: string
@@ -297,20 +298,108 @@ async function metadataApplied(replaced: ArtworkShape[]) {
   await refresh()
 }
 
-async function uploadSubtitle(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
+/**
+ * Reka UI reserves the empty string for "cleared" and throws during render if
+ * an option uses it — which takes the whole page down, not just the select.
+ */
+const AUTO_DEFAULT = '__auto__'
+const NO_DEFAULT = '__none__'
+
+const defaultChoice = computed(() => {
+  if (video.value?.subtitleDefaultSource !== 'MANUAL') return AUTO_DEFAULT
+  return subtitles.value?.items?.find(track => track.isDefault)?.id ?? NO_DEFAULT
+})
+
+const defaultOptions = computed(() => [
+  { label: 'Automatic (English)', value: AUTO_DEFAULT },
+  { label: 'No default', value: NO_DEFAULT },
+  ...(subtitles.value?.items ?? []).map(track => ({
+    label: `${track.label} (${track.language})`,
+    value: track.id,
+  })),
+])
+
+async function chooseDefault(value: string) {
+  const body
+    = value === AUTO_DEFAULT
+      ? { mode: 'AUTO' }
+      : { mode: 'MANUAL', subtitleId: value === NO_DEFAULT ? null : value }
+
+  try {
+    await api(`/videos/${id}/subtitles/default`, { method: 'PUT', body })
+    // Both change: the track list carries isDefault, the video carries whether
+    // the choice is a choice at all.
+    await Promise.all([refreshSubs(), refresh()])
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not set the default track'), color: 'error' })
+  }
+}
+
+/**
+ * A language's English name, from the platform rather than from a list.
+ *
+ * `Intl.DisplayNames` ships with the browser and knows both the two- and
+ * three-letter forms, so there is no table here to fall out of date. It throws
+ * on a code it cannot parse at all, which is why the code itself is the
+ * fallback — an admin typing a private code still gets a usable label.
+ */
+function languageLabel(code: string): string {
+  const trimmed = code.trim().toLowerCase()
+  if (!trimmed) return ''
+
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(trimmed) ?? trimmed
+  } catch {
+    return trimmed
+  }
+}
+
+/**
+ * The upload form.
+ *
+ * `label` is required by the endpoint and the old form never sent it, so this
+ * button returned a 400 for every file it was ever given.
+ */
+const subtitleUpload = reactive({ open: false, language: 'en', label: '', file: null as File | null })
+
+function pickSubtitleFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  subtitleUpload.file = file
+  // A label nobody edits still has to be something, and the language is the
+  // only thing we know about the track at this point.
+  if (file && !subtitleUpload.label) subtitleUpload.label = languageLabel(subtitleUpload.language)
+  subtitleUpload.open = Boolean(file)
+}
+
+async function uploadSubtitle() {
+  if (!subtitleUpload.file) return
 
   const body = new FormData()
-  body.append('file', file)
-  body.append('language', 'en')
+  body.append('file', subtitleUpload.file)
+  body.append('language', subtitleUpload.language.trim().toLowerCase())
+  body.append('label', subtitleUpload.label.trim() || languageLabel(subtitleUpload.language))
+
   try {
     await api(`/videos/${id}/subtitles`, { method: 'POST', body })
-    await refreshSubs()
+    subtitleUpload.open = false
+    subtitleUpload.file = null
+    subtitleUpload.label = ''
+    // An uploaded English track can become the default on its own.
+    await Promise.all([refreshSubs(), refresh()])
   } catch (error) {
     // An SRT accepted as .vtt loads as an empty track, so the API sniffs for
     // the WEBVTT signature and this is where that rejection surfaces.
     toast.add({ title: apiMessage(error, 'Could not add that subtitle'), color: 'error' })
+  }
+}
+
+async function removeSubtitle(track: SubtitleTrack) {
+  try {
+    await api(`/subtitles/${track.id}`, { method: 'DELETE' })
+    // Removing the default lets another English track take over.
+    await Promise.all([refreshSubs(), refresh()])
+  } catch (error) {
+    toast.add({ title: apiMessage(error, 'Could not remove that track'), color: 'error' })
   }
 }
 
@@ -497,13 +586,39 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
                 default
               </UBadge>
               <span class="ml-auto text-xs text-(--ui-text-dimmed)">{{ track.origin }}</span>
+              <UButton
+                variant="subtle"
+                color="neutral"
+                size="xs"
+                icon="i-lucide-trash-2"
+                :aria-label="`Remove the ${track.label} subtitle track`"
+                @click="removeSubtitle(track)"
+              />
             </li>
           </ul>
           <p v-else class="mb-4 text-sm text-(--ui-text-muted)">No subtitle tracks.</p>
 
+          <div v-if="subtitles?.items?.length" class="mb-4">
+            <label for="subtitle-default" class="mb-1 block text-sm text-(--ui-text-muted)">
+              Default track
+            </label>
+            <USelect
+              id="subtitle-default"
+              :model-value="defaultChoice"
+              :items="defaultOptions"
+              class="w-full"
+              aria-label="Default subtitle track"
+              @update:model-value="(value: string) => chooseDefault(value)"
+            />
+            <p class="mt-1 text-xs text-(--ui-text-dimmed)">
+              Automatic picks the English track, and leaves the video without one when there is
+              no English track to pick.
+            </p>
+          </div>
+
           <div class="flex flex-wrap gap-2">
             <label class="cursor-pointer">
-              <input type="file" accept=".vtt" class="hidden" @change="uploadSubtitle">
+              <input type="file" accept=".vtt" class="hidden" @change="pickSubtitleFile">
               <span
                 class="inline-flex items-center gap-2 rounded-md bg-(--ui-bg-accented) px-3 py-1.5 text-sm hover:bg-(--ui-border-accented)"
               >
@@ -519,6 +634,43 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
               Extract embedded
             </UButton>
           </div>
+
+          <!--
+            The language and label are asked for rather than assumed. The old
+            form hardcoded `en` and sent no label at all, which the endpoint
+            requires — so every upload it ever attempted came back a 400.
+          -->
+          <UModal v-model:open="subtitleUpload.open" title="Add a subtitle track">
+            <template #body>
+              <div class="space-y-4">
+                <p class="text-sm text-(--ui-text-muted)">{{ subtitleUpload.file?.name }}</p>
+                <UFormField label="Language" help="An ISO 639 code, such as en, nl or eng.">
+                  <UInput
+                    v-model="subtitleUpload.language"
+                    aria-label="Subtitle language code"
+                    @blur="subtitleUpload.label ||= languageLabel(subtitleUpload.language)"
+                  />
+                </UFormField>
+                <UFormField label="Label" help="What the viewer picks from in the track menu.">
+                  <UInput v-model="subtitleUpload.label" aria-label="Subtitle track label" />
+                </UFormField>
+              </div>
+            </template>
+            <template #footer>
+              <div class="flex justify-end gap-2">
+                <UButton variant="subtle" color="neutral" @click="subtitleUpload.open = false">
+                  Cancel
+                </UButton>
+                <UButton
+                  variant="solid"
+                  :disabled="!subtitleUpload.language.trim()"
+                  @click="uploadSubtitle"
+                >
+                  Add track
+                </UButton>
+              </div>
+            </template>
+          </UModal>
         </UCard>
       </div>
 

@@ -34,7 +34,11 @@ describe('Rate limiting', () => {
       count: jest.fn().mockResolvedValue(1),
     },
     inviteToken: { findFirst: jest.fn().mockResolvedValue(null) },
-    mediaJob: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    video: { count: jest.fn().mockResolvedValue(0) },
+    mediaJob: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
 
   beforeAll(async () => {

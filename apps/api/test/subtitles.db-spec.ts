@@ -373,6 +373,28 @@ describe('Subtitles (real database)', () => {
       videoId = (await prisma.video.findFirstOrThrow()).id;
     });
 
+    /** Uploads a minimal track and returns its id. */
+    async function addTrack(language: string, label: string): Promise<string> {
+      const response = await admin
+        .post(`/videos/${videoId}/subtitles`)
+        .field('language', language)
+        .field('label', label)
+        .attach('file', Buffer.from('WEBVTT\n'), {
+          filename: `${language}-${label}.vtt`,
+          contentType: 'text/vtt',
+        })
+        .expect(201);
+
+      return response.body.id as string;
+    }
+
+    /** A second video, so a track from one cannot be aimed at the other. */
+    async function seedVideo(relPath: string): Promise<string> {
+      await makeVideo(relPath);
+      await scan();
+      return (await prisma.video.findFirstOrThrow({ where: { storageKey: relPath } })).id;
+    }
+
     it('accepts a WebVTT upload', async () => {
       const response = await admin
         .post(`/videos/${videoId}/subtitles`)
@@ -434,27 +456,118 @@ describe('Subtitles (real database)', () => {
      * `<track default>` on two tracks is undefined behaviour — the browser
      * picks one, and which is not something to leave to chance.
      */
-    it('keeps exactly one default per video', async () => {
-      const first = await admin
-        .post(`/videos/${videoId}/subtitles`)
-        .field('language', 'en')
-        .field('label', 'English')
-        .field('isDefault', 'true')
-        .attach('file', Buffer.from('WEBVTT\n'), { filename: 'a.vtt', contentType: 'text/vtt' })
-        .expect(201);
-      const second = await admin
-        .post(`/videos/${videoId}/subtitles`)
-        .field('language', 'nl')
-        .field('label', 'Nederlands')
-        .attach('file', Buffer.from('WEBVTT\n'), { filename: 'b.vtt', contentType: 'text/vtt' })
-        .expect(201);
+    it('keeps at most one default per video', async () => {
+      const first = await addTrack('en', 'English');
+      const second = await addTrack('nl', 'Nederlands');
 
-      await admin.patch(`/subtitles/${second.body.id}`).send({ isDefault: true }).expect(200);
+      await admin
+        .put(`/videos/${videoId}/subtitles/default`)
+        .send({ mode: 'MANUAL', subtitleId: second })
+        .expect(200);
 
       const all = await prisma.subtitle.findMany();
       expect(all.filter((subtitle) => subtitle.isDefault)).toHaveLength(1);
-      expect(all.find((subtitle) => subtitle.isDefault)?.id).toBe(second.body.id);
-      expect(first.body.id).not.toBe(second.body.id);
+      expect(all.find((subtitle) => subtitle.isDefault)?.id).toBe(second);
+      expect(first).not.toBe(second);
+    });
+
+    /**
+     * The default an admin never had to set. English is the rule because it is
+     * the one language this library's viewers share; everything else waits to
+     * be asked for.
+     */
+    it('elects the English track on its own', async () => {
+      await addTrack('nl', 'Nederlands');
+      const english = await addTrack('en', 'English');
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.find((track) => track.isDefault)?.id).toBe(english);
+    });
+
+    /**
+     * A default on a language the viewer cannot read is worse than none: it
+     * turns subtitles on and leaves them hunting for the menu that turns them
+     * off again.
+     */
+    it('leaves a video with no English track with no default', async () => {
+      await addTrack('nl', 'Nederlands');
+      await addTrack('de', 'Deutsch');
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.filter((track) => track.isDefault)).toHaveLength(0);
+    });
+
+    /**
+     * The whole reason `subtitleDefaultSource` exists. Losing a deliberate
+     * choice to a routine rescan is what makes curation feel unsafe — the same
+     * contract as a hand-picked poster surviving a re-probe.
+     */
+    it('does not overrule a hand-picked default', async () => {
+      const dutch = await addTrack('nl', 'Nederlands');
+      await admin
+        .put(`/videos/${videoId}/subtitles/default`)
+        .send({ mode: 'MANUAL', subtitleId: dutch })
+        .expect(200);
+
+      // Exactly the event that would otherwise re-elect English.
+      await addTrack('en', 'English');
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.find((track) => track.isDefault)?.id).toBe(dutch);
+    });
+
+    it('hands the choice back to the rule', async () => {
+      const dutch = await addTrack('nl', 'Nederlands');
+      const english = await addTrack('en', 'English');
+      await admin
+        .put(`/videos/${videoId}/subtitles/default`)
+        .send({ mode: 'MANUAL', subtitleId: dutch })
+        .expect(200);
+
+      await admin.put(`/videos/${videoId}/subtitles/default`).send({ mode: 'AUTO' }).expect(200);
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.find((track) => track.isDefault)?.id).toBe(english);
+    });
+
+    /** "No default at all" is a real choice, and no track can carry one. */
+    it('accepts a deliberate no-default', async () => {
+      await addTrack('en', 'English');
+
+      await admin
+        .put(`/videos/${videoId}/subtitles/default`)
+        .send({ mode: 'MANUAL', subtitleId: null })
+        .expect(200);
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.filter((track) => track.isDefault)).toHaveLength(0);
+    });
+
+    /**
+     * Nothing used to promote a replacement, so deleting the default left a
+     * video with none and no route back to one.
+     */
+    it('promotes another English track when the default is deleted', async () => {
+      const first = await addTrack('en', 'English');
+      const second = await addTrack('eng', 'English (SDH)');
+
+      await admin.delete(`/subtitles/${first}`).expect(204);
+
+      const tracks = await prisma.subtitle.findMany();
+      expect(tracks.find((track) => track.isDefault)?.id).toBe(second);
+    });
+
+    /**
+     * A subtitle id is not a way to act on a video the caller did not name.
+     */
+    it('refuses a track belonging to another video', async () => {
+      const otherVideo = await seedVideo('disk1/Other/Other.mp4');
+      const foreign = await addTrack('en', 'English');
+
+      await admin
+        .put(`/videos/${otherVideo}/subtitles/default`)
+        .send({ mode: 'MANUAL', subtitleId: foreign })
+        .expect(404);
     });
 
     it('deletes a track and its file', async () => {
