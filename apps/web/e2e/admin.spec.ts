@@ -50,6 +50,92 @@ test.describe('admin', () => {
   })
 
   /**
+   * The library reaches past its first window — both halves of it.
+   *
+   * It could not: one request per list at `limit=100`, the API's ceiling, and
+   * stop. `total` arrived in both responses and was printed straight into the
+   * section heading while `hasMore` was never read at all, so "Videos (1284)"
+   * sat over a hundred rows and record 101 was reachable only by already
+   * knowing its title — on the one screen whose job is to find a record.
+   */
+  test('the library loads more than one window of each list', async ({ page }) => {
+    await visit(page, '/admin/library')
+    await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible()
+
+    // Decided from the data. `locator.count()` does not retry, so a guard
+    // written on it runs before the route has rendered and is always true.
+    const totals = await page.evaluate(async () => {
+      const [videos, collections] = await Promise.all([
+        fetch('/api/videos?limit=1').then(response => response.json()),
+        fetch('/api/collections?limit=1').then(response => response.json()),
+      ])
+      return { videos: videos.total as number, collections: collections.total as number }
+    })
+
+    const lists = [
+      {
+        resource: 'videos',
+        total: totals.videos,
+        heading: /^Videos \(/,
+        rows: page.locator('main table tbody tr'),
+      },
+      {
+        resource: 'collections',
+        total: totals.collections,
+        heading: /^Collections \(/,
+        rows: page.locator('main a[href^="/admin/collections/"]'),
+      },
+    ] as const
+
+    for (const list of lists) {
+      const section = page.locator('main section')
+        .filter({ has: page.getByRole('heading', { name: list.heading }) })
+      const button = section.getByRole('button', { name: /Load \d+ more/ })
+
+      // Both directions are real assertions: past one window the button has to
+      // fetch the next, and within one window it must not be offered at all —
+      // an offer of nothing is the same lie as a heading nobody can reach.
+      if (list.total <= 100) {
+        await expect(list.rows).toHaveCount(list.total)
+        await expect(button).toHaveCount(0)
+        continue
+      }
+
+      await expect(list.rows).toHaveCount(100)
+      await expect(button).toBeVisible()
+      await expectsRequest(
+        page,
+        new RegExp(`/${list.resource}\\?.*offset=100`),
+        'GET',
+        () => button.click(),
+      )
+      await expect(list.rows).toHaveCount(Math.min(list.total, 200))
+    }
+  })
+
+  /**
+   * Narrowing drops the windows that were fetched for the old question.
+   *
+   * Appended windows are the reason this matters: window seven of "everything"
+   * left underneath window one of "blade" is a list whose rows never matched
+   * what the box says, and there is nothing on screen to say so.
+   */
+  test('searching the library drops the windows loaded before it', async ({ page }) => {
+    await visit(page, '/admin/library')
+
+    const rows = page.locator('main table tbody tr')
+    const before = await rows.count()
+
+    await fillStable(page, 'input[placeholder="Search titles"]', 'zzzznothing')
+    await expect(page.getByText('Nothing matches.')).toBeVisible()
+    await expect(rows).toHaveCount(0)
+
+    // And back, so the reset is not just "everything disappeared".
+    await fillStable(page, 'input[placeholder="Search titles"]', '')
+    await expect(rows).toHaveCount(before)
+  })
+
+  /**
    * Browse carries a lifecycle filter that only an admin is shown.
    *
    * The rendering is gated on `isAdmin`, which is a convenience rather than an

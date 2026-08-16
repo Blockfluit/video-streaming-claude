@@ -859,6 +859,28 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `nextBrowsePage` in `browse-paging.ts` is the one place that decides, and it is specced.
 - Appending offset pages is only sound because `apps/api/src/library/merge.ts` sorts on a **total** order
   ending in `id`. Break that and the same card arrives twice under one `:key`.
+- **A screen asking for `MAX_PAGE_LIMIT` and printing `total` is claiming a number it cannot show.** Every
+  `Page<T>` carries `total` and `hasMore`, and the recurring bug is reading the first into a heading while
+  ignoring the second: `/admin/people` and `/admin/library` both shipped as "one window of a hundred, and
+  stop", the library with *two* of them, so "Videos (1284)" sat over a hundred rows and the only records an
+  admin could open were the ones whose titles they already knew — on the screens whose whole job is finding
+  a record. `loadMoreLabel` and `appendWindow` in `app/utils/paging.ts` are the shared answer; the offer is
+  counted against **`total`**, never `hasMore`, which stops being the question the moment a second window is
+  appended. The label names *what is left* ("Load 12 more (of 412)") because promising a whole window for the
+  twelve that remain reads, when twelve arrive, as eighty-eight records having gone missing.
+- `appendWindow` dedupes by id rather than concatenating. Offset paging over a list that moves hands back a
+  row already on screen — a delete in an earlier window shifts every later one up by exactly one — and two
+  rows under one `:key` is a rendering bug, not a duplicate.
+- **A filter change must drop the appended windows**, which is why both pages funnel every change through one
+  `ask()` that resets them: window seven of the old question left underneath window one of the new one is a
+  list whose rows never matched what the box says, with nothing on screen admitting it. The search box is
+  debounced into `ask()` for the same reason — a mid-word refetch replaces window one while the windows
+  behind it were fetched for a different question. On the library the URL is written from what was *asked*
+  rather than from the controls, so the shareable link is the question the lists are answering.
+- Both load-more tests assert **both directions** — past one window the button fetches the next, within one
+  window it is not offered at all — rather than skipping on a small library. A skip that never runs reports
+  green, and the dev library is under a hundred titles, so the skip would have been the only branch anyone
+  ever saw.
 - The poster wall is `.poster-grid` in `main.css`, used by browse, my-list and the collection page — it was
   three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
   identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
