@@ -209,9 +209,27 @@ export class StorageService implements OnModuleInit {
    * and read by the next probe as though it were finished.
    */
   async move(root: StorageRoot, fromKey: string, toKey: string): Promise<void> {
-    const from = this.resolvePath(root, fromKey);
-    const to = this.resolvePath(root, toKey);
+    await this.relocate(this.resolvePath(root, fromKey), this.resolvePath(root, toKey));
+  }
 
+  /**
+   * The same move, between the two roots.
+   *
+   * Its one caller relocates converted files out of `derived/converted/` and in
+   * beside their sources. Almost always a copy rather than a rename in
+   * practice: the roots are separate mounts in production, and `derived` is
+   * scratch space while the drives under `MEDIA_ROOT` are the real disks.
+   */
+  async moveBetweenRoots(
+    fromRoot: StorageRoot,
+    fromKey: string,
+    toRoot: StorageRoot,
+    toKey: string,
+  ): Promise<void> {
+    await this.relocate(this.resolvePath(fromRoot, fromKey), this.resolvePath(toRoot, toKey));
+  }
+
+  private async relocate(from: string, to: string): Promise<void> {
     await mkdir(dirname(to), { recursive: true });
 
     try {

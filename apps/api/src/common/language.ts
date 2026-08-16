@@ -48,6 +48,25 @@ export function languageName(code: string): string | null {
   return lookup(code)?.name ?? null;
 }
 
+/**
+ * The two-letter (639-1) form of any recognised code, or null.
+ *
+ * The one comparison key for "is this the same language". An extracted track
+ * carries the container's tag (`eng`) while a sidecar carries whatever the
+ * filename said (`en`) — comparing those as strings makes them two languages,
+ * and any rule phrased as "prefer English" then skips every embedded track.
+ *
+ * Null covers two different cases on purpose, because callers treat them the
+ * same: a code nothing recognises, and a code that is real but has no 639-1
+ * form at all (`und` for an untagged stream is the one seen in practice). An
+ * empty string counts as absent rather than as an answer — some entries carry
+ * one, and returning `''` would compare equal to the next entry that does.
+ */
+export function toIso6391(code: string): string | null {
+  const twoLetter = lookup(code)?.['1'];
+  return twoLetter !== undefined && twoLetter.length > 0 ? twoLetter : null;
+}
+
 /** The language's own name for itself — what a viewer picking a track would rather read. */
 export function languageNativeName(code: string): string | null {
   return lookup(code)?.local ?? null;

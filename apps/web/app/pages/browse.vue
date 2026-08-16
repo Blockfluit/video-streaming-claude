@@ -82,7 +82,9 @@ const { data, status, error } = await useApiData<Page<LibraryCard>>(
   'browse-library',
   () => `/library?${query.value}`,
   // The URL is a function of the filters, so the fetch has to follow them.
-  { watch: [query] },
+  // `lazy` so arriving here paints the grid's placeholders at once rather than
+  // holding the previous page on screen; SSR still waits and still ships cards.
+  { watch: [query], lazy: true },
 )
 
 /**
@@ -95,6 +97,7 @@ const { data, status, error } = await useApiData<Page<LibraryCard>>(
 const { data: genreFacets } = await useApiData<Page<GenreFacet>>(
   'browse-genres',
   '/library/genres?limit=100',
+  { lazy: true },
 )
 
 const genreOptions = computed(() => (genreFacets.value?.items ?? []).map((facet) => facet.genre))
@@ -166,11 +169,17 @@ const hasMore = computed(() => nextBrowsePage(cards.value.length, total.value) !
  * and the count was already on screen — so it answers both while there is more
  * to come, and goes back to being a plain total once there is not.
  */
-const countLabel = computed(() =>
-  hasMore.value
+const countLabel = computed(() => {
+  // Nothing until there is something to count. `total` is 0 before the first
+  // answer, so this read "0 titles" over a grid of placeholders — the same
+  // claim the empty state is kept from making, in the one corner of the page
+  // that was still free to make it.
+  if (status.value !== 'success' && cards.value.length === 0) return ''
+
+  return hasMore.value
     ? `${cards.value.length} of ${total.value} titles`
-    : `${total.value} ${total.value === 1 ? 'title' : 'titles'}`,
-)
+    : `${total.value} ${total.value === 1 ? 'title' : 'titles'}`
+})
 
 // A different list entirely: drop everything the last one had loaded.
 watch(query, () => {
@@ -466,7 +475,22 @@ useHead({ title: 'Browse' })
       />
     </div>
 
-    <p v-else-if="status !== 'pending'" class="py-20 text-center text-(--ui-text-muted)">
+    <!--
+      After the grid on purpose. Changing a filter refetches while
+      `useAsyncData` holds on to the previous cards, and replacing a screenful
+      of results with placeholders every time a letter is typed would be worse
+      than the stale-but-visible list it stands in for. So this is only reached
+      when there is genuinely nothing on screen yet.
+
+      `!== 'success'` covers `idle` as well as `pending`: under `lazy` the fetch
+      has not started when the component first renders, and the old
+      `status !== 'pending'` test let the empty message win that frame.
+    -->
+    <div v-else-if="status !== 'success'" role="status" aria-label="Loading the library">
+      <SkeletonPosterGrid />
+    </div>
+
+    <p v-else class="py-20 text-center text-(--ui-text-muted)">
       {{
         hasActiveFilters(filters)
           ? 'Nothing matches those filters.'

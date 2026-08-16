@@ -41,28 +41,40 @@ const props = defineProps<{
   paused?: boolean
 }>()
 
+/**
+ * The moment the trailer becomes visible — not when it was asked for.
+ *
+ * The home hero rotates on a fixed interval, and a YouTube embed measured here
+ * takes **five to nine seconds** just to fire `load`; the turn is ten. So the
+ * entry was changing at about the moment its trailer became watchable, and the
+ * page looked exactly as if no trailer ever played. The rotation starts an
+ * entry's turn from this instead, so a slow embed costs a longer turn rather
+ * than the whole feature.
+ */
+const emit = defineEmits<{ revealed: [] }>()
+
 const broken = ref(false)
 const showImage = computed(() => Boolean(props.image) && !broken.value)
 
 /* ---------------------------------------------------------------- trailer -- */
 
 /**
- * The trailer starts at once, and only reveals itself once it is actually
- * playing.
+ * The trailer starts itself, plays muted behind the page's text, and gives way
+ * to the banner only when it cannot play.
  *
- * It used to wait two seconds and then fade in regardless, which is wrong in the
- * one case that matters. When the video will not play — autoplay refused,
- * embedding disabled by its owner, the video pulled — YouTube paints its own
- * grey "Video unavailable" card, and *that* is what got faded across the
- * artwork. The banner underneath was always the intended fallback; nothing was
- * checking whether it was needed.
+ * **It is not gated on permission to start, and that is the whole rule.** A
+ * previous version held the iframe hidden until the player confirmed over
+ * `postMessage` that it was playing, and unmounted it if no confirmation came
+ * within four seconds. None ever came — the embed does not reliably answer — so
+ * every viewer saw the banner and nothing else, on every title. The stub in the
+ * browser suite answered dutifully, so it passed. Silence must therefore mean
+ * "carry on"; only an error means stop.
  *
- * So the iframe is mounted immediately but held at `opacity-0`, and the banner
- * stays up until the player says it is playing. If it never says so, the iframe
- * is taken away again and nobody sees anything but the banner. See
- * `utils/youtube-embed.ts` for how that conversation works.
+ * So: mount, and reveal shortly after the iframe loads. If the player *does*
+ * speak up to say it is playing, reveal at that moment instead, which is
+ * crisper. If it says it has failed, retreat to the banner.
  *
- * The other two rules are unchanged and still not preferences:
+ * The three standing rules are unchanged and none of them is a preference:
  *
  * - **Muted.** A browser refuses to start an unmuted video nobody asked for, and
  *   it fails *silently* — the iframe loads and sits there. Sound belongs to the
@@ -70,20 +82,23 @@ const showImage = computed(() => Boolean(props.image) && !broken.value)
  * - **Not under `prefers-reduced-motion`.** A hero that begins moving on its own
  *   is precisely what that setting is about. The trailer stays available behind
  *   the modal's button, which is a deliberate act rather than an ambush.
+ * - **No controls.** There is no play, mute or ✕ over the artwork; anyone who
+ *   wants the trailer wants the dialog, and that button is in the page's own row.
  */
 
 /**
- * How long the player gets to confirm before the banner wins.
+ * The grace between the iframe loading and the crossfade.
  *
- * Generous on purpose: it covers loading the embed over a slow connection as
- * well as the failures, and the cost of being wrong in that direction is only
- * that a working trailer is dropped a moment before it would have started.
+ * Not zero: at `load` the embed's document exists but has painted nothing, so
+ * revealing straight away fades the banner into a black rectangle. Measured from
+ * `load` rather than from mount, so a slow embed gets its own time instead of
+ * spending a fixed budget on the network.
  */
-const CONFIRM_MS = 4000
+const REVEAL_MS = 900
 
 /** Whether the iframe exists at all, so nothing is requested before it does. */
 const mounted = ref(false)
-/** Whether it has earned the right to be seen. */
+/** Whether it has anything worth showing yet. */
 const revealed = ref(false)
 const frame = ref<HTMLIFrameElement | null>(null)
 
@@ -94,34 +109,51 @@ const embedUrl = computed(() =>
     : null,
 )
 
-let deadline: ReturnType<typeof setTimeout> | undefined
+let curtain: ReturnType<typeof setTimeout> | undefined
+let unsubscribe: (() => void) | undefined
 
 function stopTrailer(): void {
-  clearTimeout(deadline)
+  clearTimeout(curtain)
+  unsubscribe?.()
+  unsubscribe = undefined
   revealed.value = false
   mounted.value = false
 }
 
+function reveal(): void {
+  clearTimeout(curtain)
+  if (revealed.value) return
+
+  revealed.value = true
+  emit('revealed')
+}
+
 /**
- * The embed posts nothing until it is subscribed to, and it is only reachable
- * once its document exists — so this is bound to the iframe's `load` rather than
- * fired alongside the mount.
+ * Bound to the iframe's `load`, because the embed is only reachable once its
+ * document exists — and asked repeatedly from there, because at `load` the
+ * player's own listener is not attached yet. See `subscribeToPlayer`.
+ *
+ * The reveal is armed here rather than at mount so that a trailer still stuck on
+ * the network is not counted as showing.
  */
-function subscribe(): void {
-  frame.value?.contentWindow?.postMessage(LISTENING, EMBED_ORIGIN)
+function onFrameLoad(): void {
+  unsubscribe?.()
+  unsubscribe = frame.value ? subscribeToPlayer(frame.value) : undefined
+
+  clearTimeout(curtain)
+  curtain = setTimeout(reveal, REVEAL_MS)
 }
 
 function onMessage(event: MessageEvent): void {
   if (!mounted.value) return
 
   const signal = readPlayerSignal(event.origin, event.data)
-  if (signal === 'playing') {
-    clearTimeout(deadline)
-    revealed.value = true
-  }
-  // Told rather than timed out: an error arrives immediately, and waiting the
-  // full deadline to act on it would leave the grey card fading in behind a
-  // reveal that is about to be cancelled anyway.
+
+  // Better than the timer when it arrives, and nothing depends on it arriving.
+  if (signal === 'playing') reveal()
+  // The one thing that sends us back to the banner. It is also the answer to
+  // "what if the video is gone" — YouTube's grey card is what would otherwise
+  // be sitting there.
   else if (signal === 'failed') stopTrailer()
 }
 
@@ -133,13 +165,11 @@ function startTrailer(): void {
   if (import.meta.server) return
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
+  // And then nothing else happens until the iframe loads. An embed that never
+  // loads never reveals, so a blocked host or a dead network leaves the banner
+  // exactly where it is — the fallback falls out of the design rather than
+  // needing a timer of its own to enforce it.
   mounted.value = true
-  deadline = setTimeout(() => {
-    // Still nothing. Whatever the reason, the banner is the answer — and the
-    // iframe goes rather than sitting there invisible, holding a connection to
-    // a third party for a video this page has given up on.
-    if (!revealed.value) stopTrailer()
-  }, CONFIRM_MS)
 }
 
 onMounted(() => {
@@ -148,7 +178,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  clearTimeout(deadline)
+  clearTimeout(curtain)
+  unsubscribe?.()
   window.removeEventListener('message', onMessage)
 })
 
@@ -209,8 +240,12 @@ watch(
       button in the page's own button row is the part anyone needs to reach.
 
       The crossfade is short. A full second was the tail of a two-second wait and
-      read as a deliberate flourish; now that the trailer is already playing when
-      this runs, the same second reads as the page being slow.
+      read as a deliberate flourish; by the time this runs the trailer has
+      already loaded, and the same second reads as the page being slow.
+
+      `opacity-0` is a hidden trailer that is *still loading or playing*, never a
+      rejected one — a trailer that will not play is unmounted outright, so this
+      layer never sits invisible holding a connection open.
     -->
     <div
       v-if="embedUrl"
@@ -231,7 +266,7 @@ watch(
         frameborder="0"
         allow="autoplay; encrypted-media"
         referrerpolicy="strict-origin-when-cross-origin"
-        @load="subscribe"
+        @load="onFrameLoad"
       />
     </div>
 

@@ -11,12 +11,21 @@ import { test, visit } from './fixtures'
  * silent because a browser will not start anything else. "Play the trailer" is a
  * thing people mean literally, and this dialog is where they can.
  *
- * Deliberately **not** opting out of the config's global reduced motion, unlike
- * `hero.spec.ts`. That setting suppresses the trailer that starts itself and has
- * no business suppressing one somebody pressed a button for — running under it
- * is what proves the two are actually separate.
+ * Reduced motion is asked for **here**, explicitly, rather than inherited. It
+ * suppresses the trailer that starts itself and has no business suppressing one
+ * somebody pressed a button for, so running under it is what proves the two are
+ * separate — and it keeps the ambient embed off the page, which is the only
+ * other thing that could satisfy a locator for a YouTube iframe.
+ *
+ * Stated in the file because the config's global `reducedMotion: 'reduce'` was
+ * measured **not** reaching this spec: `matchMedia` reported false inside it. The
+ * old version of this test passed anyway, but only by accident — back then the
+ * ambient iframe unmounted itself after four seconds of silence, so polling for
+ * its absence eventually succeeded for entirely the wrong reason.
  */
 test.describe('the trailer dialog', () => {
+  test.use({ reducedMotion: 'reduce' })
+
   /**
    * Nothing leaves the machine. Narrow to the two hosts: a `*youtube*` glob also
    * catches Vite's own module requests, and the fixture watchdog fails the test
@@ -102,7 +111,19 @@ test.describe('the trailer dialog', () => {
        */
       await page.keyboard.press('Escape')
       await expect(dialog).toBeHidden()
-      await expect(page.locator('iframe[src*="youtube"]')).toHaveCount(0)
+
+      /**
+       * Scoped to the dialog, and reported by `src` rather than by count.
+       *
+       * The hero's ambient trailer is also a YouTube iframe on this page, so a
+       * bare "expected 0 iframes" cannot say which one survived — and with
+       * reduced motion off it would be the ambient one, correctly restarting now
+       * that the dialog has stopped pausing it. Naming the `src` is what turns a
+       * failure here into a sentence instead of a number.
+       */
+      await expect.poll(() => dialog.locator('iframe').evaluateAll(
+        els => els.map(e => (e.getAttribute('src') ?? '').replace(/^.*\/embed\//, '')),
+      )).toEqual([])
     }
     finally {
       await setTrailer(page, video!.id, '')

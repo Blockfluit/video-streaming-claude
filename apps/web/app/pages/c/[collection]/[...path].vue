@@ -93,7 +93,7 @@ const collection = computed(() =>
  * puts it in. That order is a fact about the membership, which is why it comes
  * from here rather than from a plain video listing.
  */
-const { data: detail } = await useApiData<{
+const { data: detail, status: detailStatus } = await useApiData<{
   year: number | null
   posterKey: string | null
   trailerYoutubeId: string | null
@@ -121,7 +121,17 @@ const { data: detail } = await useApiData<{
 }>(
   () => `detail-${collectionSlug.value}`,
   () => `/collections/${collectionSlug.value}`,
-  { watch: [collectionSlug] },
+  /*
+   * `lazy`, unlike the resolve above it.
+   *
+   * The resolve decides what this URL *is* — it answers 404 for a path nobody
+   * holds, and it 301s to the video's own page when a shared collection link
+   * names one. Painting an episode grid and then redirecting out of it is worse
+   * than the pause it would replace, so that one stays blocking. This request
+   * only fills the page the resolve has already committed to, and it is the
+   * slower half, so it is the one worth not waiting on.
+   */
+  { watch: [collectionSlug], lazy: true },
 )
 
 const ordered = computed(() =>
@@ -165,5 +175,6 @@ useHead(() => ({ title: collection.value?.title ?? 'Library' }))
     :seasons="detail?.seasons ?? []"
     :videos="ordered"
     :season="season"
+    :loading="detailStatus !== 'success'"
   />
 </template>

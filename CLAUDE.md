@@ -26,9 +26,42 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 ## Invariants — violating these causes bugs that are painful to trace
 
 **Storage**
-- `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds thumbnails,
-  posters and converted MP4/VTT and is **never** inside `media/` — generated output landing in the watched
+- `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds posters,
+  banners and converted VTT, and is **never** inside `media/` — generated output landing in the watched
   tree causes a watcher feedback loop.
+- **The converted MP4 is the one exception**, and it is deliberate: it lives in `MEDIA_ROOT`, in the same
+  folder as its source (`Heat.mkv` → `Heat.mp4`). A transcode is hours of CPU rather than something
+  regenerated on demand, and for a reclaimed video it is the only copy of the film — so it belongs on the
+  archival disk, not the scratch one. Note the disk-space consequence: a conversion now needs headroom on
+  the *source's* drive, and reclaiming genuinely frees space there, which it never did before.
+- What stops the watcher feeding on it is not its location but the column: **reconcile drops from its scan
+  any path that is a row's `playbackKey`, or a live job's `outputKey`** (`ingest/converted-output.ts`,
+  applied to the whole `ScanResult` — `issues` as well as `videos`, since a converted file beside a loose
+  source parses as an issue). That filter is sound only because of its partner invariant: **`playbackKey`
+  is written to the row *before* the file appears at that path**, so reading the rows *after* the scan
+  cannot miss a conversion that finished in between. Reverse either half and the library grows a duplicate
+  row per conversion. Both ends carry a comment saying so.
+- The filter is on **stored keys only**, never on names. Skipping `Heat.mp4` because `Heat.mkv` sits beside
+  it would silently swallow a real second file an admin dropped there — forever, with no issue raised.
+- `convertedKeyFor` never returns its argument. An `.mp4` source would otherwise map to itself, and ffmpeg
+  truncates its output the moment it opens it, so the film would be gone before the encode read a frame;
+  that case becomes `Heat.converted.mp4`. Collisions past that take `-2`, `-3` like uploads do, checking
+  the filesystem **and** both `storageKey` and `playbackKey` — but a reconvert excludes the row's own key,
+  or it would pick a new name and orphan its previous output in a watched folder.
+- The encode writes to a **dot-prefixed neighbour of its destination** (`.<stem>.converting-<jobId>.mp4`),
+  not to `derived/tmp/`: dot-prefixed so the scanner and watcher pass over a half-written file inside the
+  watched tree, and in the destination's own directory so the rename into place is same-filesystem and
+  therefore atomic. Interrupted jobs have theirs swept at startup — in `derived/tmp/` an orphan was
+  invisible dead weight, in a media folder it is multiple gigabytes of the admin's disk.
+- A **move does not take the converted file with it.** It is written once, beside where the source was at
+  the time. Relocating it inside `reconcile()` would mean a cross-filesystem copy of gigabytes on the
+  watcher's debounce path, and every ordering has a crash window ending in an unclaimed `.mp4` in a watched
+  folder. Being stranded costs tidiness; being ingested twice costs the curation.
+- Existing installs are moved by `POST /admin/jobs/relocate-conversions`, **not** by a migration. SQL cannot
+  move a file, and these files cannot be abandoned the way `derived/thumbnails/` was when artwork moved.
+  Not a boot hook either: copying a library across two filesystems with the bootstrap held open is how a
+  healthcheck turns a slow start into a restart loop. `playbackRoot()` keeps both layouts playable until it
+  has run, and is meant to be deleted afterwards.
 - **Every folder directly under `MEDIA_ROOT` is a drive**, a symlink to a physical disk in production. A
   drive is where bytes live and is never a collection. The convention is
   `media/<drive>/<item>/<season>/file`, and what an item folder *becomes* is decided by what is inside it
@@ -42,7 +75,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - The folder layout is only an **initial suggestion**. A proposal is applied when a video is first
   discovered and never again — a move on disk follows the file and changes nothing else. Re-deriving would
   undo whatever an admin has arranged, on the strength of someone tidying up a disk.
-- `storageKey` = archival source. `playbackKey` = converted MP4. Streaming serves `playbackKey ?? storageKey`.
+- `storageKey` = archival source. `playbackKey` = converted MP4, **also under `MEDIA_ROOT`**, beside the
+  source. Streaming serves `playbackKey ?? storageKey`. Both are unique columns: two rows sharing one
+  converted file is silent corruption rather than an error.
 - Videos with `sourceDeletedAt` set and a valid `playbackKey` are **exempt** from the missing-file sweep,
   or reclaiming disk space marks the library `MISSING`.
 - Every storage key is `path.resolve`d and confirmed inside its root before use (path traversal). Only
@@ -64,13 +99,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   A directory that still holds something is left alone, so nobody destroys a film with the same button that
   tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
   files go rather than asking "are you sure?".
-- **Deleting a video always takes its derived output**, `deleteFiles` or not: poster, banner, converted file,
-  subtitle tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
+- **Deleting a video always takes its generated output**, `deleteFiles` or not: poster, banner, subtitle
+  tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
   belongs to a row that has stopped existing, nothing sweeps it, and it is regenerated from the source — so
   keeping it only leaks files nobody can reach again. The **source** under `MEDIA_ROOT` still needs
   `deleteFiles`, because reconcile can rebuild the row from it. Every key is collected **before**
   `video.delete`: all of them live on the row or on a `Subtitle` row, and the cascade takes both, so
   afterwards there is nothing left to say what to remove.
+- The **converted file** goes on that same unconditional path (`playbackKeysToDelete`, its own list
+  because it is generated output living in `MEDIA_ROOT`), and here it is load-bearing rather than tidy:
+  ingest skips it only because a row claims it, so leaving it behind means the next scan finds an
+  unclaimed `.mp4` in a watched folder and rebuilds the entry that was just deleted, under a new id and
+  with none of its history.
 - The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming a
   source is allowed precisely *because* the converted file replaces it. Sweeping that up as derived output
   would destroy a film through the button labelled as the recoverable one, so the recoverable one **refuses**
@@ -97,8 +137,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   a 416. Answering one range of several needs `multipart/byteranges`, and claiming otherwise is a lie.
 - `res.on('close')` must destroy the read stream. Seeking aborts requests constantly, and without it the
   process leaks a file descriptor per scrub.
-- Streaming serves `playbackKey ?? storageKey` from `derived` or `media` respectively, so the URL is
-  unchanged before and after conversion and survives the source being reclaimed.
+- Streaming serves `playbackKey ?? storageKey`, both from `media`, so the URL is unchanged before and
+  after conversion and survives the source being reclaimed. (`playbackRoot()` still answers `derived` for
+  a row left under the old `converted/` layout, until the relocation endpoint has run.)
 - Stream responses are `Cache-Control: private, no-store`. A shared cache holding a range response as
   though it were the whole file corrupts playback for the next viewer.
 - Every video has **two** pictures, both cut from the frame 10% in: a 16:9 `bannerKey` (the old
@@ -127,18 +168,32 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   iframe must be `pointer-events-none`: an iframe swallows every click that lands on it, so without
   that the Play button underneath stops working the moment the trailer fades in, and the page looks
   perfectly fine while doing it.
+- **The reveal is never gated on the player confirming anything.** `HeroBackdrop` mounts the iframe
+  hidden and crossfades it in ~900ms after the iframe's `load`; it reveals *earlier* if the embed
+  volunteers `onStateChange / info: 1`, and it retreats to the banner **only** on `onError`. It was
+  built the other way round once — hidden until the player confirmed, unmounted after four seconds of
+  silence — and real YouTube does not reliably answer that handshake, so every viewer got the banner
+  and nothing else, on every title. It shipped green because the browser suite's only stub answered
+  every time. **Silence means carry on; only an error means stop**, and `hero.spec.ts` now stubs all
+  three behaviours (answers, silent, failing) for exactly that reason.
+- The "can't be loaded" fallback needs no timer: an embed that never fires `load` never reveals, so a
+  blocked host or a dead network leaves the banner where it is by construction.
+- **`subscribeToPlayer` posts `listening` repeatedly**, not once. An iframe's `load` fires when its
+  *document* arrives, which is before the player has attached its own `message` listener — a single
+  message sent then lands on nothing and the embed never asks again, which is the likeliest reason the
+  handshake was never heard at all. It is bounded (~4s) and cancelled when the trailer is torn down.
 - **The home hero rotates**, and does so on a **fixed interval** rather than when a trailer ends.
-  There is no ended signal: `enablejsapi` is set and *nothing listens*, so "play the next one when
-  this finishes" would need a `postMessage` listener that does not exist. The interval is ~10s
-  against `HeroBackdrop`'s 2s fade-in — roughly two seconds of banner and eight of trailer. Much
-  shorter and the entry changes before its trailer has said anything, while opening a YouTube iframe
-  every few seconds.
+  There is no ended signal worth relying on: the page hears the embed only when it chooses to speak,
+  which it may never do, so "play the next one when this finishes" would rest on the same silence that
+  already cost the feature once. The interval is ~10s, which is very nearly ten seconds of trailer now
+  that it starts at once. Much shorter and the entry changes before its trailer has said anything,
+  while opening a YouTube iframe every few seconds.
 - The rotation stops for all three of: `prefers-reduced-motion` (it never starts — the same rule the
   trailer follows), a pointer resting on the hero or focus inside it, and an explicit pause button.
-  Auto-updating content needs a way to stop it. `HeroBackdrop` emits `dismiss` from the trailer's ✕
-  and **only** from there — `stopTrailer` is also how it clears the previous trailer on a change of
-  `trailerId`, so emitting from inside it would fire on every turn of the carousel. Dismissing stops
-  the rotation too: somebody who closed a trailer is not asking for the next one ten seconds later.
+  Auto-updating content needs a way to stop it. An **open `TrailerModal` holds it too**: the hero
+  cannot turn over while somebody is watching this title's trailer in a dialog on top of it. There was
+  a ✕ on the hero and a `dismiss` emit behind it; both are gone with the rest of the hero's trailer
+  controls, which steered something nobody was watching.
 - The rotation's dots are dimmed with a **colour**, never `opacity`. `visible.spec.ts` reports an
   interactive element under 0.35 effective opacity as invisible, and opacity multiplies down the
   whole ancestor chain. Inactive is `--ui-border-accented` (3:1, the non-text floor for something
@@ -148,8 +203,8 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   runs behind the cards, which means the bottom 4rem of the hero is underneath a row heading:
   "Recently added" landed exactly on top of the pause button. Anything the *page* owns inside the
   hero has to sit above that band, and the text column is the one place clear of it at every width.
-  The trailer's own controls are bottom-**right** and escape this only because a shelf heading is
-  short — do not read their position as a precedent for anything on the left.
+  The hero's own trailer controls used to sit bottom-**right** and escaped this only because a shelf
+  heading is short; they are gone now, so there is no precedent there for anything on the left.
 - The browser suite therefore runs with `reducedMotion: 'reduce'` set in `playwright.config.ts`.
   Without it the auto-playing trailer puts a third-party iframe on `/` — a page a dozen tests visit
   only to get a base URL for a `fetch` — where the response watchdog fails any 4xx in any frame,
@@ -227,8 +282,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   it saturates a CPU, so running several makes them all slower rather than finishing sooner.
 - **Nothing transcodes on its own.** A 200-file drop flags what needs converting and stops; an admin decides
   when to spend the CPU.
-- Transcode output goes to `derived/tmp/` and is renamed into place **only on success**. A partial file
-  under its final name would be streamed to viewers and read by the next probe as finished.
+- Transcode output goes to a dot-prefixed neighbour of its destination and is renamed into place **only on
+  success**. A partial file under its final name would be streamed to viewers, read by the next probe as
+  finished, and — now that the output lands in the watched tree — ingested as a truncated video.
+- The final name is chosen **after** the encode, not before. A three-hour transcode is easily outlived by a
+  new file appearing in the folder, so a name reserved up front may be taken by the time it is used. The
+  *temporary* name comes from the source stem and is stable throughout, which is what the encode needs.
+- The row is updated **before** the rename, and rolled back to its previous values on failure (a reconvert's
+  previous `playbackKey` is not null, so clearing it would strand the old file). Rename-first leaves a
+  finished `.mp4` that no row claims in a watched folder — and the rename is exactly what wakes the watcher.
+  Reserve-first leaves the column pointing at a file that appears milliseconds later: streaming 404s for an
+  instant, `reclaimSource` refuses because it stats the file, and the delete guard is unreachable because
+  `enqueue` will not convert a reclaimed video at all. Transient against permanent.
 - Cancel sends **SIGKILL**, not SIGTERM: ffmpeg handles SIGTERM by finalising the file it is writing, and a
   cancelled job must not leave something that looks complete.
 - Progress writes to Postgres are throttled to ~1/s. ffmpeg reports several times a second, and a write per
@@ -646,7 +711,31 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   provider labelled `.vtt`. An SRT accepted as a `.vtt` loads as an empty track: the viewer sees the language
   listed and nothing ever appears. (Upload refuses anything else outright; a download converts instead,
   because nobody chose its format.)
-- Exactly one `isDefault` per video. `<track default>` on two tracks is undefined behaviour.
+- **At most** one `isDefault` per video. `<track default>` on two tracks is undefined behaviour, and *none*
+  is a legitimate answer — see below.
+- The default track is a property of the **video**, not of a track: `PUT /videos/:id/subtitles/default`,
+  because "no default at all" has no track to carry it and AUTO has to be expressible. `isDefault` is
+  deliberately **not** on `updateSubtitleSchema`; two ways to write one invariant is how they drift.
+- The rule is **English, and only English** (`subtitles/default-track.ts`, pure). A video whose subtitles are
+  all Dutch gets no default rather than an arbitrary one: a default on a language the viewer cannot read is
+  worse than none, since it turns subtitles on and leaves them hunting for the menu that turns them off.
+- English is matched through `toIso6391`, never by string. Extracted tracks carry the container's tag
+  (`eng`) while sidecars carry whatever the filename said (`en`); compared as strings those are two
+  languages, and the rule would skip every embedded track — the majority of them.
+- `Video.subtitleDefaultSource` is the same contract as `posterSource`: **MANUAL is never reapplied over**.
+  Without it a deliberate Dutch default reverts to English the next time anything touches the track list.
+- `refreshAutoDefault` runs wherever that list changes — after extraction (**once, after the whole set**;
+  inside the loop it answers from a half-registered list), after sidecar binding, after an upload, and after
+  a removal. That last is not tidiness: nothing else promotes a replacement, so deleting the default used to
+  leave a video with none and no route back.
+- The container's `disposition.default` decides **nothing**. It meant the default was whatever the encoder
+  set — often a forced-subtitle track, and on a two-flagged container whichever stream was processed last.
+- The tie-break between two English tracks is **total**, ending on the id. Same-label collisions are normal
+  (an extracted track and a sidecar for one language), and a default that moves between scans reads as a
+  rendering bug for weeks.
+- A **downloaded** track goes through the same rule: `installDownloaded` calls `refreshAutoDefault` exactly
+  as an upload does, so fetching an English subtitle for a video that had none lights it up, and an admin's
+  MANUAL choice survives it. `fetchSubtitleSchema` therefore carries no `isDefault` either.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
 - Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can
@@ -1016,6 +1105,43 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   request and no results, so a page that destructures only `{ data }` renders an outage as "No rows yet" or
   "Nothing here yet" — which sends whoever reads it looking in entirely the wrong place. Take `error` too
   and check it **before** the empty state.
+- The **same rule applies while a request is still out**, which is what the skeletons are for. Viewer pages
+  pass `{ lazy: true }` so a client-side navigation paints at once instead of leaving the previous screen
+  frozen — and the moment they do, "no data yet" and "no data" become the same `null` again. The branch order
+  is **error → content → skeleton → empty**: content before the skeleton so a refetch (browse's filters,
+  requests' status) keeps the rows already on screen rather than collapsing them to placeholders, and the
+  empty state last so it is only reached once the request has genuinely succeeded with nothing in it.
+- Test that with `status !== 'success'`, **never `status === 'pending'`**. `status` is initialised to `idle`
+  and only becomes `pending` when the fetch actually starts (`asyncData.js` lines 309, 330), and under `lazy`
+  the fetch is deferred to `onBeforeMount` — so on the one frame the placeholder exists to fill, `pending` is
+  false. `pendingWhenIdle` defaults to false in Nuxt 4, so the `pending` ref is merely that same comparison.
+- **`lazy: true` costs SSR nothing** — checked in `node_modules/nuxt/dist/app/composables/asyncData.js` and
+  worth not re-deriving. The server branch (lines 85–91) calls `initialFetch()` and registers
+  `onServerPrefetch` **without consulting `lazy`**; only `server: false` would skip it. So a hard load still
+  blocks and still ships the real content, hydration reads it from the payload with `status` already
+  `success` (line 108), and only a client-side navigation sees a placeholder. The `await` at each call site
+  can stay: `useAsyncData` always returns a thenable, but under `lazy` on the client the underlying promise
+  does not exist yet, so it settles on the next microtask rather than on the network.
+- A fetch that decides **what a URL is** stays blocking. `c/[collection]/[...path]`'s `resolve` answers 404
+  and 301s a shared collection link to the video's own page; painting an episode grid and then redirecting
+  out of it is worse than the pause. Its second request only fills a page that resolve has already committed
+  to, so that is the one that goes `lazy`.
+- Making a primary fetch `lazy` **breaks a `throw createError` in setup**, silently. `error` is null there
+  because the request has not been made, so the throw never fires and a missing record renders the page's own
+  fallback instead of Nuxt's error page. Move it to `watch(error, …, { immediate: true })` calling
+  `showError` — outside setup there is nothing left to throw to, and `immediate` covers the server, where the
+  fetch does block and the error is already present.
+- **Do not use `USkeleton`.** It hardcodes `role="alert"`, `aria-live="polite"` and `aria-label="loading"` on
+  every instance with no prop to disable them, so a grid of twenty placeholders is twenty live regions all
+  announcing themselves — the same trap as `USelectMenu`'s built-in `aria-label` shadowing its visible text.
+  Its theme resolves to exactly the three declarations `.skeleton` carries in `main.css`, so nothing is given
+  up; the skeleton components put **one** `role="status"` on the container instead.
+- A skeleton is a textless, non-interactive `<div>` with a solid `background-color`. Never a gradient
+  shimmer: `visible.spec.ts` stops resolving a backdrop at the first `background-image` and returns null,
+  which silently exempts that element **and every descendant** from the border and text-contrast checks — a
+  shimmer buys a green audit by blinding it. Never an `<a>`/`<button>` either, which the audit *does* check
+  for an effective opacity below 0.35. And the pulse is decoration: the global reduced-motion reset stops it,
+  so the resting colour has to read as a placeholder on its own.
 - **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every control
   on the page cleared AA — the worst was 5.78:1 and the `Edit` buttons measured 6.19:1. The formula weights
   red at 0.2126, so saturated red text on near-black scores well and reads badly at 12–14px. The fix was to

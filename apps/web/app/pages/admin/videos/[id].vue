@@ -41,6 +41,8 @@ interface VideoDetail {
   probeError: string | null
   posterSource: string
   bannerSource: string
+  /** AUTO lets the English rule pick the default track; MANUAL is a hand-made choice. */
+  subtitleDefaultSource: string
   trailerYoutubeId: string | null
   playbackKey: string | null
   storageKey: string
@@ -455,9 +457,16 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         </UCard>
 
         <UCard>
+          <!--
+            `defaultSource` lives on the video, not on a track, so it comes from
+            here; `changed` is what tells this page to re-read it after the
+            panel has altered the track list or the choice.
+          -->
           <SubtitleTracks
             :video-id="id"
+            :default-source="video.subtitleDefaultSource"
             @extract="act('/extract-subtitles', 'POST', 'Extraction queued')"
+            @changed="refresh"
           />
         </UCard>
       </div>

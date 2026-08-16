@@ -421,18 +421,23 @@ describe('Ingest (real database)', () => {
         where: { id: video.id },
         data: {
           state: 'PUBLISHED',
-          playbackKey: 'converted/inception.mp4',
+          playbackKey: 'disk1/Inception/Inception.converted.mp4',
           sourceDeletedAt: new Date(),
         },
       });
 
+      // What is actually left in the folder after a reclaim: the converted file
+      // and nothing else.
       await remove('disk1/Inception/Inception.mp4');
+      await put('disk1/Inception/Inception.converted.mp4');
       const summary = await reconcile.run();
 
       expect(summary.markedMissing).toBe(0);
       await expect(prisma.video.findUniqueOrThrow({ where: { id: video.id } })).resolves.toMatchObject(
         { state: 'PUBLISHED' },
       );
+      // And the converted file did not become a video of its own.
+      await expect(prisma.video.count()).resolves.toBe(1);
     });
 
     // Half an exemption is no exemption: without a playbackKey there is nothing
@@ -544,6 +549,117 @@ describe('Ingest (real database)', () => {
       await reconcile.run();
 
       expect(await videos()).toHaveLength(0);
+    });
+  });
+
+  /**
+   * The converted MP4 is the one piece of generated output that lives inside
+   * the watched tree, beside the source it came from. Nothing about its name
+   * says so — the only thing marking it as ours is a row claiming it as
+   * `playbackKey`, and these are the ways that claim has to hold.
+   */
+  describe('converted files the library wrote itself', () => {
+    /** Puts a source and the converted file the library would write beside it. */
+    async function convert(source: string, converted: string): Promise<string> {
+      await put(source);
+      await reconcile.run();
+      const [video] = await videos();
+      await prisma.video.update({ where: { id: video.id }, data: { playbackKey: converted } });
+      await put(converted);
+      return video.id;
+    }
+
+    it('does not ingest a converted file sitting beside its source', async () => {
+      await convert('disk1/Heat/Heat.mkv', 'disk1/Heat/Heat.mp4');
+
+      const summary = await reconcile.run();
+
+      expect(await videos()).toHaveLength(1);
+      expect(summary.created).toBe(0);
+      expect(summary.issues).toBe(0);
+    });
+
+    /**
+     * Worse than a spurious row. The shape rule counts the video files in a
+     * folder, so a converted file makes a one-film folder look like a
+     * collection — and the film gets filed as an episode of itself.
+     */
+    it('does not file the film as an episode of itself', async () => {
+      const videoId = await convert('disk1/Heat/Heat.mkv', 'disk1/Heat/Heat.mp4');
+
+      await reconcile.run();
+
+      // One video, in at most one collection, and that video is the source.
+      const entries = await prisma.collectionVideo.findMany({ select: { videoId: true } });
+      expect(entries.every((entry) => entry.videoId === videoId)).toBe(true);
+      expect(await videos()).toHaveLength(1);
+      await expect(prisma.season.count()).resolves.toBe(0);
+    });
+
+    /** A sidecar beside both files belongs to the source, not to the output. */
+    it('does not bind subtitles to a converted file', async () => {
+      const videoId = await convert('disk1/Heat/Heat.mkv', 'disk1/Heat/Heat.mp4');
+      await put('disk1/Heat/Heat_en_English.srt', 'WEBVTT\n');
+
+      await reconcile.run();
+
+      const subtitles = await prisma.subtitle.findMany({ select: { videoId: true } });
+      expect(subtitles).toHaveLength(1);
+      expect(subtitles[0].videoId).toBe(videoId);
+    });
+
+    /**
+     * A move follows the source and leaves the converted file where it was, so
+     * the old output must not then be read as the source arriving somewhere new.
+     */
+    it('does not mistake a converted file for a moved source', async () => {
+      await convert('disk1/Heat/Heat.mkv', 'disk1/Heat/Heat.mp4');
+
+      await remove('disk1/Heat/Heat.mkv');
+      await put('disk1/Heat/Heat (1995).mkv');
+      const summary = await reconcile.run();
+
+      expect(summary.moved).toBe(1);
+      expect(await videos()).toHaveLength(1);
+    });
+
+    /**
+     * A job that crashed between reserving its key and renaming the file leaves
+     * output no row claims yet. Its `outputKey` is the other half of the claim.
+     */
+    it('skips output a running job has already claimed', async () => {
+      await put('disk1/Heat/Heat.mkv');
+      await reconcile.run();
+      const [video] = await videos();
+      await prisma.mediaJob.create({
+        data: {
+          videoId: video.id,
+          type: 'TRANSCODE',
+          status: 'RUNNING',
+          outputKey: 'disk1/Heat/Heat.mp4',
+        },
+      });
+      await put('disk1/Heat/Heat.mp4');
+
+      const summary = await reconcile.run();
+
+      expect(await videos()).toHaveLength(1);
+      expect(summary.created).toBe(0);
+    });
+
+    /**
+     * The filter is on stored keys and nothing else. A real second file an
+     * admin drops in must still be ingested — a name-based rule would swallow
+     * it silently and forever, which is the worse failure by far.
+     */
+    it('still ingests an unclaimed file with the same stem', async () => {
+      await put('disk1/Heat/Heat.mkv');
+      await reconcile.run();
+      await put('disk1/Heat/Heat.mp4');
+
+      await reconcile.run();
+
+      expect(await videos()).toHaveLength(2);
     });
   });
 

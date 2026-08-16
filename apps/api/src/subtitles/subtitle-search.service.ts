@@ -134,7 +134,7 @@ export class SubtitleSearchService {
   /** Downloads the chosen candidate and installs it as a track on the video. */
   async install(
     videoId: string,
-    input: { fileId: string; language: string; label?: string; isDefault?: boolean },
+    input: { fileId: string; language: string; label?: string },
   ) {
     this.assertConfigured();
     await this.load(videoId);
@@ -151,7 +151,6 @@ export class SubtitleSearchService {
       // A track with no name in the picker is worse than a generic one; the
       // language's own name is what a viewer expects to read anyway.
       label: input.label?.trim() || languageName(language) || language.toUpperCase(),
-      isDefault: input.isDefault ?? false,
     });
   }
 

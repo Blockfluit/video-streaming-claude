@@ -75,15 +75,24 @@ const from = computed(() => {
   return typeof named === 'string' && named.length > 0 ? named : null
 })
 
-const { data: video, error } = await useApiData<VideoDetail>(
+const { data: video, error, status } = await useApiData<VideoDetail>(
   () => `playback-${slug.value}`,
   () => `/videos/by-slug/${encodeURIComponent(slug.value)}`,
-  { watch: [slug] },
+  // `lazy`, like the two requests below it already are — pressing Play should
+  // open the player's frame at once rather than leaving the page you pressed it
+  // on sitting there.
+  { watch: [slug], lazy: true },
 )
 
-if (error.value) {
-  throw createError({ statusCode: 404, statusMessage: 'No such video', fatal: true })
-}
+/*
+ * In a watcher, and `showError` rather than a throw: `lazy` means the request
+ * has not been made when setup runs, so `error` is null here on a client-side
+ * navigation. `immediate` preserves the server's behaviour, where the fetch
+ * blocks and the error is already present.
+ */
+watch(error, (failure) => {
+  if (failure) showError({ statusCode: 404, statusMessage: 'No such video', fatal: true })
+}, { immediate: true })
 
 /**
  * The collection this was reached through, for what comes before and after.
@@ -390,6 +399,49 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
           :current-time="currentTime"
           @seek="seconds => player?.seek?.(seconds)"
         />
+      </div>
+    </div>
+  </div>
+
+  <!--
+    The player's frame, before there is anything to put in it.
+
+    It reuses the same grid and the same `expectsRail` sizing as the real page,
+    which is the whole point: the 16:9 box lands exactly where the video will,
+    so the picture appears inside a frame that is already there rather than
+    shoving the page around as it arrives. `expectsRail` is read from the URL
+    rather than from the response, so it is already correct at this point.
+  -->
+  <div
+    v-else-if="status !== 'success'"
+    class="page-shell pt-24 pb-24"
+    role="status"
+    aria-label="Loading the player"
+  >
+    <div
+      class="grid gap-x-8 gap-y-6 lg:items-start"
+      :class="expectsRail
+        ? 'lg:grid-cols-[minmax(0,1fr)_22rem]'
+        : 'mx-auto w-full max-w-[min(100%,calc((100dvh-13rem)*16/9))]'"
+    >
+      <div class="min-w-0 space-y-6">
+        <div class="skeleton h-5 w-64" />
+        <div class="skeleton aspect-video w-full rounded-lg" />
+        <div class="space-y-3">
+          <div class="skeleton h-7 w-2/5" />
+          <div class="skeleton h-4 w-full max-w-2xl" />
+        </div>
+      </div>
+
+      <div v-if="expectsRail" class="space-y-2">
+        <div class="skeleton h-6 w-36" />
+        <div v-for="index in 5" :key="index" class="flex gap-3 rounded-md p-2">
+          <div class="skeleton aspect-video w-28 shrink-0" />
+          <div class="min-w-0 grow space-y-2 py-1">
+            <div class="skeleton h-4 w-3/4" />
+            <div class="skeleton h-3 w-1/2" />
+          </div>
+        </div>
       </div>
     </div>
   </div>

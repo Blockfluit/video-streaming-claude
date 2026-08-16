@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
@@ -19,11 +20,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   MAX_SUBTITLE_BYTES,
   fetchSubtitleSchema,
+  setDefaultSubtitleSchema,
   subtitleSearchSchema,
   toPage,
   updateSubtitleSchema,
   uploadSubtitleSchema,
   type FetchSubtitleInput,
+  type SetDefaultSubtitleInput,
   type SubtitleSearchInput,
   type UpdateSubtitleInput,
   type UploadSubtitleInput,
@@ -186,6 +189,25 @@ export class SubtitlesController {
     @Body(validate(fetchSubtitleSchema)) dto: FetchSubtitleInput,
   ) {
     return this.search.install(videoId, dto);
+  }
+
+  /**
+   * Which track carries `default` — or that the choice is automatic again.
+   *
+   * On the **video**, not on a track: "no default at all" is a real choice with
+   * no track to carry it, and AUTO has to be expressible or a hand-picked
+   * default could never be handed back to the English rule.
+   *
+   * Returns the refreshed list, so the screen re-renders from what the server
+   * decided rather than from what it hoped would happen.
+   */
+  @Put('videos/:videoId/subtitles/default')
+  @Roles('ADMIN')
+  setDefault(
+    @Param('videoId') videoId: string,
+    @Body(validate(setDefaultSubtitleSchema)) dto: SetDefaultSubtitleInput,
+  ) {
+    return this.subtitles.setDefaultTrack(videoId, dto);
   }
 
   @Patch('subtitles/:id')

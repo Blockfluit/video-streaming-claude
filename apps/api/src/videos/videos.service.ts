@@ -14,7 +14,13 @@ import { StorageService } from '../common/storage.service';
 import { titleUpdate } from '../common/title';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import { derivedKeysToDelete, mediaKeysToDelete, subtitleDirectoryKey } from './deletion';
+import { playbackRoot } from '../transcode/converted-key';
+import {
+  derivedKeysToDelete,
+  mediaKeysToDelete,
+  playbackKeysToDelete,
+  subtitleDirectoryKey,
+} from './deletion';
 import { validateMarkers, type Markers } from './markers';
 
 /**
@@ -100,6 +106,8 @@ const VIDEO_SELECT = {
   posterSource: true,
   bannerKey: true,
   bannerSource: true,
+  // So the editor can say whether the default track is a choice or a rule.
+  subtitleDefaultSource: true,
   trailerYoutubeId: true,
   introStartSec: true,
   introEndSec: true,
@@ -315,7 +323,7 @@ export class VideosService {
       !deleteFiles
       && video.sourceDeletedAt !== null
       && converted !== null
-      && (await this.storage.exists('derived', converted))
+      && (await this.storage.exists(playbackRoot(converted), converted))
     ) {
       throw new BadRequestException(
         'The converted file is the only copy of this video, because its source was reclaimed. '
@@ -329,6 +337,18 @@ export class VideosService {
       await this.storage.delete('derived', key);
     }
     await this.storage.delete('derived', subtitleDirectoryKey(id));
+
+    /*
+     * Before the `deleteFiles` gate, not after it.
+     *
+     * The converted file sits in the watched tree, and the only thing that kept
+     * ingest from reading it as a video was the row that just stopped existing.
+     * Leaving it behind on a recoverable delete would put the entry straight
+     * back on the next scan, under a new id and with none of its history.
+     */
+    for (const key of playbackKeysToDelete(video)) {
+      await this.storage.delete(playbackRoot(key), key);
+    }
 
     if (!deleteFiles) return;
 

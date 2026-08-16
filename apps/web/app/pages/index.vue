@@ -81,13 +81,33 @@ interface HomeRow {
  * setup and never derives it from the path, so a key left saying "featured"
  * over a `/library` request is a payload key that lies for good.
  */
-const [{ data: rows, error: rowsError }, { data: newest, error: newestError }]
-  = await Promise.all([
-    useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20'),
-    useApiData<Page<LibraryCard>>('home-newest', `/library?sort=added&limit=${HERO_LIMIT}`),
-  ])
+const [
+  { data: rows, error: rowsError, status: rowsStatus },
+  { data: newest, error: newestError, status: newestStatus },
+] = await Promise.all([
+  useApiData<Page<HomeRow>>('home-rows', '/lists?limit=20', { lazy: true }),
+  useApiData<Page<LibraryCard>>(
+    'home-newest',
+    `/library?sort=added&limit=${HERO_LIMIT}`,
+    { lazy: true },
+  ),
+])
 
 const failed = computed(() => rowsError.value ?? newestError.value ?? null)
+
+/**
+ * Still waiting on the first answer.
+ *
+ * Both requests, because the hero is drawn from one and the shelves from the
+ * other and a half-built home page is worse than a placeholder for a moment
+ * longer. Neither is watched, so this only describes the first load — there is
+ * no refetch here whose results this could throw away.
+ *
+ * `!== 'success'` rather than `=== 'pending'`: under `lazy` the fetch has not
+ * started when this component first renders, so the status is still `idle` and
+ * a `pending` test would leave the frame blank.
+ */
+const loading = computed(() => rowsStatus.value !== 'success' || newestStatus.value !== 'success')
 
 /**
  * A row that resolves to nothing is not rendered.
@@ -193,6 +213,25 @@ const motion = ref(true)
 const fill = computed(() =>
   motion.value ? Math.min(rotation.value.elapsedMs / ROTATE_MS, 1) : 1,
 )
+
+/**
+ * Restart this entry's turn the moment its trailer actually becomes visible.
+ *
+ * The turn is ten seconds and a YouTube embed, measured against the real thing,
+ * takes **five to nine** just to fire `load` — so the hero was moving on at
+ * about the moment there was finally something to watch, and the page read as
+ * though the trailer never played at all. (`onStateChange` never arrives, so
+ * there is no earlier signal to key on; the embed says nothing until it loads.)
+ *
+ * Once per entry, which the `revealed` emit already guarantees, and only while
+ * the carousel is running: resetting the clock repeatedly would be a hero that
+ * never advances. An entry whose trailer never loads keeps the ordinary ten
+ * seconds, so a dead embed cannot freeze the rotation.
+ */
+function giveTheTrailerItsTurn(): void {
+  if (!rotating.value) return
+  rotation.value = { ...rotation.value, elapsedMs: 0 }
+}
 
 let frame: number | undefined
 let last = 0
@@ -324,6 +363,7 @@ useHead({ title: 'Home' })
       :image="hero.image"
       :trailer-id="hero.trailerId"
       :paused="trailerOpen"
+      @revealed="giveTheTrailerItsTurn"
       @pointerenter="hovering = true"
       @pointerleave="hovering = false"
       @focusin="hovering = true"
@@ -446,10 +486,46 @@ useHead({ title: 'Home' })
       </div>
     </HeroBackdrop>
 
+    <!--
+      The hero's own box, while there is nothing to put in it.
+
+      Same band as `HeroBackdrop`'s `wide` size and the same `page-shell` inside
+      it, so the shelves below start at the height they will keep. A hero that
+      appears and shoves the page down is the reflow this whole change exists to
+      avoid, and it is the most visible one on the site.
+    -->
+    <section
+      v-else-if="loading"
+      class="relative flex h-[58vh] min-h-100 w-full items-center overflow-hidden bg-(--ui-bg-muted)"
+      role="status"
+      aria-label="Loading the library"
+    >
+      <div class="page-shell w-full">
+        <div class="max-w-xl space-y-4">
+          <div class="skeleton h-3 w-32" />
+          <div class="skeleton h-12 w-4/5 sm:h-16" />
+          <div class="skeleton h-4 w-48" />
+          <div class="flex items-center gap-3 pt-2">
+            <div class="skeleton h-10 w-32 rounded-lg" />
+            <div class="skeleton h-10 w-28 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div
       class="page-shell space-y-8 pb-24"
-      :class="hero ? 'relative z-1 -mt-16' : 'pt-24'"
+      :class="hero || loading ? 'relative z-1 -mt-16' : 'pt-24'"
     >
+      <!--
+        Three, which is about a screenful. The real count is unknowable until
+        the rows arrive and guessing high would fill the page with placeholders
+        for shelves that may not exist.
+      -->
+      <template v-if="loading">
+        <SkeletonRow v-for="index in 3" :key="index" />
+      </template>
+
       <MediaRow
         v-for="(row, index) in shelves"
         :key="row.id"
@@ -476,8 +552,16 @@ useHead({ title: 'Home' })
       </div>
     </div>
 
-    <!-- A new library is empty, and that is a state worth designing for. -->
-    <div v-else-if="isEmpty" class="grid min-h-screen place-items-center px-6 text-center">
+    <!--
+      A new library is empty, and that is a state worth designing for.
+
+      `&& !loading` for the same reason `failed` is checked before it: while the
+      requests are still out every shelf is empty and every hero entry missing,
+      which is indistinguishable from an empty library from here. Without it,
+      arriving at the home page announces "Nothing here yet" over a library full
+      of things, for as long as the fetch takes.
+    -->
+    <div v-else-if="isEmpty && !loading" class="grid min-h-screen place-items-center px-6 text-center">
       <div class="space-y-4">
         <UIcon name="i-lucide-clapperboard" class="size-12 text-(--ui-text-dimmed)" />
         <h1 class="text-2xl font-semibold">Nothing here yet</h1>

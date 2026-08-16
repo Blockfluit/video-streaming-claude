@@ -47,15 +47,30 @@ interface VideoDetail {
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
 
-const { data: video, error } = await useApiData<VideoDetail>(
+const { data: video, error, status } = await useApiData<VideoDetail>(
   () => `video-${slug.value}`,
   () => `/videos/by-slug/${encodeURIComponent(slug.value)}`,
-  { watch: [slug] },
+  // `lazy` so clicking a poster opens this page immediately. It is the most
+  // travelled link in the app, and it was the one that sat on the previous
+  // screen doing nothing.
+  { watch: [slug], lazy: true },
 )
 
-if (error.value) {
-  throw createError({ statusCode: 404, statusMessage: 'No such video', fatal: true })
-}
+/*
+ * The 404, moved out of setup.
+ *
+ * `lazy` means the request has not been made when setup runs, so `error` is
+ * null here on a client-side navigation and a `throw` would simply never fire —
+ * a missing video would render the page's own "not found" fallback instead of
+ * Nuxt's error page. A watcher sees the failure whenever it lands.
+ *
+ * `showError` rather than `throw createError`, because outside setup there is
+ * nothing left to throw to. `immediate` covers the server, where the fetch
+ * *does* block and the error is already present by the time this runs.
+ */
+watch(error, (failure) => {
+  if (failure) showError({ statusCode: 404, statusMessage: 'No such video', fatal: true })
+}, { immediate: true })
 
 /** The collection the "more from" shelf is drawn from, when there is one. */
 const primary = computed(() => video.value?.collections?.[0] ?? null)
@@ -342,4 +357,33 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
       </MediaRow>
     </div>
   </div>
+
+  <!--
+    The title band, waiting.
+
+    Mirrors the `full` hero above it — same `min-h-[88svh]`, same padding, text
+    on the floor of the frame — so the real page does not jump up the screen
+    when it arrives. A 404 is handled by the watcher in the script and replaces
+    this whole page with Nuxt's error page, so this only ever stands in for a
+    request that is still in flight.
+  -->
+  <section
+    v-else-if="status !== 'success'"
+    class="relative flex min-h-[88svh] w-full items-end overflow-hidden bg-(--ui-bg-muted) pt-28 pb-10"
+    role="status"
+    aria-label="Loading this title"
+  >
+    <div class="page-shell w-full">
+      <div class="max-w-2xl space-y-4">
+        <div class="skeleton h-3 w-40" />
+        <div class="skeleton h-12 w-3/4 sm:h-16" />
+        <div class="skeleton h-4 w-56" />
+        <div class="skeleton h-4 w-full max-w-xl" />
+        <div class="flex items-center gap-3 pt-2">
+          <div class="skeleton h-10 w-32 rounded-lg" />
+          <div class="skeleton h-10 w-28 rounded-lg" />
+        </div>
+      </div>
+    </div>
+  </section>
 </template>

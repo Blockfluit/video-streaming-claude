@@ -9,6 +9,7 @@ import { isKnownLanguage } from '../common/language';
 import { StorageService } from '../common/storage.service';
 import { FfmpegService } from '../media/ffmpeg.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { pickDefaultTrack } from './default-track';
 import { isProbablyUtf8, isWebVtt } from './vtt';
 
 /** A video with more tracks than this has a problem the picker cannot fix. */
@@ -252,7 +253,6 @@ export class SubtitlesService {
     format: string;
     language: string;
     label: string;
-    isDefault: boolean;
   }) {
     const video = await this.prisma.video.findUnique({
       where: { id: input.videoId },
@@ -309,7 +309,13 @@ export class SubtitlesService {
             select: SUBTITLE_SELECT,
           });
 
-      if (input.isDefault) await this.setDefault(saved.id);
+      /*
+       * The same rule an upload follows: downloading an English track into a
+       * video that had no default should light it up, rather than leaving the
+       * admin to go and say so separately. It respects a MANUAL choice, so an
+       * admin who has already picked one keeps it.
+       */
+      await this.refreshAutoDefault(input.videoId);
 
       return { ...saved, languageKnown: isKnownLanguage(language) };
     } catch (error) {
@@ -336,7 +342,6 @@ export class SubtitlesService {
     storageKey: string;
     language: string;
     label: string;
-    isDefault: boolean;
   }): Promise<void> {
     const existing = await this.prisma.subtitle.findFirst({
       where: { videoId: track.videoId, storageKey: track.storageKey },
@@ -354,7 +359,16 @@ export class SubtitlesService {
     }
 
     try {
-      const created = await this.prisma.subtitle.create({
+      /**
+       * No `isDefault` here, and none read off the container either.
+       *
+       * The disposition flag used to decide this, which meant the default was
+       * whatever the encoder happened to set — often a forced-subtitle track,
+       * and on a two-flagged container simply whichever stream was processed
+       * last. `refreshAutoDefault` decides it once, for the whole set, after
+       * the job has registered every track.
+       */
+      await this.prisma.subtitle.create({
         data: {
           videoId: track.videoId,
           language: track.language,
@@ -365,8 +379,6 @@ export class SubtitlesService {
         },
         select: { id: true },
       });
-
-      if (track.isDefault) await this.setDefault(created.id);
     } catch (error) {
       // A sidecar may already claim this language and label. That is a
       // duplicate, not a reason to fail the extraction job.
@@ -380,7 +392,7 @@ export class SubtitlesService {
   async forgetMissingSidecars(presentSourceKeys: Set<string>): Promise<number> {
     const ingested = await this.prisma.subtitle.findMany({
       where: { origin: 'INGEST', sourceKey: { not: null } },
-      select: { id: true, sourceKey: true, storageKey: true },
+      select: { id: true, videoId: true, sourceKey: true, storageKey: true },
     });
 
     const gone = ingested.filter((subtitle) => !presentSourceKeys.has(subtitle.sourceKey as string));
@@ -392,6 +404,13 @@ export class SubtitlesService {
       await this.prisma.subtitle.delete({ where: { id: subtitle.id } });
     }
 
+    // One of those may have been the default. Re-deriving per affected video —
+    // rather than for the whole library — keeps a scan that removed nothing
+    // from writing anything.
+    for (const videoId of new Set(gone.map((subtitle) => subtitle.videoId))) {
+      await this.refreshAutoDefault(videoId);
+    }
+
     return gone.length;
   }
 
@@ -399,7 +418,7 @@ export class SubtitlesService {
   async upload(
     videoId: string,
     file: Buffer,
-    input: { language: string; label: string; isDefault?: boolean },
+    input: { language: string; label: string },
   ) {
     const video = await this.prisma.video.findUnique({ where: { id: videoId }, select: { id: true } });
     if (!video) throw new NotFoundException('No such video');
@@ -427,61 +446,161 @@ export class SubtitlesService {
       select: SUBTITLE_SELECT,
     });
 
-    if (input.isDefault) await this.setDefault(created.id);
+    // Uploading an English track into a video that had none should light it up,
+    // rather than leaving the admin to go and say so separately.
+    await this.refreshAutoDefault(videoId);
 
     return { ...created, languageKnown: isKnownLanguage(language) };
   }
 
-  async update(
-    id: string,
-    input: { language?: string; label?: string; isDefault?: boolean },
-  ) {
-    const subtitle = await this.prisma.subtitle.findUnique({ where: { id }, select: { id: true } });
+  /**
+   * Renaming a track, or correcting its language.
+   *
+   * Deliberately **not** how the default is set — that is
+   * `PUT /videos/:id/subtitles/default`, because the choice belongs to the
+   * video and "no default" has no track to carry it. Two ways to write one
+   * invariant is how the two drift apart.
+   *
+   * A corrected language can change which track the rule would pick, so the
+   * auto default is re-derived afterwards.
+   */
+  async update(id: string, input: { language?: string; label?: string }) {
+    const subtitle = await this.prisma.subtitle.findUnique({
+      where: { id },
+      select: { id: true, videoId: true },
+    });
     if (!subtitle) throw new NotFoundException('No such subtitle');
 
-    if (input.isDefault === true) await this.setDefault(id);
-
-    return this.prisma.subtitle.update({
+    const updated = await this.prisma.subtitle.update({
       where: { id },
       data: {
         language: input.language?.trim().toLowerCase(),
         label: input.label,
-        ...(input.isDefault === false ? { isDefault: false } : {}),
       },
       select: SUBTITLE_SELECT,
     });
+
+    await this.refreshAutoDefault(subtitle.videoId);
+
+    return updated;
   }
 
   async remove(id: string): Promise<void> {
     const subtitle = await this.prisma.subtitle.findUnique({
       where: { id },
-      select: { id: true, storageKey: true },
+      select: { id: true, videoId: true, storageKey: true },
     });
     if (!subtitle) throw new NotFoundException('No such subtitle');
 
     await this.storage.delete('derived', subtitle.storageKey);
     await this.prisma.subtitle.delete({ where: { id } });
+
+    // The one that just went may have been the default, and nothing else would
+    // ever promote a replacement.
+    await this.refreshAutoDefault(subtitle.videoId);
   }
 
   /**
-   * Exactly one default per video.
+   * At most one default per video, and exactly the one asked for.
    *
    * `<track default>` on two tracks is undefined behaviour — the browser picks
-   * one, and which it picks is not something to leave to chance.
+   * one, and which it picks is not something to leave to chance. Both
+   * statements go in one transaction so no reader ever sees the moment between
+   * clearing the old default and setting the new one.
+   *
+   * `null` is a real argument, not a degenerate case: "no default at all" is
+   * both what the English rule returns for a video with no English track and
+   * what an admin can choose deliberately.
    */
-  private async setDefault(id: string): Promise<void> {
-    const subtitle = await this.prisma.subtitle.findUniqueOrThrow({
-      where: { id },
-      select: { videoId: true },
-    });
-
+  private async applyDefault(videoId: string, subtitleId: string | null): Promise<void> {
     await this.prisma.$transaction([
       this.prisma.subtitle.updateMany({
-        where: { videoId: subtitle.videoId },
+        where: { videoId, isDefault: true },
         data: { isDefault: false },
       }),
-      this.prisma.subtitle.update({ where: { id }, data: { isDefault: true } }),
+      ...(subtitleId === null
+        ? []
+        : [this.prisma.subtitle.update({ where: { id: subtitleId }, data: { isDefault: true } })]),
     ]);
+  }
+
+  /**
+   * Re-derives the default track, unless an admin has taken the decision.
+   *
+   * Called wherever a video's track list changes — extraction, sidecar binding,
+   * upload, deletion — because the rule reads the whole set and any of those
+   * can change the answer. Deleting the current default is the case that makes
+   * it necessary rather than merely tidy: without this, removing an English
+   * track leaves a video with no default and no way back to one.
+   *
+   * MANUAL is never reapplied over, the same contract as a hand-picked poster.
+   * Losing a deliberate choice to a routine rescan is the thing that makes
+   * curation feel unsafe.
+   */
+  async refreshAutoDefault(videoId: string): Promise<void> {
+    const video = await this.prisma.video.findUnique({
+      where: { id: videoId },
+      select: { subtitleDefaultSource: true },
+    });
+    if (!video || video.subtitleDefaultSource === 'MANUAL') return;
+
+    const tracks = await this.prisma.subtitle.findMany({
+      where: { videoId },
+      select: { id: true, language: true, label: true, isDefault: true },
+    });
+
+    const wanted = pickDefaultTrack(tracks);
+    const current = tracks.find((track) => track.isDefault)?.id ?? null;
+
+    // A scan that changed nothing must write nothing — this runs once per video
+    // whose sidecars were touched, on every pass.
+    if (wanted === current) return;
+
+    await this.applyDefault(videoId, wanted);
+  }
+
+  /**
+   * An admin choosing the default, or handing the choice back to the rule.
+   *
+   * The choice belongs to the video rather than to a track: "no default" has no
+   * track to carry it, and the AUTO/MANUAL flag has to live somewhere a track
+   * being deleted cannot take with it.
+   */
+  async setDefaultTrack(
+    videoId: string,
+    input: { mode: 'AUTO' | 'MANUAL'; subtitleId?: string | null },
+  ): Promise<Page<unknown>> {
+    const video = await this.prisma.video.findUnique({ where: { id: videoId }, select: { id: true } });
+    if (!video) throw new NotFoundException('No such video');
+
+    if (input.mode === 'AUTO') {
+      await this.prisma.video.update({
+        where: { id: videoId },
+        data: { subtitleDefaultSource: 'AUTO' },
+      });
+      await this.refreshAutoDefault(videoId);
+      return this.list(videoId);
+    }
+
+    const subtitleId = input.subtitleId ?? null;
+
+    if (subtitleId !== null) {
+      // Reached through the video, so a subtitle id from elsewhere is a 404
+      // rather than a way to act on a video the caller did not name.
+      const track = await this.prisma.subtitle.findFirst({
+        where: { id: subtitleId, videoId },
+        select: { id: true },
+      });
+      if (!track) throw new NotFoundException('No such subtitle');
+    }
+
+    await this.prisma.video.update({
+      where: { id: videoId },
+      data: { subtitleDefaultSource: 'MANUAL' },
+    });
+    await this.applyDefault(videoId, subtitleId);
+
+    return this.list(videoId);
   }
 }
 

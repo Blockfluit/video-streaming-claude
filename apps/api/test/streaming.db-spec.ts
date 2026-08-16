@@ -277,10 +277,34 @@ describe('Streaming (real database)', () => {
     it('prefers the converted playback file over the source', async () => {
       const converted = Buffer.from('converted-mp4-body');
       const video = await seedVideo('Inception');
-      await storage.save('derived', 'films/inception.mp4', converted);
+      await storage.save('media', 'films/inception.mp4', converted);
       await prisma.video.update({
         where: { id: video.id },
         data: { playbackKey: 'films/inception.mp4', playbackMime: 'video/mp4' },
+      });
+
+      const response = await admin.get(`/videos/${video.id}/stream`).expect(200);
+
+      expect(Buffer.from(response.body).equals(converted)).toBe(true);
+    });
+
+    /**
+     * A row whose file has not been relocated yet still plays.
+     *
+     * Converted files used to live under `derived/converted/` and now live
+     * beside their source, and the files are moved by an admin endpoint rather
+     * than by a migration — a transcode costs hours of CPU and cannot be
+     * abandoned the way regenerable artwork was. Between deploying and running
+     * that, both layouts exist, and reading a legacy key as a media key would
+     * 404 every already-converted video in the library.
+     */
+    it('still plays a converted file that has not been relocated yet', async () => {
+      const converted = Buffer.from('legacy-converted-body');
+      const video = await seedVideo('Inception');
+      await storage.save('derived', `converted/${video.id}.mp4`, converted);
+      await prisma.video.update({
+        where: { id: video.id },
+        data: { playbackKey: `converted/${video.id}.mp4`, playbackMime: 'video/mp4' },
       });
 
       const response = await admin.get(`/videos/${video.id}/stream`).expect(200);
@@ -295,7 +319,7 @@ describe('Streaming (real database)', () => {
     it('still plays when the source has been reclaimed', async () => {
       const converted = Buffer.from('converted-mp4-body');
       const video = await seedVideo('Inception');
-      await storage.save('derived', 'films/inception.mp4', converted);
+      await storage.save('media', 'films/inception.mp4', converted);
       await prisma.video.update({
         where: { id: video.id },
         data: {
@@ -311,7 +335,7 @@ describe('Streaming (real database)', () => {
 
     it('sends the playback mime type when there is one', async () => {
       const video = await seedVideo('Inception', { mimeType: 'video/x-matroska' });
-      await storage.save('derived', 'films/inception.mp4', Buffer.from('x'));
+      await storage.save('media', 'films/inception.mp4', Buffer.from('x'));
       await prisma.video.update({
         where: { id: video.id },
         data: { playbackKey: 'films/inception.mp4', playbackMime: 'video/mp4' },
