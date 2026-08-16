@@ -74,3 +74,27 @@ test.describe('the phone viewport itself', () => {
     expect(named(await page.evaluate(AUDIT))).toHaveLength(0)
   })
 })
+
+test.describe('the poster wall', () => {
+
+  /*
+   * Two columns, not one.
+   *
+   * `auto-fill` with an 11rem floor needs a 400px viewport to find room for a
+   * second track, so every phone narrower than that was served one poster per
+   * row at the full width of the screen — a wall of one title. The override is
+   * counted here rather than eyeballed, because the failure looks like a
+   * design choice in a screenshot.
+   */
+  test('is two columns wide on a phone', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const grid = page.locator('.poster-grid').first()
+    await expect(grid).toBeVisible()
+
+    const columns = await grid.evaluate(el =>
+      getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length)
+
+    expect(columns).toBe(2)
+  })
+})

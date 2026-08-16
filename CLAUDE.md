@@ -1005,10 +1005,21 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
   identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
   stretches a three-result search into three enormous posters.
-- **A poster tile is `11rem` at every viewport width.** Letting it grow on large screens was tried — a
-  `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
-  and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
-  enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
+- **A poster tile's floor is `11rem` at every viewport width above 400px.** Letting it grow on large screens
+  was tried — a `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as
+  more of them — and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the
+  app draws, so enlarging them only there makes the page look zoomed. Extra width buys columns and margin,
+  never size.
+  **Below 400px the floor drops and the wall is two explicit columns**, because 11rem cannot fit two tracks
+  there: `.page-shell` leaves 343px at 375px, and two 176px tiles with a 1rem gap need 368px, so `auto-fill`
+  found room for exactly one and every phone got a single poster filling the screen. The exception is a
+  `@media (max-width: 25rem)` override of `grid-template-columns` alone, and it is **continuous** with the
+  rule it bends — at exactly 400px it produces a 176px tile, identical to what `auto-fill` produces one pixel
+  wider, shrinking to 163.5px at 375px. Seven per cent under the floor, against ninety-five per cent over it.
+  Stated as `repeat(2, minmax(0, 1fr))` rather than a `min()` expression inside the `auto-repeat`, so the
+  exception stays bounded and greppable instead of becoming a formula that changes the tile at every width —
+  which is what the `clamp` was removed for. `minmax(0, 1fr)`, never `1fr`: `1fr` is `minmax(auto, 1fr)` and
+  one unbroken title collapses the grid back to a single column.
 - **Every page is `.page-shell` and nothing else.** One width, one gutter scale, the header included — so
   moving between two routes never shifts the content sideways. `/browse` and `/my-list` were briefly given a
   wider variant, on the reasoning that a wall of posters wants width in a way a synopsis does not: at 4K it
@@ -1018,6 +1029,41 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
   middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
   page.
+- **No media query reaches JavaScript.** Every responsive decision is CSS — a `sm:` prefix,
+  `@media (pointer: coarse)`, `@media (hover: hover)`. A `matchMedia` branch deciding *what to render*
+  disagrees with the server, and a hydration mismatch is a `pageerror`, which the suite's
+  `failOnConsoleError` fixture turns into a failure of **every test in the file** rather than of the one
+  that caused it. VueUse's `useMediaQuery` is out for the same reason `refDebounced` is.
+- **`.tap` is for icon-only, destructive, and press-while-moving controls — not for everything.** WCAG
+  2.5.8's 24px floor is already cleared by a text-labelled `size="xs"` button at ~30px with its spacing;
+  what fails is the icon-only set, where a bare `size-5` anchor is 20px. A blanket 44px turns `/browse`'s
+  one row of filter chips into three for no gain. It grows the box with `min-block-size`/`min-inline-size`
+  rather than a `::after` hit-area expander — an expander costs no layout and silently covers its
+  neighbour, stealing the taps of the control next to it in exactly the dense toolbars it gets used in.
+- **`.card-lift:hover` lives inside `@media (hover: hover) and (pointer: fine)`.** Chromium latches
+  `:hover` onto the last element tapped, so unguarded it leaves a card scaled 1.06 and raised long after
+  you have navigated away and come back, until you happen to tap somewhere else.
+- **The start-over sweep cannot be paused on a touchscreen**, since there is no hover and nothing to focus.
+  It runs for 8s instead of 5 (`--offer-seconds` under `@media (pointer: coarse)`), rather than gaining a
+  "keep this" control — a third button inside a two-control overlay on a 343px screen, over video, beside
+  the native control bar. The override goes through the custom property because the reduced-motion
+  exemption restates `animation-duration` from it.
+- **`AUDIT` also measures horizontal overflow**, and it lives in `e2e/audit.ts` rather than in
+  `visible.spec.ts`: importing it *from a spec file* registers that file's tests too, which quietly ran the
+  whole legibility suite under the phone project. `document.documentElement.scrollWidth` against
+  `clientWidth` is the assertion; per-element rectangles are diagnosis, reported only when that fires. A
+  candidate is dropped when any ancestor's computed `overflow-x` is anything but `visible`, which exempts
+  the media rails, the `.no-scrollbar` shelves and the admin tables by **behaviour** rather than by a class
+  allowlist that would drift — and a clipped element is not overflowing anything either. Candidates
+  containing other candidates are dropped, so one bad chip reports once rather than seven times. Use
+  `getAttribute('class')`, never `className`: on an SVG that is an `SVGAnimatedString`, and slicing it
+  throws inside `page.evaluate` as an opaque evaluation failure.
+- **`hasTouch: true` on the `phone` Playwright project is load-bearing.** Without it Chromium reports
+  `pointer: fine` and every `@media (pointer: coarse)` rule in `main.css` goes unexercised while the run
+  stays green. No device preset: `devices['iPhone 14']` implies WebKit — the wrong browser, carrying
+  neither the storage state nor `--autoplay-policy`. `mobile.spec.ts` plants a box that cannot fit and
+  checks the audit names it, because an audit reporting nothing looks exactly like an app with nothing
+  wrong with it.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.
