@@ -106,6 +106,20 @@ describe('OpenSubtitlesClient', () => {
       expect(url).toContain('episode_number=7');
     });
 
+    it('sorts the query parameters, which the API insists on', async () => {
+      // Any other order gets a 301 to the sorted form of the same query.
+      // `fetch` follows it, so this is invisible until you watch the traffic.
+      const fetchImpl = jest.fn().mockResolvedValue(jsonResponse(SEARCH_BODY));
+      const client = clientWith(CONFIGURED, fetchImpl);
+
+      await client.search({ language: 'en', query: 'Twin Peaks', seasonNumber: 2, episodeNumber: 7 });
+
+      const [url] = fetchImpl.mock.calls[0] as FetchArgs;
+      const search = url.slice(url.indexOf('?') + 1);
+      const names = search.split('&').map(pair => pair.split('=')[0] as string);
+      expect(names).toEqual([...names].sort());
+    });
+
     it('maps a result to a candidate, taking the format from the file name', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(jsonResponse(SEARCH_BODY));
       const client = clientWith(CONFIGURED, fetchImpl);
@@ -122,6 +136,35 @@ describe('OpenSubtitlesClient', () => {
         hearingImpaired: false,
         fromHash: true,
       });
+    });
+
+    /**
+     * Real names from a live search. OpenSubtitles' `file_name` is usually a
+     * release name, not a filename, so the thing after the last dot is very
+     * often not an extension at all.
+     */
+    it.each([
+      ['10 Cloverfield Lane (2016).DVD', 'srt'],
+      ['10.Cloverfield.Lane.2016.720p.BluRay.x264-SPARKS', 'srt'],
+      ['Some.Release.en', 'srt'],
+      ['Proper.Name.srt', 'srt'],
+      ['Proper.Name.ASS', 'ass'],
+      ['Proper.Name.vtt', 'vtt'],
+    ])('reads the format of %s as %s', async (fileName, expected) => {
+      const fetchImpl = jest.fn().mockResolvedValue(
+        jsonResponse({
+          data: [
+            {
+              id: '1',
+              attributes: { language: 'en', files: [{ file_id: 1, file_name: fileName }] },
+            },
+          ],
+        }),
+      );
+      const client = clientWith(CONFIGURED, fetchImpl);
+
+      const [candidate] = await client.search({ language: 'en', query: 'x' });
+      expect(candidate?.format).toBe(expected);
     });
 
     it('skips results carrying no downloadable file', async () => {

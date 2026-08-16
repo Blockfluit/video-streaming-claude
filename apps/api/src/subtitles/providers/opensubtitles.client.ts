@@ -93,6 +93,15 @@ export class OpenSubtitlesClient implements SubtitleProvider {
       parameters.set('episode_number', String(query.episodeNumber));
     }
 
+    /*
+     * Alphabetical, because OpenSubtitles answers **301** to any other order and
+     * redirects to the sorted form of the same query. `fetch` follows that, so
+     * an unsorted request still works — it just pays a pointless round trip on
+     * every search, and relies on a redirect preserving the `Api-Key` header.
+     * Confirmed against the live API: insertion order 301s, sorted returns 200.
+     */
+    parameters.sort();
+
     const body = await this.request<{ data?: OpenSubtitlesResult[] }>(
       `${BASE_URL}/subtitles?${parameters.toString()}`,
     );
@@ -283,12 +292,24 @@ function toCandidate(result: OpenSubtitlesResult): SubtitleCandidate | null {
 }
 
 /**
- * SRT unless the name says otherwise — it is what OpenSubtitles overwhelmingly
- * serves, and guessing `vtt` would skip the conversion the file actually needs.
+ * The subtitle formats worth recognising in a file name.
+ *
+ * A closed set, because OpenSubtitles' `file_name` is usually a *release* name
+ * rather than a filename — `10 Cloverfield Lane (2016).DVD` and
+ * `Some.Release.en` both end in something extension-shaped that is not one.
+ * Anything outside this list is not an extension, whatever it looks like.
+ * (Found by searching against the live API, where `.DVD` became a format.)
+ */
+const KNOWN_FORMATS = new Set(['srt', 'vtt', 'ass', 'ssa', 'sub', 'smi', 'sbv']);
+
+/**
+ * SRT unless the name genuinely says otherwise — it is what OpenSubtitles
+ * overwhelmingly serves, and guessing `vtt` would skip the conversion the file
+ * actually needs and then refuse it for not being WebVTT.
  */
 function formatOf(fileName: string | null): string {
   const extension = fileName?.split('.').pop()?.toLowerCase();
-  return extension && /^[a-z0-9]{2,4}$/.test(extension) ? extension : 'srt';
+  return extension && KNOWN_FORMATS.has(extension) ? extension : 'srt';
 }
 
 async function safeBody(response: Response): Promise<string> {
