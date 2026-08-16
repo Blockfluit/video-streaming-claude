@@ -340,7 +340,13 @@ model Video {
 
   // playbackKey is the converted MP4 in DERIVED_ROOT; streaming serves playbackKey ?? storageKey,
   // so the same URL keeps working before and after conversion.
-  playbackKey     String?
+  /// The converted MP4 — in MEDIA_ROOT, beside the source it was made from.
+  ///
+  /// Unique because two rows sharing one file is silent corruption rather than
+  /// an error: both would stream it, and deleting either would take the other's
+  /// only playable copy. Postgres allows many NULLs, so unconverted rows are
+  /// unaffected.
+  playbackKey     String?   @unique
   playbackMime    String?
   needsConversion Boolean   @default(false)
   sourceDeletedAt DateTime? // source reclaimed after conversion — exempt from the missing sweep

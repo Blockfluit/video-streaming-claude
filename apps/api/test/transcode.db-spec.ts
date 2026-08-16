@@ -201,7 +201,7 @@ describe('Transcoding (real ffmpeg)', () => {
 
       const video = await prisma.video.findUniqueOrThrow({ where: { id: videoId } });
       expect(video).toMatchObject({
-        playbackKey: `converted/${videoId}.mp4`,
+        playbackKey: 'Films/show.mp4',
         playbackMime: 'video/mp4',
         needsConversion: false,
       });
@@ -241,7 +241,7 @@ describe('Transcoding (real ffmpeg)', () => {
       await waitForJob(queued.body.id);
 
       const head = (
-        await readFile(storage.resolvePath('derived', `converted/${videoId}.mp4`))
+        await readFile(storage.resolvePath('media', 'Films/show.mp4'))
       ).subarray(0, 1024).toString('latin1');
 
       expect(head).toContain('moov');
@@ -259,7 +259,7 @@ describe('Transcoding (real ffmpeg)', () => {
       expect(job.progress).toBe(1);
       expect(job.startedAt).not.toBeNull();
       expect(job.finishedAt).not.toBeNull();
-      expect(job.outputKey).toBe(`converted/${videoId}.mp4`);
+      expect(job.outputKey).toBe('Films/show.mp4');
     }, 180_000);
 
     it('does not queue a second conversion of the same video', async () => {
@@ -345,12 +345,14 @@ describe('Transcoding (real ffmpeg)', () => {
       // goes, not that it goes before the status flips, and asserting the
       // stronger thing fails whenever the machine is loaded enough to slow the
       // teardown down. It did exactly that on a 2-core CI runner.
-      await waitUntilGone('derived', `tmp/${job.id}.mp4`);
+      await waitUntilGone('media', `Films/.long.converting-${job.id}.mp4`);
 
       // No polling here, and deliberately so: the converted file is only ever
       // renamed into place on success, so a cancelled job must never produce
-      // one at any point. That is the invariant worth failing over.
-      await expect(storage.exists('derived', `converted/${videoId}.mp4`)).resolves.toBe(false);
+      // one at any point. That is the invariant worth failing over — and it
+      // matters more now that the output lands in the watched tree, where an
+      // abandoned file is a video on the next scan rather than dead weight.
+      await expect(storage.exists('media', 'Films/long.mp4')).resolves.toBe(false);
       // The video is untouched — still needing conversion, still playable from source.
       await expect(prisma.video.findUniqueOrThrow({ where: { id: videoId } })).resolves.toMatchObject(
         { playbackKey: null, needsConversion: true },
@@ -387,6 +389,15 @@ describe('Transcoding (real ffmpeg)', () => {
       expect(subtitles).toHaveLength(2);
       expect(subtitles.map((subtitle) => subtitle.language).sort()).toEqual(['eng', 'nld']);
       expect(subtitles.every((subtitle) => subtitle.origin === 'EXTRACTED')).toBe(true);
+
+      /**
+       * The English one is selected, and it is found by language rather than by
+       * string: a container tags its streams `eng`, so a rule comparing against
+       * `en` would leave every extracted track unselected.
+       */
+      const chosen = subtitles.filter((subtitle) => subtitle.isDefault);
+      expect(chosen).toHaveLength(1);
+      expect(chosen[0].language).toBe('eng');
 
       // And they serve as real WebVTT.
       const response = await admin
@@ -476,7 +487,7 @@ describe('Transcoding (real ffmpeg)', () => {
       const videoId = await seedVideo('Films/show.mkv', 'Show');
       const queued = await admin.post(`/videos/${videoId}/convert`).expect(202);
       await waitForJob(queued.body.id);
-      await storage.delete('derived', `converted/${videoId}.mp4`);
+      await storage.delete('media', 'Films/show.mp4');
 
       await admin.delete(`/videos/${videoId}/source`).expect(400);
       await expect(storage.exists('media', 'Films/show.mkv')).resolves.toBe(true);
@@ -541,6 +552,117 @@ describe('Transcoding (real ffmpeg)', () => {
     });
   });
 
+  /**
+   * The one-shot that moves an existing library onto the new layout.
+   *
+   * Not a migration: SQL cannot move a file, and these files cannot be
+   * abandoned the way `derived/thumbnails/` was when artwork moved — a
+   * transcode is hours of CPU, and for a reclaimed video it is the only copy of
+   * the film.
+   */
+  describe('relocating conversions written under the old layout', () => {
+    /** A row in the pre-relocation shape: key under `converted/`, file in derived. */
+    async function seedLegacy(source: string, title: string): Promise<string> {
+      await makeMkv(source);
+      const videoId = await seedVideo(source, title);
+      await storage.save('derived', `converted/${videoId}.mp4`, Buffer.from('converted-body'));
+      await prisma.video.update({
+        where: { id: videoId },
+        data: { playbackKey: `converted/${videoId}.mp4`, playbackMime: 'video/mp4' },
+      });
+      return videoId;
+    }
+
+    it('moves the file beside its source and rewrites the key', async () => {
+      const videoId = await seedLegacy('Films/show.mkv', 'Show');
+
+      const response = await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      expect(response.body).toMatchObject({ relocated: 1, failed: 0 });
+      await expect(prisma.video.findUniqueOrThrow({ where: { id: videoId } })).resolves.toMatchObject(
+        { playbackKey: 'Films/show.mp4' },
+      );
+      await expect(storage.exists('media', 'Films/show.mp4')).resolves.toBe(true);
+      await expect(storage.exists('derived', `converted/${videoId}.mp4`)).resolves.toBe(false);
+    }, 180_000);
+
+    it('leaves no staging file behind', async () => {
+      const videoId = await seedLegacy('Films/show.mkv', 'Show');
+
+      await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      await expect(storage.exists('media', `Films/.relocating-${videoId}.mp4`)).resolves.toBe(false);
+    }, 180_000);
+
+    /** Running it twice is the normal way an admin finds out it already ran. */
+    it('is a no-op the second time', async () => {
+      await seedLegacy('Films/show.mkv', 'Show');
+      await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      const second = await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      expect(second.body).toMatchObject({ relocated: 0, failed: 0 });
+      await expect(storage.exists('media', 'Films/show.mp4')).resolves.toBe(true);
+    }, 180_000);
+
+    /**
+     * The reason the column is written before the rename. A file that has just
+     * appeared in a watched folder must already be claimed, or the next scan
+     * builds a second video out of it.
+     */
+    it('does not leave the relocated file to be ingested', async () => {
+      await seedLegacy('Films/show.mkv', 'Show');
+      await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      await admin.post('/admin/ingest/scan').expect(200);
+
+      await expect(prisma.video.count()).resolves.toBe(1);
+    }, 180_000);
+
+    /** An mp4 source is the case where the obvious name is the source itself. */
+    it('does not overwrite a source it would otherwise collide with', async () => {
+      await makeMkv('Films/show.mkv');
+      const videoId = await seedVideo('Films/show.mkv', 'Show');
+      // A second row whose source already occupies the name this one wants.
+      await storage.save('media', 'Films/show.mp4', Buffer.from('someone-elses-film'));
+      await storage.save('derived', `converted/${videoId}.mp4`, Buffer.from('converted-body'));
+      await prisma.video.update({
+        where: { id: videoId },
+        data: { playbackKey: `converted/${videoId}.mp4` },
+      });
+
+      await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      const video = await prisma.video.findUniqueOrThrow({ where: { id: videoId } });
+      expect(video.playbackKey).toBe('Films/show-2.mp4');
+      await expect(
+        readFile(storage.resolvePath('media', 'Films/show.mp4'), 'utf8'),
+      ).resolves.toBe('someone-elses-film');
+    }, 180_000);
+
+    /**
+     * Clearing the column would open the "only copy" delete guard, so a row
+     * whose file is gone is reported and left exactly as it is.
+     */
+    it('reports a row whose converted file has vanished, and changes nothing', async () => {
+      const videoId = await seedLegacy('Films/show.mkv', 'Show');
+      await storage.delete('derived', `converted/${videoId}.mp4`);
+
+      const response = await admin.post('/admin/jobs/relocate-conversions').expect(200);
+
+      expect(response.body.failed).toBe(1);
+      await expect(prisma.video.findUniqueOrThrow({ where: { id: videoId } })).resolves.toMatchObject(
+        { playbackKey: `converted/${videoId}.mp4` },
+      );
+    }, 180_000);
+
+    it('still streams while the row has not been relocated', async () => {
+      const videoId = await seedLegacy('Films/show.mkv', 'Show');
+
+      await admin.get(`/videos/${videoId}/stream`).expect(200);
+    }, 180_000);
+  });
+
   describe('access control', () => {
     it('is admin-only', async () => {
       await makeMkv('Films/show.mkv');
@@ -556,6 +678,7 @@ describe('Transcoding (real ffmpeg)', () => {
       await user.post(`/videos/${videoId}/extract-subtitles`).expect(403);
       await user.delete(`/videos/${videoId}/source`).expect(403);
       await user.get('/admin/jobs').expect(403);
+      await user.post('/admin/jobs/relocate-conversions').expect(403);
     }, 180_000);
   });
 });

@@ -8,6 +8,7 @@ import { SubtitlesService } from '../subtitles/subtitles.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeContentTag } from './content-tag';
+import { withoutConvertedOutput } from './converted-output';
 import { scanMediaRoot, type ScannedFile } from './media-scanner';
 import type { MediaPath } from './path-parser';
 import { itemFolderKey, proposeStructure, type ProposedSeason } from './structure';
@@ -106,8 +107,19 @@ export class ReconcileService {
   private async reconcile(): Promise<ReconcileSummary> {
     const startedAt = new Date();
     const root = this.storage.rootPath('media');
-    const scan = await scanMediaRoot(root);
+    const rawScan = await scanMediaRoot(root);
 
+    /**
+     * The rows are read **after** the scan, and that order is load-bearing.
+     *
+     * A converted file lives beside its source inside the watched tree, and the
+     * only thing that marks it as ours is a row claiming it as `playbackKey`.
+     * The writer sets that column *before* the file appears at the path (see
+     * `transcode/jobs.service.ts`), so any converted file this scan could have
+     * seen already had its key written — and a query issued afterwards cannot
+     * miss it. Read the rows first and that guarantee is gone: a conversion
+     * finishing in between would be ingested as a brand-new video.
+     */
     const known = await this.prisma.video.findMany({
       select: {
         id: true,
@@ -122,6 +134,21 @@ export class ReconcileService {
         fileMtime: true,
       },
     });
+
+    /**
+     * A job part-way through writing its output has no `playbackKey` yet if it
+     * crashed between reserving and renaming, so its `outputKey` is the other
+     * half of the same claim.
+     */
+    const writing = await this.prisma.mediaJob.findMany({
+      where: { status: { in: ['QUEUED', 'RUNNING'] }, outputKey: { not: null } },
+      select: { outputKey: true },
+    });
+
+    const scan = withoutConvertedOutput(rawScan, [
+      ...known.map((video) => video.playbackKey),
+      ...writing.map((job) => job.outputKey),
+    ]);
 
     const byStorageKey = new Map(known.map((video) => [video.storageKey, video]));
     const onDisk = new Set(scan.videos.map((file) => file.relPath));

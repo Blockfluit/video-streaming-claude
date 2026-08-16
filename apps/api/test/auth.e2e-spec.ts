@@ -102,7 +102,12 @@ describe('Auth (e2e)', () => {
        * app boot — including this one — and without the stub the whole module
        * fails to initialise and every test in this file dies at startup.
        */
-      mediaJob: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      /* Same hook, counting rows still under the pre-relocation layout. */
+      video: { count: jest.fn().mockResolvedValue(0) },
+      mediaJob: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })

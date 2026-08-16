@@ -79,8 +79,8 @@ replaced rather than reused.
 | `apps/web` | Nuxt 4 frontend, `srcDir` = `app/`, proxies `/api/**` → `:4000` |
 | `apps/api` | NestJS 11 API on `:4000` |
 | `packages/shared` | Types and pure helpers imported by both; compiled to `dist` before either app builds |
-| `media/` | `MEDIA_ROOT` — the watched source tree (contents gitignored) |
-| `derived/` | `DERIVED_ROOT` — thumbnails, posters, converted MP4/VTT (contents gitignored) |
+| `media/` | `MEDIA_ROOT` — the watched source tree, and the converted MP4s beside their sources (contents gitignored) |
+| `derived/` | `DERIVED_ROOT` — posters, banners, converted VTT (contents gitignored) |
 
 ### Root scripts
 

@@ -20,6 +20,8 @@ interface BrowseEntry {
   kind: 'drive' | 'folder' | 'video' | 'subtitle' | 'other'
   imported?: boolean
   videoId?: string
+  /** The library's own converted output, beside the source it came from. */
+  converted?: boolean
 }
 
 interface Proposal {
@@ -177,6 +179,14 @@ useHead({ title: 'Media' })
 
           <UBadge v-if="entry.imported === false" color="warning" variant="subtle" size="sm">
             not in the library
+          </UBadge>
+          <!--
+            Shown rather than hidden: an admin looking at a folder should see
+            everything in it. Labelled because it is the library's own output
+            sitting beside the source, not a second film someone added.
+          -->
+          <UBadge v-else-if="entry.converted" color="neutral" variant="subtle" size="sm">
+            converted copy
           </UBadge>
           <UButton
             v-else-if="entry.videoId"

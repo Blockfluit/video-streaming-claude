@@ -1416,7 +1416,7 @@ describe('Library (real database)', () => {
       const video = await seedStandaloneVideo('Arrival', {
         posterKey: 'posters/arrival.jpg',
         bannerKey: 'banners/arrival.jpg',
-        playbackKey: 'converted/arrival.mp4',
+        playbackKey: 'loose/arrival.converted.mp4',
         ...overrides,
       });
 
@@ -1440,7 +1440,7 @@ describe('Library (real database)', () => {
       await storage.save('media', 'loose/arrival.en.srt', Buffer.from('sidecar'));
       await storage.save('derived', 'posters/arrival.jpg', Buffer.from('poster'));
       await storage.save('derived', 'banners/arrival.jpg', Buffer.from('banner'));
-      await storage.save('derived', 'converted/arrival.mp4', Buffer.from('mp4'));
+      await storage.save('media', 'loose/arrival.converted.mp4', Buffer.from('mp4'));
       await storage.save('derived', `subtitles/${video.id}/en.vtt`, Buffer.from('WEBVTT'));
 
       return { ...video, storageKey: row.storageKey };
@@ -1472,17 +1472,35 @@ describe('Library (real database)', () => {
      * Derived output belongs to a row that no longer exists. Nothing sweeps it,
      * so leaving it means every delete leaks files nobody can reach again.
      */
-    it('always removes derived output, asked or not', async () => {
+    it('always removes generated output, asked or not', async () => {
       const video = await seedVideoWithFiles();
 
       await admin.delete(`/videos/${video.id}`).expect(204);
 
       await expect(storage.exists('derived', 'posters/arrival.jpg')).resolves.toBe(false);
       await expect(storage.exists('derived', 'banners/arrival.jpg')).resolves.toBe(false);
-      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(false);
       await expect(storage.exists('derived', `subtitles/${video.id}/en.vtt`)).resolves.toBe(false);
       // The directory too — nothing has ever cleaned it up.
       await expect(storage.exists('derived', `subtitles/${video.id}`)).resolves.toBe(false);
+    });
+
+    /**
+     * The converted file lives in `MEDIA_ROOT` now, beside its source, and this
+     * is the reason it cannot wait for `deleteFiles` like the source does.
+     *
+     * Ingest skips it only because a row claims it as `playbackKey`. Leave it
+     * behind when the row goes and the next scan finds an unclaimed `.mp4` in a
+     * watched folder — and rebuilds the entry the admin just deleted, under a
+     * new id and with none of its history.
+     */
+    it('takes the converted file out of the media tree even on the recoverable delete', async () => {
+      const video = await seedVideoWithFiles();
+
+      await admin.delete(`/videos/${video.id}`).expect(204);
+
+      // The source stays, because that one *is* recoverable.
+      await expect(storage.exists('media', video.storageKey)).resolves.toBe(true);
+      await expect(storage.exists('media', 'loose/arrival.converted.mp4')).resolves.toBe(false);
     });
 
     /**
@@ -1511,7 +1529,7 @@ describe('Library (real database)', () => {
       await admin.delete(`/videos/${video.id}`).expect(400);
 
       await expect(prisma.video.count()).resolves.toBe(1);
-      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(true);
+      await expect(storage.exists('media', 'loose/arrival.converted.mp4')).resolves.toBe(true);
     });
 
     it.each(['SUCCEEDED', 'FAILED', 'CANCELLED'] as const)(
@@ -1535,7 +1553,7 @@ describe('Library (real database)', () => {
       await admin.delete(`/videos/${video.id}`).expect(400);
 
       await expect(prisma.video.count()).resolves.toBe(1);
-      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(true);
+      await expect(storage.exists('media', 'loose/arrival.converted.mp4')).resolves.toBe(true);
     });
 
     it('deletes a reclaimed video when the caller means it', async () => {
@@ -1546,7 +1564,7 @@ describe('Library (real database)', () => {
       await admin.delete(`/videos/${video.id}?deleteFiles=true`).expect(204);
 
       await expect(prisma.video.count()).resolves.toBe(0);
-      await expect(storage.exists('derived', 'converted/arrival.mp4')).resolves.toBe(false);
+      await expect(storage.exists('media', 'loose/arrival.converted.mp4')).resolves.toBe(false);
     });
 
     /** Nothing to lose, so nothing to refuse — a reclaim that never converted. */

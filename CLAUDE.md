@@ -26,9 +26,42 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 ## Invariants — violating these causes bugs that are painful to trace
 
 **Storage**
-- `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds thumbnails,
-  posters and converted MP4/VTT and is **never** inside `media/` — generated output landing in the watched
+- `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds posters,
+  banners and converted VTT, and is **never** inside `media/` — generated output landing in the watched
   tree causes a watcher feedback loop.
+- **The converted MP4 is the one exception**, and it is deliberate: it lives in `MEDIA_ROOT`, in the same
+  folder as its source (`Heat.mkv` → `Heat.mp4`). A transcode is hours of CPU rather than something
+  regenerated on demand, and for a reclaimed video it is the only copy of the film — so it belongs on the
+  archival disk, not the scratch one. Note the disk-space consequence: a conversion now needs headroom on
+  the *source's* drive, and reclaiming genuinely frees space there, which it never did before.
+- What stops the watcher feeding on it is not its location but the column: **reconcile drops from its scan
+  any path that is a row's `playbackKey`, or a live job's `outputKey`** (`ingest/converted-output.ts`,
+  applied to the whole `ScanResult` — `issues` as well as `videos`, since a converted file beside a loose
+  source parses as an issue). That filter is sound only because of its partner invariant: **`playbackKey`
+  is written to the row *before* the file appears at that path**, so reading the rows *after* the scan
+  cannot miss a conversion that finished in between. Reverse either half and the library grows a duplicate
+  row per conversion. Both ends carry a comment saying so.
+- The filter is on **stored keys only**, never on names. Skipping `Heat.mp4` because `Heat.mkv` sits beside
+  it would silently swallow a real second file an admin dropped there — forever, with no issue raised.
+- `convertedKeyFor` never returns its argument. An `.mp4` source would otherwise map to itself, and ffmpeg
+  truncates its output the moment it opens it, so the film would be gone before the encode read a frame;
+  that case becomes `Heat.converted.mp4`. Collisions past that take `-2`, `-3` like uploads do, checking
+  the filesystem **and** both `storageKey` and `playbackKey` — but a reconvert excludes the row's own key,
+  or it would pick a new name and orphan its previous output in a watched folder.
+- The encode writes to a **dot-prefixed neighbour of its destination** (`.<stem>.converting-<jobId>.mp4`),
+  not to `derived/tmp/`: dot-prefixed so the scanner and watcher pass over a half-written file inside the
+  watched tree, and in the destination's own directory so the rename into place is same-filesystem and
+  therefore atomic. Interrupted jobs have theirs swept at startup — in `derived/tmp/` an orphan was
+  invisible dead weight, in a media folder it is multiple gigabytes of the admin's disk.
+- A **move does not take the converted file with it.** It is written once, beside where the source was at
+  the time. Relocating it inside `reconcile()` would mean a cross-filesystem copy of gigabytes on the
+  watcher's debounce path, and every ordering has a crash window ending in an unclaimed `.mp4` in a watched
+  folder. Being stranded costs tidiness; being ingested twice costs the curation.
+- Existing installs are moved by `POST /admin/jobs/relocate-conversions`, **not** by a migration. SQL cannot
+  move a file, and these files cannot be abandoned the way `derived/thumbnails/` was when artwork moved.
+  Not a boot hook either: copying a library across two filesystems with the bootstrap held open is how a
+  healthcheck turns a slow start into a restart loop. `playbackRoot()` keeps both layouts playable until it
+  has run, and is meant to be deleted afterwards.
 - **Every folder directly under `MEDIA_ROOT` is a drive**, a symlink to a physical disk in production. A
   drive is where bytes live and is never a collection. The convention is
   `media/<drive>/<item>/<season>/file`, and what an item folder *becomes* is decided by what is inside it
@@ -42,7 +75,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - The folder layout is only an **initial suggestion**. A proposal is applied when a video is first
   discovered and never again — a move on disk follows the file and changes nothing else. Re-deriving would
   undo whatever an admin has arranged, on the strength of someone tidying up a disk.
-- `storageKey` = archival source. `playbackKey` = converted MP4. Streaming serves `playbackKey ?? storageKey`.
+- `storageKey` = archival source. `playbackKey` = converted MP4, **also under `MEDIA_ROOT`**, beside the
+  source. Streaming serves `playbackKey ?? storageKey`. Both are unique columns: two rows sharing one
+  converted file is silent corruption rather than an error.
 - Videos with `sourceDeletedAt` set and a valid `playbackKey` are **exempt** from the missing-file sweep,
   or reclaiming disk space marks the library `MISSING`.
 - Every storage key is `path.resolve`d and confirmed inside its root before use (path traversal). Only
@@ -64,13 +99,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   A directory that still holds something is left alone, so nobody destroys a film with the same button that
   tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
   files go rather than asking "are you sure?".
-- **Deleting a video always takes its derived output**, `deleteFiles` or not: poster, banner, converted file,
-  subtitle tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
+- **Deleting a video always takes its generated output**, `deleteFiles` or not: poster, banner, subtitle
+  tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
   belongs to a row that has stopped existing, nothing sweeps it, and it is regenerated from the source — so
   keeping it only leaks files nobody can reach again. The **source** under `MEDIA_ROOT` still needs
   `deleteFiles`, because reconcile can rebuild the row from it. Every key is collected **before**
   `video.delete`: all of them live on the row or on a `Subtitle` row, and the cascade takes both, so
   afterwards there is nothing left to say what to remove.
+- The **converted file** goes on that same unconditional path (`playbackKeysToDelete`, its own list
+  because it is generated output living in `MEDIA_ROOT`), and here it is load-bearing rather than tidy:
+  ingest skips it only because a row claims it, so leaving it behind means the next scan finds an
+  unclaimed `.mp4` in a watched folder and rebuilds the entry that was just deleted, under a new id and
+  with none of its history.
 - The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming a
   source is allowed precisely *because* the converted file replaces it. Sweeping that up as derived output
   would destroy a film through the button labelled as the recoverable one, so the recoverable one **refuses**
@@ -97,8 +137,9 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   a 416. Answering one range of several needs `multipart/byteranges`, and claiming otherwise is a lie.
 - `res.on('close')` must destroy the read stream. Seeking aborts requests constantly, and without it the
   process leaks a file descriptor per scrub.
-- Streaming serves `playbackKey ?? storageKey` from `derived` or `media` respectively, so the URL is
-  unchanged before and after conversion and survives the source being reclaimed.
+- Streaming serves `playbackKey ?? storageKey`, both from `media`, so the URL is unchanged before and
+  after conversion and survives the source being reclaimed. (`playbackRoot()` still answers `derived` for
+  a row left under the old `converted/` layout, until the relocation endpoint has run.)
 - Stream responses are `Cache-Control: private, no-store`. A shared cache holding a range response as
   though it were the whole file corrupts playback for the next viewer.
 - Every video has **two** pictures, both cut from the frame 10% in: a 16:9 `bannerKey` (the old
@@ -241,8 +282,18 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   it saturates a CPU, so running several makes them all slower rather than finishing sooner.
 - **Nothing transcodes on its own.** A 200-file drop flags what needs converting and stops; an admin decides
   when to spend the CPU.
-- Transcode output goes to `derived/tmp/` and is renamed into place **only on success**. A partial file
-  under its final name would be streamed to viewers and read by the next probe as finished.
+- Transcode output goes to a dot-prefixed neighbour of its destination and is renamed into place **only on
+  success**. A partial file under its final name would be streamed to viewers, read by the next probe as
+  finished, and — now that the output lands in the watched tree — ingested as a truncated video.
+- The final name is chosen **after** the encode, not before. A three-hour transcode is easily outlived by a
+  new file appearing in the folder, so a name reserved up front may be taken by the time it is used. The
+  *temporary* name comes from the source stem and is stable throughout, which is what the encode needs.
+- The row is updated **before** the rename, and rolled back to its previous values on failure (a reconvert's
+  previous `playbackKey` is not null, so clearing it would strand the old file). Rename-first leaves a
+  finished `.mp4` that no row claims in a watched folder — and the rename is exactly what wakes the watcher.
+  Reserve-first leaves the column pointing at a file that appears milliseconds later: streaming 404s for an
+  instant, `reclaimSource` refuses because it stats the file, and the delete guard is unreachable because
+  `enqueue` will not convert a reclaimed video at all. Transient against permanent.
 - Cancel sends **SIGKILL**, not SIGTERM: ffmpeg handles SIGTERM by finalising the file it is writing, and a
   cancelled job must not leave something that looks complete.
 - Progress writes to Postgres are throttled to ~1/s. ffmpeg reports several times a second, and a write per
@@ -658,7 +709,28 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   ffmpeg either fails or emits mojibake — a conversion that already threw cannot be rescued by a retry.
 - An uploaded subtitle is sniffed for the `WEBVTT` signature. An SRT accepted as a `.vtt` loads as an empty
   track: the viewer sees the language listed and nothing ever appears.
-- Exactly one `isDefault` per video. `<track default>` on two tracks is undefined behaviour.
+- **At most** one `isDefault` per video. `<track default>` on two tracks is undefined behaviour, and *none*
+  is a legitimate answer — see below.
+- The default track is a property of the **video**, not of a track: `PUT /videos/:id/subtitles/default`,
+  because "no default at all" has no track to carry it and AUTO has to be expressible. `isDefault` is
+  deliberately **not** on `updateSubtitleSchema`; two ways to write one invariant is how they drift.
+- The rule is **English, and only English** (`subtitles/default-track.ts`, pure). A video whose subtitles are
+  all Dutch gets no default rather than an arbitrary one: a default on a language the viewer cannot read is
+  worse than none, since it turns subtitles on and leaves them hunting for the menu that turns them off.
+- English is matched through `toIso6391`, never by string. Extracted tracks carry the container's tag
+  (`eng`) while sidecars carry whatever the filename said (`en`); compared as strings those are two
+  languages, and the rule would skip every embedded track — the majority of them.
+- `Video.subtitleDefaultSource` is the same contract as `posterSource`: **MANUAL is never reapplied over**.
+  Without it a deliberate Dutch default reverts to English the next time anything touches the track list.
+- `refreshAutoDefault` runs wherever that list changes — after extraction (**once, after the whole set**;
+  inside the loop it answers from a half-registered list), after sidecar binding, after an upload, and after
+  a removal. That last is not tidiness: nothing else promotes a replacement, so deleting the default used to
+  leave a video with none and no route back.
+- The container's `disposition.default` decides **nothing**. It meant the default was whatever the encoder
+  set — often a forced-subtitle track, and on a two-flagged container whichever stream was processed last.
+- The tie-break between two English tracks is **total**, ending on the id. Same-label collisions are normal
+  (an extracted track and a sidecar for one language), and a default that moves between scans reads as a
+  rendering bug for weeks.
 - An unrecognised season folder or language code is *accepted and flagged*, not rejected. Only structural
   problems (root-level file, depth > 3) refuse ingestion.
 - Language codes go through `src/common/language.ts` (backed by `langs`), never a local list. A language can

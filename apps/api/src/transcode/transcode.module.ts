@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 
+import { ConvertedRelocationService } from './converted-relocation.service';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { Transcoder } from './transcoder';
@@ -8,7 +9,7 @@ import { Transcoder } from './transcoder';
 @Global()
 @Module({
   controllers: [JobsController],
-  providers: [JobsService, Transcoder],
+  providers: [JobsService, Transcoder, ConvertedRelocationService],
   exports: [JobsService],
 })
 export class TranscodeModule {}
