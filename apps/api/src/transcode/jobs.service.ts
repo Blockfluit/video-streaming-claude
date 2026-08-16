@@ -309,7 +309,6 @@ export class JobsService implements OnModuleInit {
           storageKey,
           language: track.language,
           label: track.label,
-          isDefault: track.isDefault,
         });
         extracted += 1;
       } catch (error) {
@@ -317,6 +316,15 @@ export class JobsService implements OnModuleInit {
         this.logger.warn(`Could not extract stream ${track.index}: ${describe(error)}`);
       }
     }
+
+    /**
+     * Once, after the whole set — not per track.
+     *
+     * The rule reads every track to decide, so running it inside the loop would
+     * have it answer from a half-registered list and settle on whichever
+     * English track happened to be extracted first.
+     */
+    await this.subtitles.refreshAutoDefault(videoId);
 
     const notes = [`${extracted} track${extracted === 1 ? '' : 's'} extracted`];
     if (skipped.length > 0) {

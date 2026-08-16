@@ -349,6 +349,14 @@ export class ReconcileService {
     }
 
     const boundSourceKeys = new Set<string>();
+    /**
+     * Videos whose track list actually changed this pass.
+     *
+     * The auto default is re-derived only for these, rather than for every
+     * video with a sidecar: a scan that bound nothing new is the normal case
+     * and must not write anything.
+     */
+    const touched = new Set<string>();
     let bound = 0;
 
     for (const [, group] of byFolder) {
@@ -383,7 +391,10 @@ export class ReconcileService {
             format: binding.extension,
           });
           boundSourceKeys.add(source.relPath);
-          if (outcome !== 'unchanged') bound += 1;
+          if (outcome !== 'unchanged') {
+            bound += 1;
+            touched.add(binding.videoId);
+          }
 
           // Accepted, but the code is not one we recognise — worth an admin's
           // attention without refusing a subtitle that probably works.
@@ -421,6 +432,19 @@ export class ReconcileService {
     }
 
     const removed = await this.subtitles.forgetMissingSidecars(boundSourceKeys);
+
+    /**
+     * A sidecar-only library has never had a default track, because binding one
+     * does not set the column and nothing else ever looked at the question.
+     * This is where an ingested English subtitle becomes the selected one.
+     *
+     * After `forgetMissingSidecars`, which re-derives the videos it emptied —
+     * running before it would decide from a list still holding rows whose files
+     * are gone.
+     */
+    for (const videoId of touched) {
+      await this.subtitles.refreshAutoDefault(videoId);
+    }
 
     return { bound, removed };
   }

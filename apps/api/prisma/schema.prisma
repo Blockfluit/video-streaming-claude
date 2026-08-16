@@ -53,6 +53,19 @@ enum ArtworkSource {
   MANUAL
 }
 
+/// Whether the default subtitle track was chosen by hand.
+///
+/// Same contract as ArtworkSource — MANUAL is never reapplied over — but a
+/// separate enum because it answers a different question, and one enum meaning
+/// two things is how a migration ends up unsafe to reason about.
+///
+/// It lives on the video rather than on a Subtitle row because "deliberately no
+/// default" is a valid manual choice, and no track can represent one.
+enum SubtitleDefaultSource {
+  AUTO
+  MANUAL
+}
+
 enum CreditRole {
   ACTOR
   DIRECTOR
@@ -355,6 +368,10 @@ model Video {
   uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  /// AUTO re-elects the English track whenever the track list changes; MANUAL
+  /// is left alone, including when the admin's choice was "no default at all".
+  subtitleDefaultSource SubtitleDefaultSource @default(AUTO)
 
   subtitles     Subtitle[]
   jobs          MediaJob[]
