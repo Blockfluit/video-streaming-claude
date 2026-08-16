@@ -1067,6 +1067,23 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   containing other candidates are dropped, so one bad chip reports once rather than seven times. Use
   `getAttribute('class')`, never `className`: on an SVG that is an `SVGAnimatedString`, and slicing it
   throws inside `page.evaluate` as an opaque evaluation failure.
+- **The hero's scrim runs bottom-up below `sm` and left-to-right above it** (`.hero-side-scrim`). The
+  horizontal version is tuned for text in the left third and fades to `transparent 72%`; on a phone the
+  text column spans the full width, so its right quarter sat on unscrimmed artwork. `visible.spec.ts`
+  **cannot** see this — `backdrop()` returns `null` at the first `background-image` and exempts that
+  element *and every descendant* from the contrast checks — so it is judged by eye. It is a class rather
+  than the inline style it replaced because a media query cannot live in a `style` attribute.
+- **Every hero proportion is `svh`, not `vh`.** `vh` is the *large* viewport height, so it ignores a mobile
+  browser's collapsing address bar and the hero opens taller than the screen. `full` always said this;
+  `wide` was missed and read `58vh`.
+- **The player's three overlays are one flex column, not three absolute siblings.** All of them sat at
+  `bottom-20` — 80px up a video that is 193px tall on a phone, so they floated at 41% of its height over
+  the picture — and Skip intro and Start over shared that offset with nothing keeping them apart, so
+  resuming into an intro put one on top of the other. A column makes the overlap impossible rather than
+  unlikely; the container is `pointer-events-none` because it spans the video and would otherwise swallow
+  every tap meant for the picture. They stay siblings of `<video>`, so **native fullscreen leaves them
+  behind** — accepted, since the alternative is the Fullscreen API and a control surface of our own, and
+  this player is deliberately the browser's.
 - **`hasTouch: true` on the `phone` Playwright project is load-bearing.** Without it Chromium reports
   `pointer: fine` and every `@media (pointer: coarse)` rule in `main.css` goes unexercised while the run
   stays green. No device preset: `devices['iPhone 14']` implies WebKit — the wrong browser, carrying

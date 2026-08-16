@@ -315,70 +315,92 @@ onBeforeUnmount(() => {
       offer's lifetime is whatever `main.css` says it is and nothing in this
       component has to agree with it separately.
     -->
-    <Transition
-      enter-active-class="transition duration-300"
-      enter-from-class="opacity-0 translate-y-2"
-      leave-active-class="transition duration-200"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="showStartOver"
-        class="offer absolute bottom-20 left-4 flex items-center gap-2"
-        @animationend="dismissOffer"
+    <!--
+      One stack, rather than three things positioned to miss each other.
+
+      All three used to be siblings at `bottom-20`, which is 80px measured from
+      the bottom of a video that is 193px tall on a phone: they floated at 41%
+      of its height, in the middle of the picture, instead of sitting just above
+      the control bar they were positioned against on a desktop. Worse, Skip
+      intro and Start over shared that offset with nothing keeping them apart,
+      so resuming into the intro range put one on top of the other.
+
+      A flex column makes the overlap impossible rather than merely unlikely,
+      and `bottom-16` clears the native control bar on a phone. The container
+      does not take pointer events — it spans the width of the video and would
+      otherwise swallow every tap meant for the picture.
+
+      They remain siblings of the <video>, so native fullscreen (which promotes
+      the element itself) leaves them behind. Accepted: the alternative is the
+      Fullscreen API and a control surface of our own, and this player is
+      deliberately the browser's.
+    -->
+    <div class="pointer-events-none absolute inset-x-4 bottom-16 flex flex-col items-end gap-2 sm:bottom-20">
+      <Transition
+        enter-active-class="transition duration-300"
+        enter-from-class="opacity-0 translate-y-2"
+        leave-active-class="transition duration-200"
+        leave-to-class="opacity-0"
       >
-        <!--
-          Neutral, not accent: playing is the default now, so there is no call
-          to action on this screen for accent colour to mark. No `aria-label` —
-          the visible text is the accessible name, which is how it should be.
-        -->
-        <UButton
-          size="lg"
-          color="neutral"
-          variant="solid"
-          icon="i-lucide-rotate-ccw"
-          class="offer-wipe"
-          @click="startOver"
+        <div
+          v-if="showStartOver"
+          class="offer pointer-events-auto flex flex-wrap items-center justify-end gap-2 sm:self-start"
+          @animationend="dismissOffer"
         >
-          Start from the beginning
-        </UButton>
-        <UButton
-          size="lg"
-          color="neutral"
-          variant="solid"
-          icon="i-lucide-x"
-          aria-label="Dismiss"
-          @click="dismissOffer"
-        />
-      </div>
-    </Transition>
+          <!--
+            Neutral, not accent: playing is the default now, so there is no call
+            to action on this screen for accent colour to mark. No `aria-label` —
+            the visible text is the accessible name, which is how it should be.
+          -->
+          <UButton
+            size="lg"
+            color="neutral"
+            variant="solid"
+            icon="i-lucide-rotate-ccw"
+            class="offer-wipe"
+            @click="startOver"
+          >
+            Start from the beginning
+          </UButton>
+          <UButton
+            size="lg"
+            color="neutral"
+            variant="solid"
+            icon="i-lucide-x"
+            aria-label="Dismiss"
+            @click="dismissOffer"
+          />
+        </div>
+      </Transition>
 
-    <Transition
-      enter-active-class="transition duration-200"
-      enter-from-class="opacity-0 translate-y-2"
-      leave-active-class="transition duration-150"
-      leave-to-class="opacity-0"
-    >
-      <div v-if="inIntro" class="absolute right-4 bottom-20">
-        <UButton size="lg" color="neutral" variant="solid" @click="skipTo(markers.introEndSec)">
-          Skip intro
-        </UButton>
-      </div>
-    </Transition>
+      <Transition
+        enter-active-class="transition duration-200"
+        enter-from-class="opacity-0 translate-y-2"
+        leave-active-class="transition duration-150"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="inIntro" class="pointer-events-auto">
+          <UButton size="lg" color="neutral" variant="solid" @click="skipTo(markers.introEndSec)">
+            Skip intro
+          </UButton>
+        </div>
+      </Transition>
 
-    <Transition
-      enter-active-class="transition duration-200"
-      enter-from-class="opacity-0 translate-y-2"
-      leave-active-class="transition duration-150"
-      leave-to-class="opacity-0"
-    >
-      <div v-if="inOutro" class="absolute right-4 bottom-20">
-        <UButton v-if="nextTo" :to="nextTo" size="lg" trailing-icon="i-lucide-skip-forward">
-          Next episode
-        </UButton>
-        <UButton v-else size="lg" color="neutral" variant="solid" @click="skipTo(markers.outroEndSec)">
-          Skip outro
-        </UButton>
-      </div>
-    </Transition>
+      <Transition
+        enter-active-class="transition duration-200"
+        enter-from-class="opacity-0 translate-y-2"
+        leave-active-class="transition duration-150"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="inOutro" class="pointer-events-auto">
+          <UButton v-if="nextTo" :to="nextTo" size="lg" trailing-icon="i-lucide-skip-forward">
+            Next episode
+          </UButton>
+          <UButton v-else size="lg" color="neutral" variant="solid" @click="skipTo(markers.outroEndSec)">
+            Skip outro
+          </UButton>
+        </div>
+      </Transition>
+    </div>
   </div>
 </template>

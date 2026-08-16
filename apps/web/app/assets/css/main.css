@@ -363,6 +363,44 @@ body {
 }
 
 /**
+ * The hero's scrim, which runs bottom-up on a phone and left-to-right above it.
+ *
+ * The horizontal version is tuned for a wide frame where the text occupies the
+ * left third: it is opaque at 0%, 78% at 42%, and fully transparent by 72%. On
+ * a 375px screen the text column spans the whole width, so its right quarter
+ * sat on unscrimmed artwork — white type over whatever happened to be in the
+ * frame.
+ *
+ * On a phone the text is at the *bottom* rather than the left, so the scrim
+ * turns with it. This is not something `visible.spec.ts` can check: `backdrop()`
+ * returns null at the first `background-image` it meets and silently exempts
+ * that element **and every descendant** from the contrast checks. Judge it by
+ * eye.
+ *
+ * A class rather than the inline style it replaced, because a media query
+ * cannot live in a `style` attribute. It interpolates to `var(--ui-bg)` and
+ * never a hex, so it keeps landing on the colour actually behind it.
+ */
+.hero-side-scrim {
+  background: linear-gradient(
+    to top,
+    var(--ui-bg) 0%,
+    color-mix(in srgb, var(--ui-bg) 85%, transparent) 38%,
+    transparent 88%
+  );
+}
+@media (min-width: 640px) {
+  .hero-side-scrim {
+    background: linear-gradient(
+      to right,
+      var(--ui-bg) 0%,
+      color-mix(in srgb, var(--ui-bg) 78%, transparent) 42%,
+      transparent 72%
+    );
+  }
+}
+
+/**
  * The backdrop behind the sign-in and invite screens.
  *
  * Everywhere else in the app, artwork is the bright thing and the chrome stays
