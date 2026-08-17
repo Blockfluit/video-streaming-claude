@@ -1,4 +1,5 @@
 import {
+  dragOnto,
   expect,
   expectApiRejection,
   expectsRequest,
@@ -616,15 +617,17 @@ test.describe('admin', () => {
     // Scoped to the loose group, not "the first draggable row on the page" —
     // with a season above it that is a different episode.
     const loose = page.getByRole('region', { name: 'Not in a season' })
-    const episode = loose.locator('li[draggable="true"]').first()
+    const episode = loose.locator('ul > li').first()
     const title = (await episode.innerText()).split('\n').filter(Boolean)[1]
 
-    // Playwright's dragTo issues the real HTML5 drag events the handlers use.
+    // A performed pointer drag, not `dragTo`: the list listens to Pointer
+    // Events now rather than the HTML5 protocol, which is what makes the same
+    // gesture work with a thumb.
     await expectsRequest(page, /\/videos\/order$/, 'PATCH', () =>
-      episode.dragTo(season))
+      dragOnto(page, episode, season))
 
     // It is in the season now, and numbered from one.
-    const moved = season.locator('li[draggable="true"]')
+    const moved = season.locator('ul > li')
     await expect(moved).toHaveCount(1)
     await expect(moved.first()).toContainText(title as string)
 
@@ -632,12 +635,15 @@ test.describe('admin', () => {
     await page.reload()
     await page.waitForLoadState('networkidle')
     const after = page.getByRole('region', { name: `Season ${number}` })
-    await expect(after.locator('li[draggable="true"]')).toHaveCount(1)
+    await expect(after.locator('ul > li')).toHaveCount(1)
 
     // Put the episode back where it started.
     await expectsRequest(page, /\/videos\/order$/, 'PATCH', () =>
-      after.locator('li[draggable="true"]').first()
-        .dragTo(page.getByRole('region', { name: 'Not in a season' })))
+      dragOnto(
+        page,
+        after.locator('ul > li').first(),
+        page.getByRole('region', { name: 'Not in a season' }),
+      ))
 
     // Removes the folder too, or the scan later in this suite rebuilds the row.
     await removeSeasonWithFolder(page, number)
@@ -667,9 +673,9 @@ test.describe('admin', () => {
     await expect(season.getByText('Drop an episode here.')).toBeVisible()
 
     const episode = page.getByRole('region', { name: 'Not in a season' })
-      .locator('li[draggable="true"]').first()
-    await expectsRequest(page, /\/videos\/order$/, 'PATCH', () => episode.dragTo(season))
-    await expect(season.locator('li[draggable="true"]')).toHaveCount(1)
+      .locator('ul > li').first()
+    await expectsRequest(page, /\/videos\/order$/, 'PATCH', () => dragOnto(page, episode, season))
+    await expect(season.locator('ul > li')).toHaveCount(1)
 
     // Now it holds something, so the delete must stop and explain.
     await page.getByRole('button', { name: `Remove Season ${number}` }).click()
@@ -682,7 +688,7 @@ test.describe('admin', () => {
     // swallows pointer events, so the drag below lands on nothing and the
     // request never fires.
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    await expect(season.locator('li[draggable="true"]')).toHaveCount(1)
+    await expect(season.locator('ul > li')).toHaveCount(1)
 
     /*
      * Cleanup goes through the API, not the UI.

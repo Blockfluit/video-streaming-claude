@@ -223,6 +223,56 @@ export async function savesThenRestores(
  * `deleteFiles`, because for a real admin the recoverable mistake is the right
  * default; a test is the one caller that wants the other one.
  */
+/**
+ * Drags one element onto another with real pointer events.
+ *
+ * **Not `locator.dragTo`.** That issues the HTML5 drag-and-drop protocol, which
+ * the episode list stopped speaking when it moved to dnd-kit — and it moved
+ * because that protocol fires *nothing at all* from a finger, so reordering did
+ * not exist on a phone. dnd-kit listens to Pointer Events, which are the same
+ * events a touchscreen produces, so this drives the code path a thumb drives.
+ *
+ * The drag is performed rather than declared: press, cross the sensor's
+ * activation threshold before travelling, wait long enough that a delay-based
+ * constraint elapses, then move in steps so collision detection sees the
+ * positions in between. A single jump to the target looks, to any pointer
+ * sensor, like nothing happening and then a release somewhere else.
+ */
+export async function dragOnto(page: Page, source: Locator, target: Locator): Promise<void> {
+  /*
+   * Both ends on screen first.
+   *
+   * `page.mouse` works in **viewport** coordinates while `boundingBox()`
+   * happily reports a point 1500px below the fold, so without this the whole
+   * gesture is performed in empty space and nothing anywhere is dragged —
+   * which looks exactly like a drag implementation that does not work.
+   * `dragTo` scrolls for you; a hand-rolled pointer drag has to do it itself.
+   */
+  const ends = [await source.elementHandle(), await target.elementHandle()]
+  await page.evaluate(([from, onto]) => {
+    if (!from || !onto) return
+    const a = from.getBoundingClientRect()
+    const b = onto.getBoundingClientRect()
+    const middle = (Math.min(a.top, b.top) + Math.max(a.bottom, b.bottom)) / 2 + window.scrollY
+    window.scrollTo({ top: Math.max(0, middle - window.innerHeight / 2), behavior: 'instant' })
+  }, ends)
+
+  const from = await source.boundingBox()
+  const onto = await target.boundingBox()
+  if (!from || !onto) throw new Error('cannot drag a box that is not on the page')
+
+  const startX = from.x + from.width / 2
+  const startY = from.y + from.height / 2
+
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX, startY + 12, { steps: 6 })
+  await page.waitForTimeout(300)
+  await page.mouse.move(onto.x + onto.width / 2, onto.y + onto.height / 2, { steps: 20 })
+  await page.waitForTimeout(200)
+  await page.mouse.up()
+}
+
 export async function removeSeasonWithFolder(page: Page, number: number): Promise<void> {
   await page.evaluate(async (seasonNumber) => {
     const collections = await (await fetch('/api/collections?limit=1')).json()

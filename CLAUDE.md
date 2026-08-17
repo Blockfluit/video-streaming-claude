@@ -1084,6 +1084,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   every tap meant for the picture. They stay siblings of `<video>`, so **native fullscreen leaves them
   behind** — accepted, since the alternative is the Fullscreen API and a control surface of our own, and
   this player is deliberately the browser's.
+- **Episodes reorder with `@dnd-kit/vue`, and with arrows beside it.** HTML5 `draggable` fires *nothing*
+  from a finger, so `/admin/collections/:slug` — a page whose whole job is arranging episodes — had no
+  working reorder on a phone and said nothing about it. dnd-kit's `PointerSensor` reads Pointer Events,
+  which are mouse, touch and pen through one path, so the gesture a test drives with a mouse is the one a
+  thumb performs; its `KeyboardSensor` covers cross-season moves without a pointer at all. Checked, and
+  worth not re-checking: **`vuedraggable@next`** is UMD-only with no `exports` field (the recurring "does
+  not provide an export named 'default'" under Vite) and its open #286 is `RefImpl is not a constructor`
+  against Vue 3.5, which is this project's version; **`@vueuse/integrations`' `useSortable`** would promote
+  two phantom dependencies at once — the `refDebounced` mistake again — and cannot do cross-list at all;
+  **`sortablejs`** direct mutates the DOM behind Vue's back, so every wrapper has to undo the mutation
+  before splicing the array; **pragmatic-drag-and-drop** is built on HTML5 DnD and has no touch support.
+  The rows are their own component because `useSortable` is a composable and cannot be called in a `v-for`.
+  **Playwright cannot script a touch drag** (microsoft/playwright#39043 is open), so `dragOnto` in
+  `fixtures.ts` performs a *pointer* drag — and it scrolls both ends into view first, because `page.mouse`
+  works in viewport coordinates while `boundingBox()` will happily report a point below the fold, and a
+  gesture performed in empty space looks exactly like a drag implementation that does not work.
 - **`hasTouch: true` on the `phone` Playwright project is load-bearing.** Without it Chromium reports
   `pointer: fine` and every `@media (pointer: coarse)` rule in `main.css` goes unexercised while the run
   stays green. No device preset: `devices['iPhone 14']` implies WebKit — the wrong browser, carrying

@@ -1,4 +1,4 @@
-import { expect, test, visit } from './fixtures'
+import { expect, expectsRequest, test, visit } from './fixtures'
 import { AUDIT } from './audit'
 
 /**
@@ -157,6 +157,83 @@ test.describe('the admin tables', () => {
 
     expect(room.scrolls).toBe('auto')
     expect(room.overflowing).toBe(true)
+  })
+})
+
+test.describe('reordering episodes', () => {
+
+  /*
+   * The path that does not involve dragging anything.
+   *
+   * Dragging works with a thumb now — dnd-kit reads Pointer Events, which is
+   * what a touchscreen emits — but a drag on a phone means holding the thing
+   * you are moving under the finger you are looking past, on a list that
+   * scrolls. The arrows do the same move in one tap and go through the same
+   * request, which is what this checks: not that a button is there, but that
+   * it writes the order.
+   *
+   * It moves an episode down and then straight back up, because this suite
+   * runs against the real dev library.
+   */
+  test('works by tapping, not only by dragging', async ({ page }) => {
+    await visit(page, '/admin/library')
+
+    /*
+     * Which collection to open, and whether to bother, decided from the data
+     * rather than from the DOM. `locator.count()` does not retry, so a guard
+     * written against it runs before the route has rendered and is therefore
+     * always true — a skip that never runs, reporting green.
+     */
+    const found = await page.evaluate(async () => {
+      const page1 = await (await fetch('/api/collections?limit=20')).json()
+      for (const item of page1.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${item.slug}`)).json()
+        const seasons = new Map<string | null, number>()
+        for (const video of detail.videos ?? []) {
+          seasons.set(video.seasonId, (seasons.get(video.seasonId) ?? 0) + 1)
+        }
+        if ([...seasons.values()].some(count => count > 1)) return item.slug as string
+      }
+      return null
+    })
+
+    test.skip(found === null, 'no collection here has two episodes in one season')
+
+    await visit(page, `/admin/collections/${found}`)
+
+    const down = page.getByRole('button', { name: /^Move .* down$/ }).first()
+    await expect(down).toBeEnabled()
+
+    /*
+     * Centred before pressing. Playwright scrolls an element only as far as it
+     * has to, which on a 375px screen leaves it at the very top of the
+     * viewport, underneath the card's own heading — the click then lands on
+     * the heading and the request never fires.
+     */
+    const press = async (button: typeof down) => {
+      await button.evaluate(el => el.scrollIntoView({ block: 'center' }))
+      await button.click()
+    }
+
+    // Named, not counted. The list re-renders from the server after the move,
+    // so an index picked before it is an index into the list as it was.
+    const label = (await down.getAttribute('aria-label')) ?? ''
+    const episode = label.replace(/^Move /, '').replace(/ down$/, '')
+
+    const order = /\/videos\/order$/
+    await expectsRequest(page, order, 'PATCH', () => press(down))
+
+    /*
+     * And back, so the library is where it started.
+     *
+     * `exact`, because dnd-kit marks the row itself `role="button"` for its
+     * keyboard sensor — so the row's accessible name contains its controls'
+     * labels, and a loose match resolves to both the row and the chevron
+     * inside it.
+     */
+    const up = page.getByRole('button', { name: `Move ${episode} up`, exact: true })
+    await expect(up).toBeEnabled()
+    await expectsRequest(page, order, 'PATCH', () => press(up))
   })
 })
 
