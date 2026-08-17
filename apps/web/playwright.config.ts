@@ -101,7 +101,18 @@ export default defineConfig({
      */
     {
       name: 'phone',
-      testMatch: /mobile\.spec\.ts/,
+      /*
+       * Its own specs, plus the legibility audit — which is where the overflow
+       * check earns its keep, and the only mechanised look at layout there is:
+       * `vitest.config.ts` is `environment: 'node'` and says in as many words
+       * that component rendering is deliberately not tested here.
+       *
+       * The rest of the suite stays desktop-only on purpose. It asserts
+       * behaviour — requests fired, toasts shown, orders written — which does
+       * not change with the viewport, and `workers: 1` makes every extra file
+       * a serial pass.
+       */
+      testMatch: /(mobile|visible)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 375, height: 812 },

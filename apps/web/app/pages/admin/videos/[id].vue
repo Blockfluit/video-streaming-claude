@@ -365,8 +365,18 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
       :title="video.probeError"
     />
 
+    <!--
+      `min-w-0` on both columns, not only in the `xl` template.
+
+      A grid item's `min-width` is `auto`, which means "as wide as my content
+      insists on being" — so below `xl`, where this is one implicit column with
+      no `minmax(0, …)` to clamp it, the artwork and media cards pushed the
+      track to 416px inside a 343px screen and the whole page scrolled
+      sideways. The `minmax(0,1fr)` above says this for the two-column case and
+      says nothing about the one-column case.
+    -->
     <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div class="space-y-6">
+      <div class="min-w-0 space-y-6">
         <UCard>
           <template #header><h2 class="font-semibold">Details</h2></template>
           <div class="space-y-4">
@@ -474,7 +484,7 @@ useHead({ title: () => (video.value?.title ? `Edit ${video.value.title}` : 'Edit
         </UCard>
       </div>
 
-      <div class="space-y-6">
+      <div class="min-w-0 space-y-6">
         <!--
           One panel per shape. Both are captured from the same frame — the
           poster is a 2:3 crop of it — so "capture at 12:04" on each gives two

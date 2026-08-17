@@ -25,6 +25,7 @@ const PAGES = [
   '/admin/upload',
   '/admin/comments',
   '/admin/requests',
+  '/admin/media',
 ]
 
 test.describe('legibility', () => {
@@ -40,6 +41,52 @@ test.describe('legibility', () => {
       ).toEqual([])
     })
   }
+
+  /**
+   * The two admin editors, which no static route list can reach and which
+   * nothing here looked at until an overflowing episode row was found on one
+   * of them **by hand**.
+   *
+   * They are the densest screens in the app — a row on the collection editor
+   * carries a grip, an index, a still, a title, two badges and three controls —
+   * so they are the likeliest to stop fitting, and they were the two the audit
+   * could not see. Judged at both widths, since each project runs this file.
+   */
+  test('the collection editor too', async ({ page }) => {
+    await visit(page, '/admin/library')
+    const slug = await page.evaluate(async () => {
+      const body = await (await fetch('/api/collections?limit=1')).json()
+      return (body.items?.[0]?.slug ?? null) as string | null
+    })
+    test.skip(slug === null, 'the library holds no collection to edit')
+
+    await visit(page, `/admin/collections/${slug}`)
+    await expect(page.getByRole('heading', { name: 'Details' })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `collection editor:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
+
+  test('the video editor too', async ({ page }) => {
+    await visit(page, '/admin/library')
+    const id = await page.evaluate(async () => {
+      const body = await (await fetch('/api/videos?limit=1')).json()
+      return (body.items?.[0]?.id ?? null) as string | null
+    })
+    test.skip(id === null, 'the library holds no video to edit')
+
+    await visit(page, `/admin/videos/${id}`)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    const problems = await page.evaluate(AUDIT)
+    expect(
+      problems,
+      `video editor:\n${problems.map(p => `  ${p.kind} (${p.value}) — ${p.detail}`).join('\n')}`,
+    ).toEqual([])
+  })
 
   /** The pages no static route list can reach: each is behind a click. */
   test("a video's own page too", async ({ page }) => {
