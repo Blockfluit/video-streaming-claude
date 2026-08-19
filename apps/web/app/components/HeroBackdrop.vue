@@ -203,7 +203,24 @@ watch(() => [props.trailerId, props.paused], startTrailer)
  * with room to spare and gives the difference back to the picture.
  */
 const band = computed(() => ({
-  wide: 'h-[46svh] min-h-72 sm:h-[58svh] sm:min-h-100',
+  /*
+   * `svh` rather than `vh` is the fix this needed; shrinking the proportion as
+   * well was an overreach, and it broke the page.
+   *
+   * This hero is squeezed between two bands it does not own: the fixed 4rem
+   * header above it, and the 4rem at its foot that the page pulls itself up
+   * over with `-mt-16` so the artwork runs behind the cards. Its content — an
+   * eyebrow, a title that wraps to three lines on a long name, a call to
+   * action and the rotation dots — measures about 280px on a phone. At 46svh
+   * there were only 246px between those two bands, so the dots finished 17px
+   * *below* where "Continue watching" starts, and lifting them with padding
+   * pushed the eyebrow up under the wordmark instead. Both ends, not one.
+   *
+   * So: the documented 58% stays, and the two bands are reserved explicitly
+   * below `sm` rather than left to a centring calculation that knows nothing
+   * about either of them.
+   */
+  wide: 'h-[58svh] min-h-100 pt-16 pb-16 sm:pt-0 sm:pb-0',
   tall: 'min-h-100 pt-20 pb-10 sm:min-h-140 sm:pt-28',
   full: 'min-h-[88svh] pt-20 pb-10 sm:pt-28',
 }[props.size ?? 'wide']))

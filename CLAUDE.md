@@ -1038,6 +1038,17 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   is worse than one imperfect one — a `display: block` card view also drops the table's implicit ARIA roles
   and doubles the markup `visible.spec.ts` walks, half of it markup nobody looks at on a desktop. The
   identifying column is first in all of them, so the useful half is on screen before anyone scrolls.
+- **A secure-context API cannot be called directly — the dev server is reached over plain HTTP.**
+  `crypto.randomUUID` and `navigator.clipboard` exist only on HTTPS or `localhost`, and are `undefined`
+  on `http://192.168.x.x:3100`, which is exactly how the app is opened from a phone on the LAN. The
+  player called `crypto.randomUUID()` at setup, so hydration threw and **Nuxt replaced the page with its
+  own 500** — reported as "the video page 500s", though nothing server-side had failed. `newPlaySessionId`
+  in `app/utils/` falls back to `crypto.getRandomValues`, which carries no such restriction, and still
+  produces a **real UUID** because `heartbeatSchema` declares `playSessionId: z.uuid()` — anything merely
+  unique would be refused on every beat and lose the view count silently. The clipboard copy on
+  `/admin/users` is the same trap on the one value shown exactly once, and now says so rather than
+  throwing into a void. The browser suite cannot catch this class: it runs on `localhost`, which *is* a
+  secure context.
 - **No media query reaches JavaScript.** Every responsive decision is CSS — a `sm:` prefix,
   `@media (pointer: coarse)`, `@media (hover: hover)`. A `matchMedia` branch deciding *what to render*
   disagrees with the server, and a hydration mismatch is a `pageerror`, which the suite's

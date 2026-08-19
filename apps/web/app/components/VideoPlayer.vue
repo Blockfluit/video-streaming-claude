@@ -43,7 +43,7 @@ const api = useApi()
 const video = ref<HTMLVideoElement | null>(null)
 
 /** One per page load. This is what makes a view countable. */
-const playSessionId = crypto.randomUUID()
+const playSessionId = newPlaySessionId()
 
 const { data: subtitles } = await useApiData<{ items: SubtitleTrack[] }>(
   `subs-${props.videoId}`,

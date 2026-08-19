@@ -234,10 +234,27 @@ async function mint() {
   }
 }
 
+/**
+ * `navigator.clipboard` is a **secure-context** API, like `crypto.randomUUID`:
+ * on any origin that is not HTTPS or localhost it is simply `undefined`. This
+ * screen opened from a phone over plain HTTP therefore threw on the one button
+ * that matters most — a minted token is shown once and never again — and, being
+ * an unhandled rejection inside an `async` handler, it said nothing at all. The
+ * success toast used to be outside the attempt, so it claimed the copy had
+ * worked either way.
+ */
 async function copy(value: string | null, what: string) {
   if (!value) return
-  await navigator.clipboard.writeText(value)
-  toast.add({ title: `${what} copied`, color: 'success' })
+  try {
+    await navigator.clipboard.writeText(value)
+    toast.add({ title: `${what} copied`, color: 'success' })
+  }
+  catch {
+    toast.add({
+      title: `Could not copy automatically — select the ${what.toLowerCase()} and copy it by hand`,
+      color: 'warning',
+    })
+  }
 }
 
 async function revoke(invite: Invite) {

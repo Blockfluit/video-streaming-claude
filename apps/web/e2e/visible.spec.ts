@@ -1,5 +1,5 @@
 import { AUDIT } from './audit'
-import { expect, fillStable, test, visit } from './fixtures'
+import { expect, fillStable, test, visit, visitPlayer } from './fixtures'
 
 /*
  * The audit itself lives in `audit.ts` rather than here, because importing it
@@ -200,7 +200,15 @@ test.describe('legibility', () => {
     })
     test.skip(target === null, 'no collection here holds two videos')
 
-    await visit(page, target!)
+    /*
+     * `visitPlayer`, never `visit`. A playing video issues a range request
+     * every few seconds, so `/watch/:slug` never reaches `networkidle` and the
+     * wait inside `visit` runs until the *test* times out — a hang with no
+     * failing assertion to point at the cause. This was the last `visit` left
+     * on a player URL, and it is why this test failed intermittently: it only
+     * passed on the runs where playback happened not to start.
+     */
+    await visitPlayer(page, target!)
     // By label, so this holds whichever end of the sequence we landed on.
     await expect(page.getByLabel('Next episode')).toBeVisible()
     await expect(page.getByLabel('Previous episode')).toBeVisible()
