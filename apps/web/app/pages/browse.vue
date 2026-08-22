@@ -150,13 +150,13 @@ const total = computed(() => data.value?.total ?? 0)
 const chips = computed(() => activeFilterChips(filters.value))
 
 /**
- * Whether the filter controls are showing, which is a question only a phone
- * asks: from `sm` up the row is always laid out and the button that toggles
- * this is not rendered at all.
+ * Whether the filter controls are showing. They are not, to begin with — at
+ * every width, so there is one behaviour to understand rather than a panel on
+ * one side of a breakpoint and a permanent row on the other.
  *
- * Closed to begin with — the same value on the server and on the client's first
- * render, so nothing here depends on knowing the viewport before hydration.
- * What is *applied* stays on screen either way, as the chips below the row.
+ * Closed on the server and on the client's first render alike, so nothing here
+ * depends on knowing the viewport before hydration. What is *applied* stays on
+ * screen either way, as the chips below the row and as the count on the button.
  */
 const filtersOpen = ref(false)
 
@@ -378,37 +378,59 @@ useHead({ title: 'Browse' })
         whether or not you have opened the filters.
       -->
       <span class="text-sm text-(--ui-text-muted)">{{ countLabel }}</span>
-      <UInput
-        v-model="search"
-        icon="i-lucide-search"
-        placeholder="Search titles, genres and cast"
-        class="w-full sm:ml-auto sm:w-72"
-      />
+
+      <!--
+        The search box and the way to the filters, kept together so they wrap as
+        one thing rather than the button stranding itself on a line of its own.
+
+        On the **left**, under the heading, rather than out on the right margin:
+        searching is the first thing anyone does here, and it reads better where
+        the eye already is than at the far edge of a wide screen.
+      -->
+      <div class="flex w-full items-center gap-2">
+        <!--
+          First, and the widest thing in the row: searching is what this page is
+          for, so it starts where the reading does rather than at the far edge
+          of a wide screen.
+        -->
+        <UInput
+          v-model="search"
+          icon="i-lucide-search"
+          placeholder="Search titles, genres and cast"
+          class="grow sm:w-72 sm:grow-0"
+        />
+
+        <!--
+          The filters fold away, at **every** width.
+
+          Four selects laid out inline is the page for finding something to
+          watch opening on everything except the things to watch: on a phone
+          they pushed the first poster below the fold, and on a desktop they
+          are still a row of controls above the only thing anyone came for.
+          Searching is what people do here; narrowing by genre is occasional,
+          so it is one press away rather than permanently on screen.
+
+          One disclosure rather than a panel here and an inline row there. Two
+          idioms for one control is how they drift, and it would mean two sets
+          of the same four selects in the markup.
+
+          No media query reaches JavaScript for this: `filtersOpen` is false on
+          the server and on the client's first render alike.
+        -->
+        <UButton
+          color="neutral"
+          variant="subtle"
+          class="shrink-0"
+          :icon="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-sliders-horizontal'"
+          :aria-expanded="filtersOpen"
+          aria-controls="browse-filters"
+          @click="filtersOpen = !filtersOpen"
+        >
+          {{ chips.length ? `Filters (${chips.length})` : 'Filters' }}
+        </UButton>
+
+      </div>
     </div>
-
-    <!--
-      On a phone the four selects stacked into a wall of controls above the
-      first poster — the page for finding something to watch, opening on
-      everything except the things to watch. They fold behind this instead, and
-      the button carries the number of filters actually narrowing the list so
-      folding them away never hides that they are on.
-
-      It is `sm:hidden` and the row below is `sm:flex`, so above `sm` the
-      controls are simply always there and this button does not exist. No media
-      query is read in JavaScript: `filtersOpen` is false on the server and on
-      the client's first render alike, and the breakpoint does the rest.
-    -->
-    <UButton
-      class="sm:hidden"
-      color="neutral"
-      variant="subtle"
-      :icon="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-sliders-horizontal'"
-      :aria-expanded="filtersOpen"
-      aria-controls="browse-filters"
-      @click="filtersOpen = !filtersOpen"
-    >
-      {{ chips.length ? `Filters (${chips.length})` : 'Filters' }}
-    </UButton>
 
     <!--
       Every control names its own job in an aria-label. @nuxt/ui's triggers ship
@@ -418,7 +440,7 @@ useHead({ title: 'Browse' })
     -->
     <div
       id="browse-filters"
-      class="flex-wrap items-center gap-3 sm:flex"
+      class="flex-wrap items-center gap-3"
       :class="filtersOpen ? 'flex' : 'hidden'"
     >
       <USelectMenu

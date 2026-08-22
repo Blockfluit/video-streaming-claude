@@ -1,4 +1,4 @@
-import { expect, expectsRequest, fillStable, test, visit, visitPlayer } from './fixtures'
+import { expect, expectsRequest, fillStable, openBrowseFilters, test, visit, visitPlayer } from './fixtures'
 import type { Page } from '@playwright/test'
 
 
@@ -269,8 +269,33 @@ test.describe('viewer', () => {
    * point of moving the merge onto the server is that this one request is what
    * decides the page.
    */
+  /**
+   * The filters are one press away on a desktop too, not only on a phone.
+   *
+   * Four selects laid out permanently above the grid is the page for finding
+   * something to watch opening on everything except the things to watch.
+   * Searching is the common act here; narrowing by genre is occasional.
+   *
+   * Asserted at this width specifically, because the three tests below open
+   * the panel and would therefore pass whether or not it started closed.
+   */
+  test('the filters start folded away, with search on its own', async ({ page }) => {
+    await visit(page, '/browse')
+
+    await expect(page.getByPlaceholder('Search titles, genres and cast')).toBeVisible()
+    await expect(page.locator('#browse-filters')).toBeHidden()
+    await expect(page.getByLabel('Sort the library')).toBeHidden()
+
+    // The grid is on screen without asking for anything.
+    await expect(page.locator('.poster-grid').first()).toBeVisible()
+
+    await openBrowseFilters(page)
+    await expect(page.getByLabel('Sort the library')).toBeVisible()
+  })
+
   test('the type filter reaches the API and lands in the URL', async ({ page }) => {
     await visit(page, '/browse')
+    await openBrowseFilters(page)
 
     await expectsRequest(page, /\/api\/library\?.*kind=SHOW/, 'GET', async () => {
       await page.getByLabel('Filter by films or shows').click()
@@ -282,6 +307,7 @@ test.describe('viewer', () => {
 
   test('the sort control reaches the API and lands in the URL', async ({ page }) => {
     await visit(page, '/browse')
+    await openBrowseFilters(page)
 
     await expectsRequest(page, /\/api\/library\?.*sort=year/, 'GET', async () => {
       await page.getByLabel('Sort the library').click()
@@ -306,6 +332,7 @@ test.describe('viewer', () => {
       return response.ok ? ((await response.json()).items ?? []) : []
     })
     test.skip(genres.length === 0, 'this library has no genres on it yet')
+    await openBrowseFilters(page)
 
     const genre = (genres[0] as { genre: string }).genre
     await expectsRequest(page, /\/api\/library\?.*genre=/, 'GET', async () => {

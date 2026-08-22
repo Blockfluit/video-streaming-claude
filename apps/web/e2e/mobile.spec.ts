@@ -240,13 +240,13 @@ test.describe('reordering episodes', () => {
 test.describe('the browse filters', () => {
 
   /*
-   * Folded away by default, because four stacked selects put the whole reason
-   * for the page — the posters — below the fold on a phone.
+   * Folded away by default — at every width, but it matters most here, where
+   * four stacked selects put the whole reason for the page below the fold.
    *
-   * The controls are the *same* elements the desktop lays out inline; only
-   * their container's `display` differs, so there is one set of filters rather
-   * than two that drift. This checks the fold rather than the button, and that
-   * opening it really reveals them.
+   * The desktop half of this behaviour is covered in `viewer.spec.ts`; what
+   * this adds is the width where the posters were actually being pushed off
+   * the screen. It checks the fold rather than the button, and that opening it
+   * really reveals the controls.
    */
   test('stay out of the way until they are asked for', async ({ page }) => {
     await visit(page, '/browse')
