@@ -112,7 +112,7 @@ const groups = computed(() => {
       <ul class="flex flex-wrap gap-2">
         <li v-for="credit in topBilled" :key="credit.id">
           <span
-            class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
+            class="inline-flex max-w-full items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
           >
             <!--
               A name is the way to that person's filmography.
@@ -124,9 +124,9 @@ const groups = computed(() => {
             -->
             <NuxtLink
               :to="`/people/${credit.person.slug}`"
-              class="rounded-sm font-medium hover:underline focus-visible:underline"
+              class="min-w-0 truncate rounded-sm font-medium hover:underline focus-visible:underline"
             >{{ credit.person.name }}</NuxtLink>
-            <span v-if="credit.characterName" class="text-(--ui-text-muted)">
+            <span v-if="credit.characterName" class="min-w-0 truncate text-(--ui-text-muted)">
               as {{ credit.characterName }}
             </span>
             <ImdbLink :imdb-id="credit.person.imdbId" kind="person" :label="credit.person.name" />
@@ -170,7 +170,7 @@ const groups = computed(() => {
         <ul class="flex flex-wrap gap-2">
           <li v-for="credit in group.credits" :key="credit.id">
             <span
-              class="inline-flex items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
+              class="inline-flex max-w-full items-center gap-2 rounded-full border border-(--ui-border-accented) bg-(--ui-bg-elevated) px-3 py-1.5 text-sm"
             >
               <!--
               A name is the way to that person's filmography.
@@ -182,9 +182,9 @@ const groups = computed(() => {
             -->
             <NuxtLink
               :to="`/people/${credit.person.slug}`"
-              class="rounded-sm font-medium hover:underline focus-visible:underline"
+              class="min-w-0 truncate rounded-sm font-medium hover:underline focus-visible:underline"
             >{{ credit.person.name }}</NuxtLink>
-              <span v-if="credit.characterName" class="text-(--ui-text-muted)">
+              <span v-if="credit.characterName" class="min-w-0 truncate text-(--ui-text-muted)">
                 as {{ credit.characterName }}
               </span>
               <!--

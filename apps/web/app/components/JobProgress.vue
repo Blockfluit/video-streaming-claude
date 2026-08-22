@@ -64,11 +64,14 @@ const eta = computed(() => {
       </NuxtLink>
 
       <div class="ml-auto flex gap-2">
+        <!-- Destructive, and it sits in a card that redraws as the job
+             progresses — so it is a small target that moves. -->
         <UButton
           v-if="pending"
           size="xs"
           color="error"
           variant="subtle"
+          class="tap justify-center"
           @click="emit('act', job, 'cancel')"
         >
           Cancel

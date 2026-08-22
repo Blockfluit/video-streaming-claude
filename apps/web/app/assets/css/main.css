@@ -192,18 +192,41 @@ body {
  * free — but `auto-fit` collapses the empty tracks, so a search matching three
  * titles stretches them across the whole width as three enormous posters.
  *
- * The tile floor is a fixed 11rem at every width, so a bigger screen buys more
- * posters and never larger ones. It briefly grew with the viewport — a clamp
- * that let a card reach 14rem past ~2930px — on the theory that a 4K screen
+ * The tile floor is a fixed 11rem at every width above 400px, so a bigger screen
+ * buys more posters and never larger ones. It briefly grew with the viewport — a
+ * clamp that let a card reach 14rem past ~2930px — on the theory that a 4K screen
  * wants a bigger picture as well as more of them. On a real 4K screen it just
  * read as everything being too big: the wall is made of the same cards the rest
  * of the app draws, and enlarging them only there makes the page look zoomed.
  * Extra width goes into the column count and into the margins.
+ *
+ * **Below 400px the floor drops and the wall is two explicit columns**, because
+ * 11rem cannot fit two tracks there. `.page-shell` leaves 343px at a 375px
+ * viewport, and two 176px tiles with a 1rem gap need 368px — so `auto-fill`
+ * found room for exactly one, and every phone got a single poster filling the
+ * screen. One title per screenful is not a wall.
+ *
+ * The exception is continuous with the rule it bends. At exactly 400px it
+ * produces a 176px tile, which is what `auto-fill` produces one pixel wider;
+ * from there it shrinks to 163.5px at 375px. Seven per cent under the floor,
+ * against ninety-five per cent over it the other way.
+ *
+ * Written as `repeat(2, ...)` rather than a `min()` inside the `auto-repeat`,
+ * so the exception stays bounded and greppable instead of becoming a formula
+ * that changes the tile at every width — which is the thing the clamp above was
+ * removed for. And `minmax(0, 1fr)`, never `1fr`: `1fr` means `minmax(auto, 1fr)`,
+ * so one unbroken title sets a minimum wider than its share and collapses the
+ * grid straight back to a single column.
  */
 .poster-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+}
+@media (max-width: 25rem) {
+  .poster-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /**
@@ -252,6 +275,129 @@ body {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/**
+ * A table too wide for the screen scrolls sideways. It does not restack.
+ *
+ * The admin tables were wrapped in `overflow-hidden` for their rounded corners,
+ * which meant the columns that did not fit were not merely awkward to reach —
+ * they were **clipped**, with no way to scroll to them at all. The whole defect
+ * was that one keyword, so this replaces it on the same element rather than
+ * nesting a second one: any non-`visible` overflow still clips the corners, and
+ * the border stays put while the content moves under it, which is the look the
+ * radius was there for.
+ *
+ * The table itself needs `min-w-max` so it sizes to its content rather than to
+ * the box. Both that and `w-full` are required: `w-full` alone re-clips, and
+ * `min-w-max` alone lets a short table shrink below its container.
+ *
+ * Sideways scrolling, rather than a card view below `sm`, because the invite
+ * table on `/admin/users` has always worked this way deliberately — and two
+ * table idioms in one admin area is worse than one imperfect one. A
+ * `display: block` card view would also drop the table's implicit ARIA roles
+ * and double the markup `visible.spec.ts` has to walk, half of it markup nobody
+ * looks at on a desktop. The identifying column is first in every one of these
+ * tables, so the useful half is on screen before anyone scrolls.
+ */
+.table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/**
+ * A nested scroller keeps its overscroll to itself.
+ *
+ * Reaching the end of an episode rail should not hand the gesture to the page
+ * behind it, and a sideways flick that runs out of shelf should not be read as
+ * a back-swipe. Both are the default, and both feel like the app losing your
+ * place.
+ */
+.scroll-pane {
+  overscroll-behavior: contain;
+}
+
+/**
+ * A shelf that scrolls sideways, with the cards snapping to its gutter.
+ *
+ * `proximity`, never `mandatory`: mandatory snapping takes over a flick that
+ * lands between two cards and can leave someone unable to stop where they meant
+ * to. `scroll-padding-inline-start` matches `.page-shell`'s gutter so a snapped
+ * card lines up with the heading above it instead of tucking under the edge.
+ */
+.rail {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline-start: 1rem;
+}
+.rail > * {
+  scroll-snap-align: start;
+}
+@media (min-width: 640px) {
+  .rail {
+    scroll-padding-inline-start: 2rem;
+  }
+}
+
+/**
+ * A target big enough to hit with a thumb (WCAG 2.5.5, 44px).
+ *
+ * Applied to icon-only controls, destructive ones, and anything you are
+ * expected to press while the page is moving — not to everything. A
+ * text-labelled `size="xs"` button already measures about 30px tall and clears
+ * the 24px floor of 2.5.8 with the spacing around it, and growing every filter
+ * chip to 44px turns one row of them into three for no gain anyone can feel.
+ * What genuinely fails is the icon-only set: a bare `size-5` anchor is 20px.
+ *
+ * Real box growth via `min-*-size`, not a `::after` hit-area expander. An
+ * expander costs no layout and silently overlaps whatever sits beside it,
+ * stealing that control's taps — and these live in dense toolbars where the
+ * neighbour is usually the one you did not mean to press.
+ */
+@media (pointer: coarse) {
+  .tap {
+    min-block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+  }
+}
+
+/**
+ * The hero's scrim, which runs bottom-up on a phone and left-to-right above it.
+ *
+ * The horizontal version is tuned for a wide frame where the text occupies the
+ * left third: it is opaque at 0%, 78% at 42%, and fully transparent by 72%. On
+ * a 375px screen the text column spans the whole width, so its right quarter
+ * sat on unscrimmed artwork — white type over whatever happened to be in the
+ * frame.
+ *
+ * On a phone the text is at the *bottom* rather than the left, so the scrim
+ * turns with it. This is not something `visible.spec.ts` can check: `backdrop()`
+ * returns null at the first `background-image` it meets and silently exempts
+ * that element **and every descendant** from the contrast checks. Judge it by
+ * eye.
+ *
+ * A class rather than the inline style it replaced, because a media query
+ * cannot live in a `style` attribute. It interpolates to `var(--ui-bg)` and
+ * never a hex, so it keeps landing on the colour actually behind it.
+ */
+.hero-side-scrim {
+  background: linear-gradient(
+    to top,
+    var(--ui-bg) 0%,
+    color-mix(in srgb, var(--ui-bg) 85%, transparent) 38%,
+    transparent 88%
+  );
+}
+@media (min-width: 640px) {
+  .hero-side-scrim {
+    background: linear-gradient(
+      to right,
+      var(--ui-bg) 0%,
+      color-mix(in srgb, var(--ui-bg) 78%, transparent) 42%,
+      transparent 72%
+    );
+  }
 }
 
 /**
@@ -320,10 +466,19 @@ body {
     transform 220ms cubic-bezier(0.2, 0, 0.2, 1),
     box-shadow 220ms cubic-bezier(0.2, 0, 0.2, 1);
 }
-.card-lift:hover {
-  transform: scale(1.06);
-  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.8);
-  z-index: 1;
+/*
+ * Guarded, because a touchscreen has no hover to leave. Chromium latches
+ * `:hover` onto the last thing tapped, so an unguarded rule leaves a card
+ * scaled and raised after you have already navigated away from it and come
+ * back — until you happen to tap somewhere else. The lift is for a pointer
+ * that can move without pressing; nothing is lost by saying so.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .card-lift:hover {
+    transform: scale(1.06);
+    box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.8);
+    z-index: 1;
+  }
 }
 
 @keyframes rise {
@@ -377,9 +532,30 @@ body {
   animation: offer-wipe var(--offer-seconds) linear forwards;
 }
 /* Reaching for a control should not be what makes it disappear. */
-.offer:hover .offer-wipe,
+@media (hover: hover) and (pointer: fine) {
+  .offer:hover .offer-wipe {
+    animation-play-state: paused;
+  }
+}
+/* Unguarded: a keyboard can still hold the offer open. */
 .offer:focus-within .offer-wipe {
   animation-play-state: paused;
+}
+
+/*
+ * A finger cannot hover and has nothing to focus, so on a touchscreen the sweep
+ * cannot be held at all. It gets longer rather than gaining a control: a "keep
+ * this" button would be a third thing inside a two-control overlay on a 343px
+ * screen, laid over video, next to the native control bar. Eight seconds of a
+ * bar filling in a straight line is the honest answer.
+ *
+ * Set through the custom property so the reduced-motion exemption below, which
+ * restates `animation-duration` from it, stays correct at the new value too.
+ */
+@media (pointer: coarse) {
+  .offer-wipe {
+    --offer-seconds: 8s;
+  }
 }
 
 @keyframes offer-wipe {

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// Imported rather than auto-imported: Nuxt's component scanner covers
+// `app/components`, not a package.
+import { DragDropProvider } from '@dnd-kit/vue'
+
 /**
  * A collection's own editor: details, seasons, credits and how it is doing.
  *
@@ -336,71 +340,111 @@ function regroup(): void {
 
 watch(collection, regroup, { immediate: true })
 
-/* --- dragging -------------------------------------------------------- */
+/* --- reordering ------------------------------------------------------ */
 
-const dragging = ref<{ videoId: string, from: string } | null>(null)
-const dropTarget = ref<string | null>(null)
+/**
+ * Dragging, by any pointer.
+ *
+ * This was HTML5 `draggable` and `dragstart`/`dragover`/`drop`, which fire
+ * **nothing at all** from a finger — so on a phone the one operation this page
+ * exists for did not exist, and nothing on screen said why. dnd-kit's
+ * `PointerSensor` works in Pointer Events, which are mouse, touch and pen
+ * through one path; its `KeyboardSensor` is in the default set, so the same
+ * gesture is available without a pointer at all.
+ *
+ * The shape of the interaction is unchanged: the list rearranges *under* the
+ * gesture rather than on release, because reordering is direct manipulation
+ * and a card that vanishes and reappears a round trip later is not that.
+ */
 
 /** A stable key per group, since a season id can be null. */
 const keyOf = (season: Season | null) => season?.id ?? 'loose'
 
-function onDragStart(event: DragEvent, video: VideoRow, group: Group) {
-  dragging.value = { videoId: video.id, from: keyOf(group.season) }
-  // Firefox refuses to start a drag at all without data on the transfer.
-  event.dataTransfer?.setData('text/plain', video.id)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+/** Where a video currently sits, which is the only state a move needs. */
+function locate(videoId: string): { group: Group, index: number } | null {
+  for (const group of groups.value) {
+    const index = group.videos.findIndex(video => video.id === videoId)
+    if (index !== -1) return { group, index }
+  }
+  return null
 }
 
-function onDragEnd() {
-  dragging.value = null
-  dropTarget.value = null
-}
+/** The group a drag last moved something into, so the drop knows what to send. */
+const movedInto = ref<Group | null>(null)
 
 /**
- * Moves the dragged card to `index` within `group`, in place.
+ * Rearranges under the pointer as it moves.
  *
- * Runs on dragover rather than on drop so the list rearranges under the cursor
- * and you can see where it will land. `index` of -1 means the end of the list,
- * which is what dropping on the container itself means.
+ * A drop onto another row takes that row's index; a drop onto a season's own
+ * box means the end of it, which is what dropping into an empty season has to
+ * mean — it has no rows to aim at, and pulling an episode back out of a season
+ * is exactly that case.
  */
-function reorderPreview(group: Group, index: number) {
-  const drag = dragging.value
-  if (!drag) return
+function onDragOver(event: { operation: { source?: { id?: unknown } | null, target?: { id?: unknown, type?: unknown } | null } }) {
+  const sourceId = event.operation.source?.id
+  const target = event.operation.target
+  if (sourceId === undefined || sourceId === null || !target) return
 
-  const source = groups.value.find(g => g.videos.some(v => v.id === drag.videoId))
-  if (!source) return
+  const from = locate(String(sourceId))
+  if (!from) return
 
-  const from = source.videos.findIndex(v => v.id === drag.videoId)
-  const target = index === -1 ? group.videos.length : index
-  if (source === group && (from === target || from === target - 1)) return
+  let into: Group | undefined
+  let at: number
 
-  const [moved] = source.videos.splice(from, 1)
+  if (target.type === 'season') {
+    into = groups.value.find(group => keyOf(group.season) === String(target.id))
+    if (!into || into === from.group) return
+    at = into.videos.length
+  }
+  else {
+    const over = locate(String(target.id))
+    if (!over) return
+    into = over.group
+    at = over.index
+  }
+
+  if (into === from.group && at === from.index) return
+
+  const [moved] = from.group.videos.splice(from.index, 1)
   if (!moved) return
-  group.videos.splice(source === group && from < target ? target - 1 : target, 0, moved)
+  into.videos.splice(at, 0, moved)
+  movedInto.value = into
+}
+
+/** Nothing moved, or it moved and the server has to be told. */
+function onDragEnd(event: { canceled?: boolean }) {
+  const into = movedInto.value
+  movedInto.value = null
+  if (!into) return
+
+  // A cancelled drag (Escape, or dropped on nothing) has still rearranged the
+  // list under the pointer, so it is put back rather than saved.
+  if (event.canceled) {
+    regroup()
+    return
+  }
+
+  void commit(into)
 }
 
 /**
- * Dragging over the group's own box, rather than over one of its rows.
+ * The same move, one step at a time, for a tap or a key.
  *
- * This has to move the card too, not just highlight — the rows carry `.stop`
- * on their own handler, so this fires for the gaps and, crucially, for an
- * empty season, which has no rows at all. Without it dropping onto a new
- * season sent the server that season's contents unchanged: an empty list,
- * which is a request that succeeds and does nothing.
+ * Dragging is a fine gesture with a mouse and an awkward one on a phone, where
+ * what you are dragging sits under your thumb and the page scrolls beneath it.
+ * These go through the same request, so there is one way the order is written.
  */
-function onGroupDragOver(group: Group) {
-  dropTarget.value = keyOf(group.season)
-  if (!dragging.value) return
-  // Already here: the row handlers own the position within a group.
-  if (group.videos.some(v => v.id === dragging.value!.videoId)) return
-  reorderPreview(group, -1)
+function moveBy(group: Group, index: number, direction: -1 | 1): void {
+  const to = index + direction
+  if (to < 0 || to >= group.videos.length) return
+
+  const [moved] = group.videos.splice(index, 1)
+  if (!moved) return
+  group.videos.splice(to, 0, moved)
+  void commit(group)
 }
 
 async function commit(group: Group) {
-  const drag = dragging.value
-  onDragEnd()
-  if (!drag) return
-
   try {
     // The whole season in one request. A PATCH per video is a dozen calls that
     // can half-fail, leaving an order nobody chose.
@@ -566,9 +610,9 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
             <UFormField label="Description">
               <UTextarea v-model="form.description" :rows="4" class="w-full" />
             </UFormField>
-            <div class="flex gap-4">
+            <div class="flex flex-wrap gap-4">
               <UFormField label="Year">
-                <UInput v-model.number="form.year" type="number" class="w-32" />
+                <UInput v-model.number="form.year" type="number" class="w-full sm:w-32" />
               </UFormField>
               <UFormField label="Tags" class="grow" hint="Comma separated">
                 <UInput v-model="form.tags" class="w-full" />
@@ -596,40 +640,42 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
         <UCard>
           <template #header><h2 class="font-semibold">Seasons and episodes</h2></template>
 
-          <div class="mb-4 flex items-end gap-2">
+          <div class="mb-4 flex flex-wrap items-end gap-2">
             <UFormField label="Add a season" hint="Leave blank for specials">
               <UInput
                 v-model.number="newSeasonNumber"
                 type="number"
                 placeholder="Number"
-                class="w-32"
+                class="w-full sm:w-32"
               />
             </UFormField>
             <UButton color="neutral" variant="subtle" @click="addSeason">Add</UButton>
           </div>
 
           <p class="mb-3 text-xs text-(--ui-text-muted)">
-            Drag an episode onto a season to move it. Where you drop it is the
-            order it plays in.
+            Drag an episode onto a season to move it, or use the arrows. Where
+            it lands is the order it plays in.
           </p>
 
+          <DragDropProvider @drag-over="onDragOver" @drag-end="onDragEnd">
           <div class="space-y-4">
             <!--
               A named region, not a bare div. Each season is an independent drop
               target, and without a name a screen reader announces a run of
               identical unlabelled groups.
             -->
-            <section
+            <SeasonDropZone
               v-for="group in groups"
               :key="keyOf(group.season)"
+              v-slot="{ isDropTarget }"
+              :id="keyOf(group.season)"
+            >
+            <section
               :aria-label="seasonLabel(group.season)"
               class="rounded-lg border p-3 transition-colors"
-              :class="dropTarget === keyOf(group.season)
+              :class="isDropTarget
                 ? 'border-(--ui-primary) bg-(--ui-bg-accented)'
                 : 'border-(--ui-border)'"
-              @dragover.prevent="onGroupDragOver(group)"
-              @dragenter.prevent="onGroupDragOver(group)"
-              @drop.prevent="commit(group)"
             >
               <div class="mb-2 flex items-center gap-2">
                 <h3 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
@@ -649,61 +695,23 @@ useHead(() => ({ title: collection.value?.title ?? 'Collection' }))
               </div>
 
               <ul v-if="group.videos.length" class="space-y-1">
-                <li
+                <EpisodeSortableRow
                   v-for="(video, index) in group.videos"
                   :key="video.id"
-                  draggable="true"
-                  class="flex cursor-grab items-center gap-3 rounded-md p-2 transition-opacity active:cursor-grabbing"
-                  :class="dragging?.videoId === video.id
-                    ? 'opacity-40'
-                    : 'hover:bg-(--ui-bg-elevated)'"
-                  @dragstart="onDragStart($event, video, group)"
-                  @dragend="onDragEnd"
-                  @dragover.prevent.stop="reorderPreview(group, index)"
-                  @drop.prevent.stop="commit(group)"
-                >
-                  <!-- The handle is decorative: the whole row is draggable, and
-                       a grip you must hit exactly is worse than one you cannot
-                       miss. -->
-                  <UIcon
-                    name="i-lucide-grip-vertical"
-                    aria-hidden="true"
-                    class="size-4 shrink-0 text-(--ui-text-dimmed)"
-                  />
-                  <span class="w-6 shrink-0 text-right text-xs tabular-nums text-(--ui-text-dimmed)">
-                    {{ index + 1 }}
-                  </span>
-                  <img
-                    :src="`/api/videos/${video.id}/banner`"
-                    alt=""
-                    loading="lazy"
-                    draggable="false"
-                    class="aspect-video w-16 shrink-0 rounded bg-(--ui-bg-accented) object-cover"
-                  >
-                  <span class="min-w-0 grow truncate text-sm">{{ video.title }}</span>
-                  <UBadge
-                    :color="video.state === 'PUBLISHED' ? 'success' : 'neutral'"
-                    variant="subtle"
-                    size="sm"
-                  >
-                    {{ video.state }}
-                  </UBadge>
-                  <QualityBadge :width="video.width" :height="video.height" />
-                  <UButton
-                    :to="`/admin/videos/${video.id}`"
-                    size="xs"
-                    color="neutral"
-                    variant="subtle"
-                  >
-                    Edit
-                  </UButton>
-                </li>
+                  :video="video"
+                  :index="index"
+                  :group="keyOf(group.season)"
+                  :count="group.videos.length"
+                  @move="moveBy(group, index, $event)"
+                />
               </ul>
               <p v-else class="py-3 text-center text-sm text-(--ui-text-dimmed)">
                 Drop an episode here.
               </p>
             </section>
+            </SeasonDropZone>
           </div>
+          </DragDropProvider>
 
         </UCard>
       </div>

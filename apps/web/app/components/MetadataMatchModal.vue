@@ -275,34 +275,41 @@ function show(value: unknown): string {
               Nothing here differs from what is already stored.
             </p>
 
-            <table v-else class="w-full text-sm">
-              <thead class="text-left text-xs uppercase tracking-wide text-(--ui-text-muted)">
-                <tr>
-                  <th class="w-8 pb-2" />
-                  <th class="pb-2">Field</th>
-                  <th class="pb-2">Now</th>
-                  <th class="pb-2">Would become</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-(--ui-border)">
-                <tr v-for="field in changes" :key="field.field">
-                  <td class="py-2 align-top">
-                    <UCheckbox
-                      :model-value="picked.has(field.field)"
-                      :aria-label="`Import ${FIELD_LABELS[field.field] ?? field.field}`"
-                      @update:model-value="toggle(field.field, $event === true)"
-                    />
-                  </td>
-                  <td class="py-2 align-top">{{ FIELD_LABELS[field.field] ?? field.field }}</td>
-                  <td class="py-2 align-top text-(--ui-text-muted)">
-                    <span class="line-clamp-3">{{ show(field.current) }}</span>
-                  </td>
-                  <td class="py-2 align-top">
-                    <span class="line-clamp-3">{{ show(field.proposed) }}</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <!--
+              Four columns of prose inside a modal, which on a phone is the one
+              step this whole dialog exists for. It scrolls rather than
+              squeezing "Would become" into 90px of one-word lines.
+            -->
+            <div v-else class="table-scroll">
+              <table class="w-full min-w-max text-sm">
+                <thead class="text-left text-xs uppercase tracking-wide text-(--ui-text-muted)">
+                  <tr>
+                    <th class="w-8 pb-2" />
+                    <th class="pb-2">Field</th>
+                    <th class="pb-2">Now</th>
+                    <th class="pb-2">Would become</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-(--ui-border)">
+                  <tr v-for="field in changes" :key="field.field">
+                    <td class="py-2 align-top">
+                      <UCheckbox
+                        :model-value="picked.has(field.field)"
+                        :aria-label="`Import ${FIELD_LABELS[field.field] ?? field.field}`"
+                        @update:model-value="toggle(field.field, $event === true)"
+                      />
+                    </td>
+                    <td class="py-2 align-top">{{ FIELD_LABELS[field.field] ?? field.field }}</td>
+                    <td class="py-2 align-top text-(--ui-text-muted)">
+                      <span class="line-clamp-3">{{ show(field.current) }}</span>
+                    </td>
+                    <td class="py-2 align-top">
+                      <span class="line-clamp-3">{{ show(field.proposed) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
             <div class="space-y-2 border-t border-(--ui-border) pt-4">
               <UCheckbox

@@ -188,14 +188,41 @@ onBeforeUnmount(() => {
 watch(() => [props.trailerId, props.paused], startTrailer)
 
 /**
- * `svh` rather than `vh` for the full-height hero: `vh` ignores a mobile
- * browser's collapsing address bar, so the hero is taller than the screen on
- * first paint and the page starts out scrolled by the height of the toolbar.
+ * `svh` rather than `vh`, everywhere it is a proportion of the screen: `vh` is
+ * the *large* viewport height, which ignores a mobile browser's collapsing
+ * address bar, so the hero is taller than the screen on first paint and the
+ * page starts out scrolled by the height of the toolbar. `full` said this all
+ * along and `wide` was simply missed — 58% of the large height on a 430×932
+ * phone is 540px that the toolbar then covers and uncovers as you scroll.
+ *
+ * The proportions themselves step down on a phone. 58% of a tall, narrow
+ * screen is a deep crop of a 16:9 backdrop — it reads worse *and* pushes the
+ * first shelf off the bottom — and `min-h-100` (400px) would override the
+ * percentage entirely at 375×812 anyway. `pt-28` is 112px of clearance for a
+ * 64px header, which is 17% of a short screen spent on nothing; 80px clears it
+ * with room to spare and gives the difference back to the picture.
  */
 const band = computed(() => ({
-  wide: 'h-[58vh] min-h-100',
-  tall: 'min-h-125 pt-28 pb-10 sm:min-h-140',
-  full: 'min-h-[88svh] pt-28 pb-10',
+  /*
+   * `svh` rather than `vh` is the fix this needed; shrinking the proportion as
+   * well was an overreach, and it broke the page.
+   *
+   * This hero is squeezed between two bands it does not own: the fixed 4rem
+   * header above it, and the 4rem at its foot that the page pulls itself up
+   * over with `-mt-16` so the artwork runs behind the cards. Its content — an
+   * eyebrow, a title that wraps to three lines on a long name, a call to
+   * action and the rotation dots — measures about 280px on a phone. At 46svh
+   * there were only 246px between those two bands, so the dots finished 17px
+   * *below* where "Continue watching" starts, and lifting them with padding
+   * pushed the eyebrow up under the wordmark instead. Both ends, not one.
+   *
+   * So: the documented 58% stays, and the two bands are reserved explicitly
+   * below `sm` rather than left to a centring calculation that knows nothing
+   * about either of them.
+   */
+  wide: 'h-[58svh] min-h-100 pt-16 pb-16 sm:pt-0 sm:pb-0',
+  tall: 'min-h-100 pt-20 pb-10 sm:min-h-140 sm:pt-28',
+  full: 'min-h-[88svh] pt-20 pb-10 sm:pt-28',
 }[props.size ?? 'wide']))
 
 /** Home centres its hero; a title page sits its text on the floor of the frame. */
@@ -274,11 +301,13 @@ watch(
       Two scrims. The bottom one is half the hero rather than a fixed height:
       on a short viewport a fixed value leaves the seam above the fold, which
       is exactly where it is most obvious.
+
+      The first turns with the text — bottom-up on a phone, where the column
+      spans the full width, and left-to-right above `sm`. See `.hero-side-scrim`
+      in `main.css`; it is a class rather than an inline style because a media
+      query cannot live in a `style` attribute.
     -->
-    <div
-      class="absolute inset-0"
-      style="background: linear-gradient(to right, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 78%, transparent) 42%, transparent 72%)"
-    />
+    <div class="hero-side-scrim absolute inset-0" />
     <div
       class="absolute inset-x-0 bottom-0 h-1/2"
       style="background: linear-gradient(to top, var(--ui-bg) 0%, color-mix(in srgb, var(--ui-bg) 55%, transparent) 55%, transparent 100%)"

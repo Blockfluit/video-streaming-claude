@@ -98,7 +98,13 @@ useHead(() => ({ title: person.value?.name ?? 'Person' }))
         asked `/videos/:id/thumbnail`, a route that no longer exists. The URLs
         come from `artwork.ts` for exactly that reason.
       -->
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4">
+      <!--
+        `.poster-grid`, not a fourth hand-rolled copy of it. This page drew the
+        same wall from its own arbitrary-value class, so the phone fix in
+        `main.css` reached browse, my-list and every collection and left a
+        filmography stacked one poster to a screen.
+      -->
+      <div class="poster-grid">
         <MediaCard
           v-for="card in group.cards"
           :key="card.creditId"

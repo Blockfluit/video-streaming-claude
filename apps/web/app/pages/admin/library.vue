@@ -192,8 +192,8 @@ useHead({ title: 'All titles' })
     <h1 class="text-2xl font-bold tracking-tight">Library</h1>
 
     <div class="flex flex-wrap gap-3">
-      <UInput v-model="q" icon="i-lucide-search" placeholder="Search titles" class="w-64" />
-      <USelect v-model="state" :items="STATES" aria-label="Filter by state" class="w-40" />
+      <UInput v-model="q" icon="i-lucide-search" placeholder="Search titles" class="w-full sm:w-64" />
+      <USelect v-model="state" :items="STATES" aria-label="Filter by state" class="w-full sm:w-40" />
     </div>
 
     <section v-if="collectionRows.length" class="space-y-2">
@@ -242,8 +242,8 @@ useHead({ title: 'All titles' })
       <h2 class="text-sm font-semibold tracking-wide text-(--ui-text-muted) uppercase">
         Videos ({{ videos?.total ?? 0 }})
       </h2>
-      <div class="overflow-hidden rounded-lg border border-(--ui-border)">
-        <table class="w-full text-sm">
+      <div class="table-scroll rounded-lg border border-(--ui-border)">
+        <table class="w-full min-w-max text-sm">
           <tbody class="divide-y divide-(--ui-border)">
             <tr v-for="video in videoRows" :key="video.id" class="hover:bg-white/[0.03]">
               <td class="p-3">

@@ -45,7 +45,17 @@ useHead({ title: 'History' })
     <h1 class="text-2xl font-semibold">History</h1>
 
     <ul v-if="items.length" class="divide-y divide-(--ui-border)">
-      <li v-for="item in items" :key="item.video.id" class="py-3 flex items-center gap-4">
+      <!--
+        The progress bar drops below the title on a phone rather than sharing
+        its line. A 160px bar and a 96px timecode, both `shrink-0`, left 55px
+        of a 343px row for the title — truncated to about four characters, on
+        every row of the page whose subject is which title you were watching.
+
+        The bar is `order-last` below `sm` so the timecode keeps the first
+        line company and the bar gets a full-width one of its own; above `sm`
+        the order goes back to the source order, which already fits.
+      -->
+      <li v-for="item in items" :key="item.video.id" class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
         <!--
           Back into playback rather than to the description: a history row is a
           resume surface, and its whole subject is where you got to.
@@ -57,7 +67,7 @@ useHead({ title: 'History' })
           </p>
         </NuxtLink>
 
-        <div class="w-40 shrink-0">
+        <div class="order-last w-full sm:order-none sm:w-40 sm:shrink-0">
           <div class="h-1.5 rounded-full bg-(--ui-bg-elevated) overflow-hidden">
             <div
               class="h-full bg-(--ui-primary)"
@@ -66,7 +76,7 @@ useHead({ title: 'History' })
           </div>
         </div>
 
-        <span class="w-24 shrink-0 text-right text-sm text-(--ui-text-muted) tabular-nums">
+        <span class="w-16 shrink-0 text-right text-sm text-(--ui-text-muted) tabular-nums sm:w-24">
           {{ item.progress.completed ? 'Watched' : timecode(item.progress.lastPositionSec) }}
         </span>
       </li>

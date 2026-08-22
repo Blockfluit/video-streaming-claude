@@ -57,6 +57,10 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
+      // The phone project's own specs, at 1280px, would be testing a drawer
+      // whose trigger is `lg:hidden` — every one of them fails against code
+      // that is working.
+      testIgnore: /mobile\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'e2e/.auth/state.json',
@@ -74,6 +78,47 @@ export default defineConfig({
          * which the player already handles by leaving the poster and the
          * controls exactly where they were.
          */
+        launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+      },
+      dependencies: ['setup'],
+    },
+    /*
+     * The same app at the width it is actually watched on.
+     *
+     * `hasTouch` is load-bearing rather than decoration: without it Chromium
+     * reports `pointer: fine`, and every `@media (pointer: coarse)` rule in
+     * `main.css` — the 44px targets, the longer start-over sweep, the disabled
+     * card lift — is never exercised. A green run would say nothing about the
+     * device the rules exist for.
+     *
+     * Not a device preset. `devices['iPhone 14']` implies WebKit, which is the
+     * wrong browser and carries neither the storage state nor the autoplay
+     * switch; spelling the viewport out keeps the two settings that matter at
+     * the call site.
+     *
+     * One width, not three. `workers: 1` makes each extra width a full serial
+     * pass, and 375 is the floor — what survives it survives the band.
+     */
+    {
+      name: 'phone',
+      /*
+       * Its own specs, plus the legibility audit — which is where the overflow
+       * check earns its keep, and the only mechanised look at layout there is:
+       * `vitest.config.ts` is `environment: 'node'` and says in as many words
+       * that component rendering is deliberately not tested here.
+       *
+       * The rest of the suite stays desktop-only on purpose. It asserts
+       * behaviour — requests fired, toasts shown, orders written — which does
+       * not change with the viewport, and `workers: 1` makes every extra file
+       * a serial pass.
+       */
+      testMatch: /(mobile|visible)\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 375, height: 812 },
+        hasTouch: true,
+        isMobile: true,
+        storageState: 'e2e/.auth/state.json',
         launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
       },
       dependencies: ['setup'],

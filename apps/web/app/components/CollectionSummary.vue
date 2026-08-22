@@ -403,7 +403,7 @@ const trailerOpen = ref(false)
             value-key="value"
             color="neutral"
             variant="subtle"
-            class="w-48"
+            class="w-full sm:w-48"
             aria-label="Choose a season"
             @update:model-value="chooseSeason"
           />

@@ -75,8 +75,8 @@ useHead({ title: 'Ingest' })
       description="Files are picked up automatically. A scan is only needed if the watcher was off."
     />
 
-    <div v-if="issues?.items?.length" class="overflow-hidden rounded-lg border border-(--ui-border)">
-      <table class="w-full text-sm">
+    <div v-if="issues?.items?.length" class="table-scroll rounded-lg border border-(--ui-border)">
+      <table class="w-full min-w-max text-sm">
         <thead class="bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
           <tr>
             <th class="p-3">Problem</th>

@@ -201,7 +201,7 @@ useHead({ title: 'Home page rows' })
 
     <div>
       <div class="flex flex-wrap items-end gap-2">
-        <UFormField label="Title" class="w-64">
+        <UFormField label="Title" class="w-full sm:w-64">
           <UInput
             v-model="newTitle"
             placeholder="New row title"
@@ -209,7 +209,7 @@ useHead({ title: 'Home page rows' })
             @keyup.enter="create"
           />
         </UFormField>
-        <UFormField label="Contents" class="w-56">
+        <UFormField label="Contents" class="w-full sm:w-56">
           <USelect
             v-model="newSource"
             :items="sourceOptions"
@@ -269,7 +269,7 @@ useHead({ title: 'Home page rows' })
 
       <!-- Only the settings this source actually reads. -->
       <div v-if="!reads(row, 'items')" class="mb-4 flex flex-wrap items-end gap-3">
-        <UFormField v-if="reads(row, 'kind')" label="Cards show" class="w-48">
+        <UFormField v-if="reads(row, 'kind')" label="Cards show" class="w-full sm:w-48">
           <USelect
             :model-value="row.kind"
             :items="kindOptions"
@@ -279,7 +279,7 @@ useHead({ title: 'Home page rows' })
           />
         </UFormField>
 
-        <UFormField v-if="reads(row, 'maxItems')" label="How many" class="w-24">
+        <UFormField v-if="reads(row, 'maxItems')" label="How many" class="w-full sm:w-24">
           <UInput
             :model-value="row.maxItems"
             type="number"
@@ -292,7 +292,7 @@ useHead({ title: 'Home page rows' })
           />
         </UFormField>
 
-        <UFormField v-if="reads(row, 'windowDays')" label="Days back" class="w-28">
+        <UFormField v-if="reads(row, 'windowDays')" label="Days back" class="w-full sm:w-28">
           <UInput
             :model-value="row.windowDays ?? DEFAULT_TRENDING_WINDOW_DAYS"
             type="number"
@@ -305,7 +305,7 @@ useHead({ title: 'Home page rows' })
           />
         </UFormField>
 
-        <UFormField v-if="reads(row, 'tags')" label="Only these tags" class="w-64">
+        <UFormField v-if="reads(row, 'tags')" label="Only these tags" class="w-full sm:w-64">
           <UInput
             :model-value="row.tags.join(', ')"
             placeholder="Any tag"

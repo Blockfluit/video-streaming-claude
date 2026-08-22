@@ -110,8 +110,8 @@ useHead({ title: 'Drafts' })
       </UButton>
     </div>
 
-    <div v-if="drafts.length" class="overflow-hidden rounded-lg border border-(--ui-border)">
-      <table class="w-full text-sm">
+    <div v-if="drafts.length" class="table-scroll rounded-lg border border-(--ui-border)">
+      <table class="w-full min-w-max text-sm">
         <thead class="bg-(--ui-bg-elevated) text-left text-xs text-(--ui-text-muted) uppercase">
           <tr>
             <th class="w-10 p-3" />

@@ -125,13 +125,19 @@ const canDelete = (comment: CommentView) =>
               </button>
               <span v-if="comment.editedAt" class="text-xs text-(--ui-text-dimmed)">edited</span>
 
+              <!--
+                `pointer-coarse:opacity-100` because a finger cannot hover and
+                `focus:` only lands after the tap that has already deleted the
+                comment: without it the one destructive control in a thread is
+                permanently dimmed on the device the thread is read on.
+              -->
               <UButton
                 v-if="canDelete(comment)"
                 icon="i-lucide-trash-2"
                 variant="ghost"
                 color="neutral"
                 size="xs"
-                class="ml-auto opacity-60 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                class="tap ml-auto justify-center opacity-60 transition-opacity group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100"
                 aria-label="Delete comment"
                 @click="remove(comment)"
               />

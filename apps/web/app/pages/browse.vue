@@ -149,6 +149,17 @@ const cards = computed(() => [...(data.value?.items ?? []), ...appended.value])
 const total = computed(() => data.value?.total ?? 0)
 const chips = computed(() => activeFilterChips(filters.value))
 
+/**
+ * Whether the filter controls are showing, which is a question only a phone
+ * asks: from `sm` up the row is always laid out and the button that toggles
+ * this is not rendered at all.
+ *
+ * Closed to begin with — the same value on the server and on the client's first
+ * render, so nothing here depends on knowing the viewport before hydration.
+ * What is *applied* stays on screen either way, as the chips below the row.
+ */
+const filtersOpen = ref(false)
+
 /** Whether there is another window to ask for — the sentinel's whole condition. */
 const hasMore = computed(() => nextBrowsePage(cards.value.length, total.value) !== null)
 
@@ -359,15 +370,45 @@ useHead({ title: 'Browse' })
     making use of the space; it read as the one page that would not line up.
   -->
   <div class="page-shell space-y-6 pt-24 pb-16">
-    <div class="flex items-center gap-4 flex-wrap">
-      <h1 class="text-2xl font-semibold grow">Browse</h1>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <h1 class="text-2xl font-semibold">Browse</h1>
+      <!--
+        The count moves up here because the filter row it used to sit in is
+        folded away on a phone, and "how much is there" is worth answering
+        whether or not you have opened the filters.
+      -->
+      <span class="text-sm text-(--ui-text-muted)">{{ countLabel }}</span>
       <UInput
         v-model="search"
         icon="i-lucide-search"
         placeholder="Search titles, genres and cast"
-        class="w-72"
+        class="w-full sm:ml-auto sm:w-72"
       />
     </div>
+
+    <!--
+      On a phone the four selects stacked into a wall of controls above the
+      first poster — the page for finding something to watch, opening on
+      everything except the things to watch. They fold behind this instead, and
+      the button carries the number of filters actually narrowing the list so
+      folding them away never hides that they are on.
+
+      It is `sm:hidden` and the row below is `sm:flex`, so above `sm` the
+      controls are simply always there and this button does not exist. No media
+      query is read in JavaScript: `filtersOpen` is false on the server and on
+      the client's first render alike, and the breakpoint does the rest.
+    -->
+    <UButton
+      class="sm:hidden"
+      color="neutral"
+      variant="subtle"
+      :icon="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-sliders-horizontal'"
+      :aria-expanded="filtersOpen"
+      aria-controls="browse-filters"
+      @click="filtersOpen = !filtersOpen"
+    >
+      {{ chips.length ? `Filters (${chips.length})` : 'Filters' }}
+    </UButton>
 
     <!--
       Every control names its own job in an aria-label. @nuxt/ui's triggers ship
@@ -375,21 +416,25 @@ useHead({ title: 'Browse' })
       visible text, so the accessible name of the control that picks a genre
       would otherwise say nothing about genres.
     -->
-    <div class="flex flex-wrap items-center gap-3">
+    <div
+      id="browse-filters"
+      class="flex-wrap items-center gap-3 sm:flex"
+      :class="filtersOpen ? 'flex' : 'hidden'"
+    >
       <USelectMenu
         :model-value="filters.genres"
         :items="genreOptions"
         multiple
         placeholder="Any genre"
         aria-label="Filter by genre"
-        class="w-52"
+        class="w-full sm:w-52"
         @update:model-value="(genres: string[]) => apply({ genres })"
       />
       <USelect
         :model-value="filters.kind"
         :items="KIND_OPTIONS"
         aria-label="Filter by films or shows"
-        class="w-36"
+        class="w-full sm:w-36"
         @update:model-value="(value: string) => apply({ kind: asKind(value) })"
       />
       <USelect
@@ -397,7 +442,7 @@ useHead({ title: 'Browse' })
         :items="SORT_OPTIONS"
         icon="i-lucide-arrow-up-down"
         aria-label="Sort the library"
-        class="w-44"
+        class="w-full sm:w-44"
         @update:model-value="(value: string) => apply({ sort: asSort(value) })"
       />
       <!--
@@ -410,11 +455,9 @@ useHead({ title: 'Browse' })
         :model-value="filters.state"
         :items="STATE_OPTIONS"
         aria-label="Filter by lifecycle state"
-        class="w-40"
+        class="w-full sm:w-40"
         @update:model-value="(value: string) => apply({ state: asState(value) })"
       />
-
-      <span class="ml-auto text-sm text-(--ui-text-muted)">{{ countLabel }}</span>
     </div>
 
     <div v-if="chips.length" class="flex flex-wrap items-center gap-2">

@@ -345,7 +345,7 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
         <MediaCard
           v-for="entry in otherVideos"
           :key="entry.id"
-          class="w-56 sm:w-64"
+          class="w-40 sm:w-64"
           :to="playPath(entry, primary.collection.slug)"
           :title="entry.title"
           :subtitle="runtime(entry.durationSec)"

@@ -309,7 +309,12 @@ useHead(() => ({ title: video.value?.title ?? 'Watch' }))
             pushed apart: with the margin on the first button, a second one lands
             beside the title and the row reads as two unrelated halves.
           -->
-          <div class="ml-auto flex items-center gap-2">
+          <!--
+            Wrapping, because Previous, Next, Details and Edit want about
+            410px and a phone has 343 - and none of them shrinks below its own
+            one-word label, so the row did not squeeze, it overflowed.
+          -->
+          <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
             <!--
               Stepping through the collection this was reached through.
 

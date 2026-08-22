@@ -117,7 +117,7 @@ useHead({ title: 'My List' })
           icon="i-lucide-x"
           color="neutral"
           size="xs"
-          class="absolute top-1.5 left-1.5 z-2 opacity-70 transition group-hover/item:opacity-100 focus-visible:opacity-100"
+          class="tap absolute top-1.5 left-1.5 z-2 justify-center opacity-70 transition group-hover/item:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
           :aria-label="`Remove ${item.collection?.title ?? item.video!.title}`"
           @click="remove(item)"
         />

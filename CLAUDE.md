@@ -1005,10 +1005,21 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
   identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
   stretches a three-result search into three enormous posters.
-- **A poster tile is `11rem` at every viewport width.** Letting it grow on large screens was tried — a
-  `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as more of them —
-  and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the app draws, so
-  enlarging them only there makes the page look zoomed. Extra width buys columns and margin, never size.
+- **A poster tile's floor is `11rem` at every viewport width above 400px.** Letting it grow on large screens
+  was tried — a `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as
+  more of them — and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the
+  app draws, so enlarging them only there makes the page look zoomed. Extra width buys columns and margin,
+  never size.
+  **Below 400px the floor drops and the wall is two explicit columns**, because 11rem cannot fit two tracks
+  there: `.page-shell` leaves 343px at 375px, and two 176px tiles with a 1rem gap need 368px, so `auto-fill`
+  found room for exactly one and every phone got a single poster filling the screen. The exception is a
+  `@media (max-width: 25rem)` override of `grid-template-columns` alone, and it is **continuous** with the
+  rule it bends — at exactly 400px it produces a 176px tile, identical to what `auto-fill` produces one pixel
+  wider, shrinking to 163.5px at 375px. Seven per cent under the floor, against ninety-five per cent over it.
+  Stated as `repeat(2, minmax(0, 1fr))` rather than a `min()` expression inside the `auto-repeat`, so the
+  exception stays bounded and greppable instead of becoming a formula that changes the tile at every width —
+  which is what the `clamp` was removed for. `minmax(0, 1fr)`, never `1fr`: `1fr` is `minmax(auto, 1fr)` and
+  one unbroken title collapses the grid back to a single column.
 - **Every page is `.page-shell` and nothing else.** One width, one gutter scale, the header included — so
   moving between two routes never shifts the content sideways. `/browse` and `/my-list` were briefly given a
   wider variant, on the reasoning that a wall of posters wants width in a way a synopsis does not: at 4K it
@@ -1018,6 +1029,94 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
   middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
   page.
+- **An admin table that does not fit scrolls sideways; it does not restack.** `.table-scroll` *replaces*
+  the wrapper's `overflow-hidden` rather than nesting inside it — that one keyword was the whole defect,
+  since any non-`visible` overflow still clips the rounded corners, and the border then stays put while the
+  content moves under it. The `<table>` needs `min-w-max` alongside `w-full`: `w-full` alone re-clips,
+  `min-w-max` alone lets a short table shrink. Sideways rather than a card view below `sm` because the
+  invite table on `/admin/users` has always done this deliberately, and two table idioms in one admin area
+  is worse than one imperfect one — a `display: block` card view also drops the table's implicit ARIA roles
+  and doubles the markup `visible.spec.ts` walks, half of it markup nobody looks at on a desktop. The
+  identifying column is first in all of them, so the useful half is on screen before anyone scrolls.
+- **A secure-context API cannot be called directly — the dev server is reached over plain HTTP.**
+  `crypto.randomUUID` and `navigator.clipboard` exist only on HTTPS or `localhost`, and are `undefined`
+  on `http://192.168.x.x:3100`, which is exactly how the app is opened from a phone on the LAN. The
+  player called `crypto.randomUUID()` at setup, so hydration threw and **Nuxt replaced the page with its
+  own 500** — reported as "the video page 500s", though nothing server-side had failed. `newPlaySessionId`
+  in `app/utils/` falls back to `crypto.getRandomValues`, which carries no such restriction, and still
+  produces a **real UUID** because `heartbeatSchema` declares `playSessionId: z.uuid()` — anything merely
+  unique would be refused on every beat and lose the view count silently. The clipboard copy on
+  `/admin/users` is the same trap on the one value shown exactly once, and now says so rather than
+  throwing into a void. The browser suite cannot catch this class: it runs on `localhost`, which *is* a
+  secure context.
+- **No media query reaches JavaScript.** Every responsive decision is CSS — a `sm:` prefix,
+  `@media (pointer: coarse)`, `@media (hover: hover)`. A `matchMedia` branch deciding *what to render*
+  disagrees with the server, and a hydration mismatch is a `pageerror`, which the suite's
+  `failOnConsoleError` fixture turns into a failure of **every test in the file** rather than of the one
+  that caused it. VueUse's `useMediaQuery` is out for the same reason `refDebounced` is.
+- **`.tap` is for icon-only, destructive, and press-while-moving controls — not for everything.** WCAG
+  2.5.8's 24px floor is already cleared by a text-labelled `size="xs"` button at ~30px with its spacing;
+  what fails is the icon-only set, where a bare `size-5` anchor is 20px. A blanket 44px turns `/browse`'s
+  one row of filter chips into three for no gain. It grows the box with `min-block-size`/`min-inline-size`
+  rather than a `::after` hit-area expander — an expander costs no layout and silently covers its
+  neighbour, stealing the taps of the control next to it in exactly the dense toolbars it gets used in.
+- **`.card-lift:hover` lives inside `@media (hover: hover) and (pointer: fine)`.** Chromium latches
+  `:hover` onto the last element tapped, so unguarded it leaves a card scaled 1.06 and raised long after
+  you have navigated away and come back, until you happen to tap somewhere else.
+- **The start-over sweep cannot be paused on a touchscreen**, since there is no hover and nothing to focus.
+  It runs for 8s instead of 5 (`--offer-seconds` under `@media (pointer: coarse)`), rather than gaining a
+  "keep this" control — a third button inside a two-control overlay on a 343px screen, over video, beside
+  the native control bar. The override goes through the custom property because the reduced-motion
+  exemption restates `animation-duration` from it.
+- **`AUDIT` also measures horizontal overflow**, and it lives in `e2e/audit.ts` rather than in
+  `visible.spec.ts`: importing it *from a spec file* registers that file's tests too, which quietly ran the
+  whole legibility suite under the phone project. `document.documentElement.scrollWidth` against
+  `clientWidth` is the assertion; per-element rectangles are diagnosis, reported only when that fires. A
+  candidate is dropped when any ancestor's computed `overflow-x` is anything but `visible`, which exempts
+  the media rails, the `.no-scrollbar` shelves and the admin tables by **behaviour** rather than by a class
+  allowlist that would drift — and a clipped element is not overflowing anything either. Candidates
+  containing other candidates are dropped, so one bad chip reports once rather than seven times. Use
+  `getAttribute('class')`, never `className`: on an SVG that is an `SVGAnimatedString`, and slicing it
+  throws inside `page.evaluate` as an opaque evaluation failure.
+- **The hero's scrim runs bottom-up below `sm` and left-to-right above it** (`.hero-side-scrim`). The
+  horizontal version is tuned for text in the left third and fades to `transparent 72%`; on a phone the
+  text column spans the full width, so its right quarter sat on unscrimmed artwork. `visible.spec.ts`
+  **cannot** see this — `backdrop()` returns `null` at the first `background-image` and exempts that
+  element *and every descendant* from the contrast checks — so it is judged by eye. It is a class rather
+  than the inline style it replaced because a media query cannot live in a `style` attribute.
+- **Every hero proportion is `svh`, not `vh`.** `vh` is the *large* viewport height, so it ignores a mobile
+  browser's collapsing address bar and the hero opens taller than the screen. `full` always said this;
+  `wide` was missed and read `58vh`.
+- **The player's three overlays are one flex column, not three absolute siblings.** All of them sat at
+  `bottom-20` — 80px up a video that is 193px tall on a phone, so they floated at 41% of its height over
+  the picture — and Skip intro and Start over shared that offset with nothing keeping them apart, so
+  resuming into an intro put one on top of the other. A column makes the overlap impossible rather than
+  unlikely; the container is `pointer-events-none` because it spans the video and would otherwise swallow
+  every tap meant for the picture. They stay siblings of `<video>`, so **native fullscreen leaves them
+  behind** — accepted, since the alternative is the Fullscreen API and a control surface of our own, and
+  this player is deliberately the browser's.
+- **Episodes reorder with `@dnd-kit/vue`, and with arrows beside it.** HTML5 `draggable` fires *nothing*
+  from a finger, so `/admin/collections/:slug` — a page whose whole job is arranging episodes — had no
+  working reorder on a phone and said nothing about it. dnd-kit's `PointerSensor` reads Pointer Events,
+  which are mouse, touch and pen through one path, so the gesture a test drives with a mouse is the one a
+  thumb performs; its `KeyboardSensor` covers cross-season moves without a pointer at all. Checked, and
+  worth not re-checking: **`vuedraggable@next`** is UMD-only with no `exports` field (the recurring "does
+  not provide an export named 'default'" under Vite) and its open #286 is `RefImpl is not a constructor`
+  against Vue 3.5, which is this project's version; **`@vueuse/integrations`' `useSortable`** would promote
+  two phantom dependencies at once — the `refDebounced` mistake again — and cannot do cross-list at all;
+  **`sortablejs`** direct mutates the DOM behind Vue's back, so every wrapper has to undo the mutation
+  before splicing the array; **pragmatic-drag-and-drop** is built on HTML5 DnD and has no touch support.
+  The rows are their own component because `useSortable` is a composable and cannot be called in a `v-for`.
+  **Playwright cannot script a touch drag** (microsoft/playwright#39043 is open), so `dragOnto` in
+  `fixtures.ts` performs a *pointer* drag — and it scrolls both ends into view first, because `page.mouse`
+  works in viewport coordinates while `boundingBox()` will happily report a point below the fold, and a
+  gesture performed in empty space looks exactly like a drag implementation that does not work.
+- **`hasTouch: true` on the `phone` Playwright project is load-bearing.** Without it Chromium reports
+  `pointer: fine` and every `@media (pointer: coarse)` rule in `main.css` goes unexercised while the run
+  stays green. No device preset: `devices['iPhone 14']` implies WebKit — the wrong browser, carrying
+  neither the storage state nor `--autoplay-policy`. `mobile.spec.ts` plants a box that cannot fit and
+  checks the audit names it, because an audit reporting nothing looks exactly like an app with nothing
+  wrong with it.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
   `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
   did the server actually say" is how one screen ends up silently swallowing errors.

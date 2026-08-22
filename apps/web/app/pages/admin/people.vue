@@ -174,7 +174,7 @@ useHead({ title: 'People' })
 <template>
   <div class="space-y-6">
     <div>
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <h1 class="text-2xl font-bold tracking-tight">People</h1>
         <UButton
           color="neutral"
@@ -197,9 +197,9 @@ useHead({ title: 'People' })
     </div>
 
     <div class="flex flex-wrap gap-2">
-      <UInput v-model="search" icon="i-lucide-search" placeholder="Search" class="w-64" />
+      <UInput v-model="search" icon="i-lucide-search" placeholder="Search" class="w-full sm:w-64" />
       <div class="ml-auto flex gap-2">
-        <UInput v-model="newName" placeholder="New person" class="w-56" @keyup.enter="create" />
+        <UInput v-model="newName" placeholder="New person" class="w-full sm:w-56" @keyup.enter="create" />
         <UButton icon="i-lucide-plus" @click="create">Add</UButton>
       </div>
     </div>
