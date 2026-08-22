@@ -61,11 +61,23 @@ const KIND_ORDER: Record<LibraryEntryKind, number> = { collection: 0, film: 1 };
  * the page is then cut out of the result — so this is the most a search can
  * cost, not the most it can show.
  *
- * Ordering by the metric before the cut is what keeps the bound from changing
- * the answer: `candidates.ts` has already thrown away everything that does not
- * resemble the query at all, so five hundred survivors per side is far more
- * than a private library will produce for a query anybody actually types. Same
- * argument, and the same escape hatch, as `POOL_LIMIT` in
+ * **Ordering by the metric before the cut is what keeps the bound from changing
+ * the answer**, and that sentence was true of the design and false of the code.
+ * This was a `take` on a read ordered by `normalisedTitle`, so what it cut by
+ * was the alphabet: a film called `Winter` sitting behind five hundred rows
+ * whose only claim was that word in a synopsis was fetched, dropped and never
+ * scored. The search had found it and then thrown it away, which reads from the
+ * outside as the search not working — sometimes, on some queries, for no reason
+ * anybody can see.
+ *
+ * So the number moved to the two places that can honour that sentence:
+ * `CANDIDATE_LIMIT` in `candidates.ts`, where rows arrive ranked by similarity
+ * and this is the cut, and the indirect read in `LibraryService.searched`, whose
+ * routes no SQL ranking reaches and which `relevance.ts` already weights below
+ * one. Nothing caps the direct read any more, because nothing needs to: it can
+ * only return what `candidates.ts` already bounded.
+ *
+ * Same argument, and the same escape hatch, as `POOL_LIMIT` in
  * `lists/sources/computed.ts` — if this ever needs raising past what one query
  * should return, the ranking belongs in SQL rather than in a bigger number.
  */
@@ -200,24 +212,16 @@ function byYear(a: number | null, b: number | null): number {
  *
  * **A search cannot window at all**, and the argument above is exactly why: it
  * assumes the per-side SQL order *is* the merged order, and a searching request
- * is ordered by a score Postgres never computed. So a search reads a bounded
- * pool whole and the bound moves elsewhere — `candidates.ts` caps what may match
- * at all, and `RELEVANCE_POOL` caps what one side may contribute once the
- * filters have had their say.
+ * is ordered by a score Postgres never computed.
  *
- * Keyed on whether there is a search rather than on `sort === 'relevance'`,
- * because every sort is affected. A search scores its results whatever order
- * they are then shown in — that is what lets a fuzzy match be dropped for
- * matching nothing — and a `q` that meant one thing under Best match and
- * another under Title would be indefensible.
+ * So this answers browsing only. A search does not take a window of a larger
+ * read; it reads exactly the rows something upstream already bounded, which is
+ * a stricter thing and the reason for it is in `RELEVANCE_POOL`. This function
+ * took a `searching` flag and answered `{ skip: 0, take: RELEVANCE_POOL }` for
+ * it — a cap on a read ordered by title, which is where the search lost the
+ * answers it had already found.
  */
-export function perSideWindow(
-  offset: number,
-  limit: number,
-  searching: boolean,
-): { skip: number; take: number } {
-  if (searching) return { skip: 0, take: RELEVANCE_POOL };
-
+export function perSideWindow(offset: number, limit: number): { skip: number; take: number } {
   return { skip: 0, take: offset + limit };
 }
 

@@ -246,6 +246,10 @@ model Collection {
   /// and 1.000.
   @@index([title(ops: raw("gin_trgm_ops"))], map: "Collection_title_trgm_idx", type: Gin)
   @@index([normalisedTitle(ops: raw("gin_trgm_ops"))], map: "Collection_normalisedTitle_trgm_idx", type: Gin)
+  /// A synopsis is searched by substring, and the branch that does it is why
+  /// every other trigram index above was unreachable — see
+  /// 20260822140000_search_recall_indexes. `gin_trgm_ops` answers `ILIKE`.
+  @@index([description(ops: raw("gin_trgm_ops"))], map: "Collection_description_trgm_idx", type: Gin)
 }
 
 model Season {
@@ -415,6 +419,10 @@ model Video {
   /// and 1.000.
   @@index([title(ops: raw("gin_trgm_ops"))], map: "Video_title_trgm_idx", type: Gin)
   @@index([normalisedTitle(ops: raw("gin_trgm_ops"))], map: "Video_normalisedTitle_trgm_idx", type: Gin)
+  /// A synopsis is searched by substring, and the branch that does it is why
+  /// every other trigram index above was unreachable — see
+  /// 20260822140000_search_recall_indexes. `gin_trgm_ops` answers `ILIKE`.
+  @@index([description(ops: raw("gin_trgm_ops"))], map: "Video_description_trgm_idx", type: Gin)
 }
 
 // ---------------------------------------------------------------------------

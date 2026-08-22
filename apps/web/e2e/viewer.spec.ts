@@ -262,6 +262,40 @@ test.describe('viewer', () => {
   })
 
   /**
+   * Typing the instant the page appears, which is how people search.
+   *
+   * Deliberately **not** through `fillStable`. That helper retries the whole
+   * field until it sticks, which is the right thing for a test that is about
+   * something else and the wrong thing here: retrying is precisely what hides
+   * this bug. A server-rendered input takes keystrokes as soon as it is painted,
+   * and `v-model`'s mounted hook used to overwrite the element on hydration —
+   * so the letters typed in between were dropped and the page searched for
+   * whatever was left. `chernobyl` typed on arrival searched for `nobyl`; the
+   * window was about 300 ms in dev and narrower, not absent, in a build.
+   *
+   * It reads as the search being unreliable rather than as a bug with a cause,
+   * because whether it bites depends only on how fast you start typing. That is
+   * how it was reported: *sometimes* searching does nothing.
+   *
+   * `pressSequentially` rather than `fill`, because `fill` sets the value in one
+   * assignment and the real thing is a key at a time.
+   */
+  test('keeps every letter typed the moment the page appears', async ({ page }) => {
+    await page.goto('/browse')
+
+    // The grid paints from server-rendered markup, well before Vue is listening
+    // — which is the whole point: this is the earliest a person can start.
+    await expect(page.locator('main a[href^="/c/"]').first()).toBeVisible()
+
+    const box = page.locator(SEARCH)
+    await box.click()
+    await box.pressSequentially('zzzznothing', { delay: 40 })
+
+    await expect(box).toHaveValue('zzzznothing')
+    await expect(page).toHaveURL(/q=zzzznothing/)
+  })
+
+  /**
    * The type filter partitions the grid rather than hiding half of it.
    *
    * Asserted through `expectsRequest`, because a select that renders perfectly

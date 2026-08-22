@@ -15,7 +15,13 @@ import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { searchCandidates, type SearchCandidates } from './candidates';
-import { LIBRARY_SORTS, mergePage, perSideWindow, type LibraryEntry } from './merge';
+import {
+  LIBRARY_SORTS,
+  mergePage,
+  perSideWindow,
+  RELEVANCE_POOL,
+  type LibraryEntry,
+} from './merge';
 import { prepareSearch, scoreEntry, scoreText, WEIGHTS, type Search } from './relevance';
 
 /**
@@ -97,6 +103,17 @@ interface Found {
   candidates: SearchCandidates;
   personIds: string[];
 }
+
+/**
+ * Which half of a search a read is answering.
+ *
+ * `direct` is the entry's own text, ranked and bounded by `candidates.ts`.
+ * `indirect` is everything reached through something else — a credited person,
+ * a video standing on a shelf — which no bound upstream can have capped. See
+ * `searched`: the distinction exists so that the one cap a search still applies
+ * falls on the second and never on the first.
+ */
+type SearchRoute = 'direct' | 'indirect';
 
 /** How many credits and videos are worth reading to explain one card's score. */
 const EVIDENCE_CREDITS = 10;
@@ -213,7 +230,7 @@ export class LibraryService {
   }
 
   private async byColumn(query: ListLibraryQuery, role: Role): Promise<Page<LibraryCard>> {
-    const { skip, take } = perSideWindow(query.offset, query.limit, false);
+    const { skip, take } = perSideWindow(query.offset, query.limit);
     const { orderBy } = LIBRARY_SORTS[query.sort];
 
     const collectionWhere = this.collectionWhere(query, role);
@@ -254,6 +271,30 @@ export class LibraryService {
    * The whole pool is read rather than a window of it. `perSideWindow` explains
    * why; the short version is that a score is not a column, so no prefix of one
    * side is a prefix of the answer.
+   *
+   * **Each side is read twice, and the reason is the bound.** A search cannot
+   * window, so something has to cap what it reads — and every cap falls in some
+   * order, which for Prisma can only be a column. This read is not ordered by
+   * anything the search knows, so a cap on it lands by title, and a title match
+   * that happens to sort late is thrown away in favour of a row that matched one
+   * word of a synopsis. That is not a tuning problem; it is the search silently
+   * failing to find something it found.
+   *
+   * So the two routes are read apart, and only one of them is ever cut:
+   *
+   *   **direct**   the rows `candidates.ts` matched by their own text. Already
+   *                ranked and already bounded there, by similarity — so this
+   *                read takes it whole and cuts nothing.
+   *   **indirect** the rows reached only through a person, or through a video
+   *                standing on a shelf. Unbounded joins, so this one does carry
+   *                a cap, and what it can lose is a *weak* route: `relevance.ts`
+   *                weights every one of them below one on purpose.
+   *
+   * `notIn` keeps the second from re-reading the first, and it is load-bearing
+   * rather than tidy: a shelf that matched by its own title *and* holds a video
+   * that matched would otherwise come back from both reads and be scored,
+   * merged and shown twice. Spending the cap on rows the direct read did not
+   * already have is the lesser half of the reason.
    */
   private async searched(
     query: ListLibraryQuery,
@@ -266,25 +307,42 @@ export class LibraryService {
     const personIds = candidates.people.map((person) => person.id);
     const names = new Map(candidates.people.map((person) => [person.id, person.name]));
 
-    const { skip, take } = perSideWindow(query.offset, query.limit, true);
+    const found: Found = { candidates, personIds };
     const { orderBy } = LIBRARY_SORTS[query.sort];
+    const collectionSelect = {
+      ...COLLECTION_CARD,
+      ...collectionEvidence(role, candidates.videoIds, personIds),
+    };
+    const filmSelect = { ...FILM_CARD, ...filmEvidence(personIds) };
 
-    const [collections, films] = await this.prisma.$transaction([
-      this.prisma.collection.findMany({
-        where: this.collectionWhere(query, role, { candidates, personIds }),
-        select: { ...COLLECTION_CARD, ...collectionEvidence(role, candidates.videoIds, personIds) },
-        orderBy,
-        skip,
-        take,
-      }),
-      this.prisma.video.findMany({
-        where: this.filmWhere(query, role, { candidates, personIds }),
-        select: { ...FILM_CARD, ...filmEvidence(personIds) },
-        orderBy,
-        skip,
-        take,
-      }),
-    ]);
+    const [directShelves, indirectShelves, directFilms, indirectFilms] =
+      await this.prisma.$transaction([
+        this.prisma.collection.findMany({
+          where: this.collectionWhere(query, role, found, 'direct'),
+          select: collectionSelect,
+          orderBy,
+        }),
+        this.prisma.collection.findMany({
+          where: this.collectionWhere(query, role, found, 'indirect'),
+          select: collectionSelect,
+          orderBy,
+          take: RELEVANCE_POOL,
+        }),
+        this.prisma.video.findMany({
+          where: this.filmWhere(query, role, found, 'direct'),
+          select: filmSelect,
+          orderBy,
+        }),
+        this.prisma.video.findMany({
+          where: this.filmWhere(query, role, found, 'indirect'),
+          select: filmSelect,
+          orderBy,
+          take: RELEVANCE_POOL,
+        }),
+      ]);
+
+    const collections = [...directShelves, ...indirectShelves];
+    const films = [...directFilms, ...indirectFilms];
 
     const cast = (credits: { personId: string }[]): string[] =>
       credits.map((credit) => names.get(credit.personId)).filter((name): name is string => !!name);
@@ -388,7 +446,12 @@ export class LibraryService {
     return toPage(facets.slice(query.offset, query.offset + query.limit), facets.length, query);
   }
 
-  private collectionWhere(query: ListLibraryQuery, role: Role, found?: Found): object {
+  private collectionWhere(
+    query: ListLibraryQuery,
+    role: Role,
+    found?: Found,
+    route?: SearchRoute,
+  ): object {
     return {
       ...this.sharedFilters(query),
       /*
@@ -403,13 +466,26 @@ export class LibraryService {
        */
       ...(query.kind === 'SHOW' ? { seasons: { some: {} } } : {}),
       ...(query.kind === 'FILM' ? { seasons: { none: {} } } : {}),
-      ...(found ? { OR: this.collectionSearch(found, role) } : {}),
+      ...(found ? { OR: this.collectionSearch(found, role, route) } : {}),
+      /*
+       * The indirect read skips what the direct one already returned.
+       *
+       * Its `take` is the only cap a search still applies, so it is worth
+       * spending on rows nothing else brought back. `NOT` is free here — the
+       * search is the one thing on this object that uses it.
+       */
+      ...(route === 'indirect' ? { NOT: { id: { in: found?.candidates.collectionIds ?? [] } } } : {}),
       // Last, so nothing above can overwrite the visibility constraint.
       ...narrowToVisibleStates(role, query.state),
     };
   }
 
-  private filmWhere(query: ListLibraryQuery, role: Role, found?: Found): object {
+  private filmWhere(
+    query: ListLibraryQuery,
+    role: Role,
+    found?: Found,
+    route?: SearchRoute,
+  ): object {
     return {
       ...this.sharedFilters(query),
       /*
@@ -426,7 +502,11 @@ export class LibraryService {
        */
       AND: [
         ...whereFilm().AND,
-        ...(found ? [{ OR: this.filmSearch(found) }] : []),
+        ...(found ? [{ OR: this.filmSearch(found, route) }] : []),
+        // Inside the `AND` rather than beside it, for the reason above.
+        ...(route === 'indirect'
+          ? [{ id: { notIn: found?.candidates.videoIds ?? [] } }]
+          : []),
         ...(query.kind === 'SHOW' ? [{ id: { in: [] as string[] } }] : []),
       ],
       ...narrowToVisibleStates(role, query.state),
@@ -465,10 +545,20 @@ export class LibraryService {
    * filter like any other: a draft video's title or credit must not become a way
    * to learn what is in something the caller cannot see. That `OR` is the only
    * one inside the nested `video`, so it collides with nothing.
+   *
+   * Split by `route` because only one of the three is bounded: the first is the
+   * ranked id list `candidates.ts` already capped, and the other two are joins
+   * that can return anything. `searched` reads them apart so the cap it has to
+   * apply somewhere falls on the two weak routes rather than on the strong one.
    */
-  private collectionSearch({ candidates, personIds }: Found, role: Role): object[] {
+  private collectionSearch(
+    { candidates, personIds }: Found,
+    role: Role,
+    route: SearchRoute = 'direct',
+  ): object[] {
+    if (route === 'direct') return [{ id: { in: candidates.collectionIds } }];
+
     return [
-      { id: { in: candidates.collectionIds } },
       { credits: { some: creditedTo(personIds) } },
       {
         videos: {
@@ -496,8 +586,10 @@ export class LibraryService {
    * claims, so there is no shelf whose credits could match. The case it served
    * is answered by `collectionSearch` returning the shelf instead.
    */
-  private filmSearch({ candidates, personIds }: Found): object[] {
-    return [{ id: { in: candidates.videoIds } }, { credits: { some: creditedTo(personIds) } }];
+  private filmSearch({ candidates, personIds }: Found, route: SearchRoute = 'direct'): object[] {
+    return route === 'direct'
+      ? [{ id: { in: candidates.videoIds } }]
+      : [{ credits: { some: creditedTo(personIds) } }];
   }
 }
 
