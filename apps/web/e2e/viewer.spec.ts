@@ -246,6 +246,61 @@ test.describe('viewer', () => {
     await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
   })
 
+  /**
+   * The volume is the viewer's, not the video's.
+   *
+   * Only a browser can answer this. The level lives on the `<video>` element and
+   * the record of it lives in `localStorage`, so nothing about it is visible to
+   * a unit test or to `curl` — the page renders identically whether the setting
+   * is restored or thrown away, which is exactly the shape of bug this suite
+   * exists for.
+   *
+   * The volume is set by writing the property, which is what the browser's own
+   * slider does: the native control has no accessible handle to drag, and
+   * `volumechange` — the event the player listens to — fires the same way from
+   * either.
+   */
+  test('the volume a viewer sets survives a reload', async ({ page }) => {
+    await startPlaying(page)
+    const video = await withMetadata(page)
+    await video.evaluate((el: HTMLVideoElement) => {
+      el.volume = 0.23
+    })
+
+    const url = new URL(page.url()).pathname
+    await visitPlayer(page, url)
+    const reloaded = await withMetadata(page)
+
+    await expect
+      .poll(() => reloaded.evaluate((el: HTMLVideoElement) => el.volume))
+      .toBe(0.23)
+  })
+
+  /**
+   * Muted is its own state, kept beside the level rather than folded into it —
+   * the native control draws a crossed-out speaker for one and a slider at zero
+   * for the other, and unmuting has to have a level to come back to.
+   */
+  test('a viewer who muted stays muted, at the level they left', async ({ page }) => {
+    await startPlaying(page)
+    const video = await withMetadata(page)
+    await video.evaluate((el: HTMLVideoElement) => {
+      el.volume = 0.6
+      el.muted = true
+    })
+
+    const url = new URL(page.url()).pathname
+    await visitPlayer(page, url)
+    const reloaded = await withMetadata(page)
+
+    await expect
+      .poll(() => reloaded.evaluate((el: HTMLVideoElement) => el.muted))
+      .toBe(true)
+    await expect
+      .poll(() => reloaded.evaluate((el: HTMLVideoElement) => el.volume))
+      .toBe(0.6)
+  })
+
   const SEARCH = 'input[placeholder="Search titles, genres and cast"]'
 
   test('search narrows the browse page and survives a reload', async ({ page }) => {
