@@ -15,6 +15,14 @@
  * total order — `apps/api/src/library/merge.ts` ends every sort with `id` and
  * breaks collection/film ties by kind, precisely so a window cannot repeat or
  * skip a row. Change that and this file starts producing duplicate cards.
+ *
+ * `relevance` is total too, on score then title then kind then id — and ties are
+ * the *norm* under it rather than the exception, because a tiered score hands
+ * whole groups of entries the same number. It also rests on something the other
+ * three do not need: the same query must produce the same pool every time, which
+ * is why the candidate query in `library/candidates.ts` ends its own `ORDER BY`
+ * with `id`. A pool that is cut differently between two requests repeats a card
+ * here, and this file is where somebody will come looking when it does.
  */
 
 import { MAX_LIBRARY_OFFSET, MAX_PAGE_LIMIT } from '@video/shared'

@@ -49,7 +49,10 @@ const filters = computed(() => parseBrowseFilters(route.query))
  * cannot be forgotten the way an explicit reset here could be.
  */
 function apply(change: Partial<BrowseFilters>): void {
-  router.replace({ query: browseFiltersToQuery({ ...filters.value, ...change }) })
+  // Through `applyBrowseChange`, which decides whether the change implies a
+  // different sort — starting to search selects Best match, clearing it puts
+  // Title back, and an explicit choice survives both.
+  router.replace({ query: browseFiltersToQuery(applyBrowseChange(filters.value, change)) })
 }
 
 // The search box types locally and lands in the URL 250ms later — see
@@ -119,12 +122,6 @@ const KIND_OPTIONS = [
   { label: 'Any type', value: ANY },
   { label: 'Films', value: 'FILM' },
   { label: 'Shows', value: 'SHOW' },
-]
-
-const SORT_OPTIONS = [
-  { label: 'Title', value: 'title' },
-  { label: 'Year', value: 'year' },
-  { label: 'Recently added', value: 'added' },
 ]
 
 const STATE_OPTIONS = [
@@ -461,7 +458,7 @@ useHead({ title: 'Browse' })
       />
       <USelect
         :model-value="filters.sort"
-        :items="SORT_OPTIONS"
+        :items="browseSortOptions(filters)"
         icon="i-lucide-arrow-up-down"
         aria-label="Sort the library"
         class="w-full sm:w-44"
