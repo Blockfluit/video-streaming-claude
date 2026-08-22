@@ -1444,8 +1444,24 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   image's directory including its ownership, but creates the mount point root-owned when it does not
   exist — and the bootstrap token write then fails with `EACCES` on first boot. Bind mounts are never
   chowned by Docker at all, so `MEDIA_PATH` and `DERIVED_PATH` must be `chown 1000:1000` on the host.
-- Alpine is wrong for the API image: `@node-rs/argon2` ships prebuilt **glibc** binaries. The runtime
-  image also needs `ffmpeg`, which is most of its size.
+- The API image is **Alpine**, and the reason is `ffmpeg`, not Node. It was bookworm-slim on the
+  belief that `@node-rs/argon2` needs glibc; it does not — `@node-rs/argon2-linux-x64-musl` is a
+  published prebuilt in the same `optionalDependencies` list as the gnu one, and Prisma resolves
+  `schema-engine-linux-musl-openssl-3.0.x` the same way. Verified in the image, and all 870 API unit
+  tests pass on musl.
+- **Debian's `ffmpeg` package costs 457 MB to install two binaries under 600 KB**, because it has a
+  hard `Depends: libsdl2-2.0-0` for `ffplay`. SDL2 pulls Mesa, Mesa pulls libLLVM (112 MB) and libz3
+  (23 MB), and behind those come X11, Wayland, GTK/Cairo/Pango, PulseAudio and the
+  AMD/Intel/Nouveau/Radeon DRM drivers — 288 packages so a headless server can open a player window it
+  never opens. `--no-install-recommends` cannot decline them; they are Depends, not Recommends. Alpine
+  needs 123 packages and 184 MB, and ships no `ffplay`. Do not "simplify" the base back to Debian.
+- The **`prisma` CLI is a runtime dependency** (the entrypoint runs `migrate deploy`) and Prisma 7's
+  CLI bundles Prisma Studio — `@prisma/studio-core` drags in React, Radix UI, framer-motion, elkjs and
+  @visx, and `@prisma/config` drags in `effect`. That is ~290 MB of the image, and the API itself never
+  touches the CLI: it uses the generated client and `@prisma/adapter-pg`. Removing the subtree leaves
+  the API booting normally, so the saving is real, but it needs migrations to move to an init
+  container. The CLI eagerly requires both `@prisma/studio-core/data/bff` and
+  `@prisma/dev/internal/state`, so neither can simply be deleted.
 - **The pipeline stops at GHCR — nothing deploys.** `build-dev.yml` is a manual
   `workflow_dispatch` (GitHub's "Use workflow from" dropdown is the branch picker) and pushes two tags
   per image: the moving `<image_tag>` and an immutable `<image_tag>-<short sha>`, both derived from

@@ -10,11 +10,19 @@
 #   docker build --target api -t vsc-api .
 #   docker build --target web -t vsc-web .
 
-ARG NODE_IMAGE=node:24-bookworm-slim
+ARG NODE_IMAGE=node:24-alpine
 
 # ---------------------------------------------------------------------------
-# base — glibc, deliberately not Alpine: @node-rs/argon2 ships prebuilt glibc
-# binaries, and on musl it falls back to building from source or simply fails.
+# base — Alpine, and the reason is ffmpeg rather than the base image itself.
+#
+# This was bookworm-slim on the theory that @node-rs/argon2 needs glibc. It does
+# not: `@node-rs/argon2-linux-x64-musl` is a published prebuilt and npm resolves
+# it from the same optionalDependencies list as the gnu one, so nothing compiles
+# from source. Prisma picks its musl engine the same way. Both were verified in
+# the image, and the whole API unit suite passes on musl.
+#
+# The image is 1.01 GB where bookworm was 1.58 GB. Roughly 100 MB of that is the
+# smaller base; the rest is Debian's `ffmpeg` package (see the api stage).
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS base
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
@@ -81,11 +89,18 @@ RUN --mount=type=cache,target=/root/.npm \
 FROM base AS api
 
 # ffmpeg brings ffprobe with it. Both are spawned by name (FFMPEG_PATH /
-# FFPROBE_PATH default to bare `ffmpeg` / `ffprobe`), and a slim Node base has
+# FFPROBE_PATH default to bare `ffmpeg` / `ffprobe`), and a bare Node base has
 # neither — every probe, thumbnail and transcode fails without this.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+#
+# Alpine's package is 184 MB installed against Debian's 457 MB, for two binaries
+# that together are under 600 KB. The difference is not codecs, it is `ffplay`:
+# Debian's `ffmpeg` has a hard `Depends: libsdl2-2.0-0`, SDL2 pulls Mesa, and
+# Mesa pulls libLLVM (112 MB) and libz3 (23 MB) — plus X11, Wayland, GTK, and
+# the AMD/Intel/Nouveau/Radeon DRM drivers, 288 packages in all, so that a
+# headless server can open a video player window it will never open.
+# `--no-install-recommends` cannot decline any of it; those are Depends.
+# Alpine ships no ffplay and needs 123 packages.
+RUN apk add --no-cache ffmpeg
 
 # node_modules is hoisted entirely to the root, and node_modules/@video/shared
 # is a symlink to ../../packages/shared — so that path has to exist with a
