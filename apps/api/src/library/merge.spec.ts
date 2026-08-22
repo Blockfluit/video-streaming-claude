@@ -148,21 +148,27 @@ describe('LIBRARY_SORTS.relevance', () => {
   const { compare } = LIBRARY_SORTS.relevance;
 
   it('puts the better match first', () => {
-    expect(compare(film('a', 'matrix', { score: 1 }), film('b', 'thematrix', { score: 0.8 }))).toBeLessThan(0);
+    expect(
+      compare(film('a', 'matrix', { score: 1 }), film('b', 'thematrix', { score: 0.8 })),
+    ).toBeLessThan(0);
   });
 
   it('falls back to the title when two entries matched equally well', () => {
     // Ties are the norm here rather than the exception — a tier-based score
     // gives whole groups of entries the same number — so what happens next is
     // most of the order a reader actually sees.
-    expect(compare(film('b', 'alien', { score: 0.8 }), film('a', 'brazil', { score: 0.8 }))).toBeLessThan(0);
+    expect(
+      compare(film('b', 'alien', { score: 0.8 }), film('a', 'brazil', { score: 0.8 })),
+    ).toBeLessThan(0);
   });
 
   it('still puts a collection before a film they tie with', () => {
     // The rule `relevance.ts` weights every indirect route below one to protect:
     // a shelf must not be able to accumulate its way past the film it shares a
     // name with, because this is what decides that pair.
-    expect(compare(shelf('c', 'dune', { score: 1 }), film('v', 'dune', { score: 1 }))).toBeLessThan(0);
+    expect(
+      compare(shelf('c', 'dune', { score: 1 }), film('v', 'dune', { score: 1 })),
+    ).toBeLessThan(0);
   });
 
   it('never returns zero for two different entries', () => {

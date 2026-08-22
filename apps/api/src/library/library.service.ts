@@ -475,7 +475,10 @@ export class LibraryService {
           some: {
             video: {
               ...whereVisible(role),
-              OR: [{ id: { in: candidates.videoIds } }, { credits: { some: creditedTo(personIds) } }],
+              OR: [
+                { id: { in: candidates.videoIds } },
+                { credits: { some: creditedTo(personIds) } },
+              ],
             },
           },
         },

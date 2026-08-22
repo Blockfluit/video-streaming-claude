@@ -77,7 +77,7 @@ describe('prepareSearch', () => {
     // `q` is capped at 200 characters, which is a lot of one-letter words, and
     // every token costs an edit-distance pass over every word of every
     // candidate.
-    const many = Array.from({ length: 40 }, (_, index) => `word${index}`).join(' ');
+    const many = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
 
     expect(prepareSearch(many).tokens.length).toBeLessThanOrEqual(8);
   });
@@ -163,7 +163,8 @@ describe('scoreEntry — a shelf reached through a video on it', () => {
   it('ranks it below a shelf actually called that', () => {
     // Searching "azkaban" should answer with the shelf holding the film, but a
     // shelf genuinely named Azkaban is the better answer and must come first.
-    const viaVideo = score('azkaban', 'Harry Potter', { viaVideo: scoreText(search('azkaban'), 'Prisoner of Azkaban') });
+    const onShelf = scoreText(search('azkaban'), 'Prisoner of Azkaban');
+    const viaVideo = score('azkaban', 'Harry Potter', { viaVideo: onShelf });
 
     expect(viaVideo).toBeGreaterThan(0);
     expect(viaVideo).toBeLessThan(score('azkaban', 'Azkaban'));
