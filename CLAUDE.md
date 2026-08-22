@@ -586,10 +586,34 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   of the dictionary — `the` would find `she`. A fuzzy search returning junk is worse than one returning
   nothing, and these two rules are what stop it.
 - **A search reads a bounded pool whole; it cannot window.** `perSideWindow`'s argument assumes the per-side
-  SQL order *is* the merged order, and a score Postgres never computed is not a column. `RELEVANCE_POOL`
-  bounds it instead. Keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
+  SQL order *is* the merged order, and a score Postgres never computed is not a column.
+- **Every bound on a search falls in the order of the thing it is bounding, or it changes the answer.** This
+  is the rule the first version stated and did not keep: it capped the read at `RELEVANCE_POOL` with a
+  Prisma `take`, and a Prisma `take` falls in the order of a *column*, which for a search is the alphabet.
+  A film called `Winter` sitting behind five hundred rows whose only claim was that word in a synopsis was
+  found by Postgres, discarded before scoring, and never shown. Searching a title and not being shown it is
+  the feature failing outright, and it failed on where the title fell in the alphabet — so it looked
+  intermittent, which is how it was reported. Now `CANDIDATE_LIMIT` is the only cut on the text route and it
+  falls by similarity, `LibraryService.searched` reads the direct and indirect routes **apart**, and only the
+  indirect one — cast, and a shelf reached through a video on it, both weighted below one — still carries a
+  cap. Nothing that matched the text itself is ever cut by anything but how well it matched.
+- Lowering `CANDIDATE_LIMIT` from 2 000 to `RELEVANCE_POOL` trades away recall on a **heavily filtered**
+  library — `?q=drama&genre=Horror` now considers the 500 best resemblances rather than 2 000 — and that is
+  the right way round. The filters run after this, so a generous limit buys tail results for a narrowed
+  view; what it cost was the top of the list on every ordinary search.
+- Searching is keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
   drops unmatched rows whatever order it is then shown in, and a `q` meaning one thing under Best match and
   another under Title would be indefensible.
+- **The five recall clauses are a `UNION`, never one `OR`.** Postgres answers a disjunction from indexes only
+  when *every* branch has one, so a single un-indexed clause makes all five GIN indexes unreachable and the
+  search scans the table computing a trigram similarity per row. That is what it did: measured over 20 000
+  videos, 173 ms as an `OR` against 8 ms as a `UNION` of the three title branches, and 151 ms → 43 ms for the
+  whole video query. `description` is indexed for the same reason (`gin_trgm_ops` answers `ILIKE '%x%'`,
+  49 ms → 0.5 ms). `genres` cannot be: the expression that would need indexing is over `array_to_string`,
+  which is STABLE rather than IMMUTABLE — the same refusal `unaccent()` earns — so that branch scans one
+  narrow column, which is the cost `LibraryService.genres` already weighed and took.
+- A trigram index cannot serve a pattern under three characters, so a one- or two-letter search still scans.
+  Unchanged by any of the above, and no search anybody types is two letters long.
 - `total` for a search comes from the **scored pool**, never a `count()`. Postgres was asked a generous
   question, so a database count promises cards that scored nothing and were dropped — and `nextBrowsePage`
   walks until `loaded >= total`, so an overcount is a browse page that scrolls forever.
@@ -1205,8 +1229,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   a second test addresses a collection-scoped player directly. A control that is never on screen when the
   audit walks the page has not been judged by it, and the audit cannot tell you that.
 - Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
-  silently dropped. Tests go through `visit()`/`fillStable()` for this; it is also why a real user can lose
-  the first character typed into a search box.
+  silently dropped. Tests go through `visit()`/`fillStable()` for this.
+- That is not only a test problem, and calling it "the first character" understated it. `v-model`'s mounted
+  hook writes the model's value into the element on hydration, throwing away **everything** typed up to that
+  moment: on `/browse` in dev, typing from the instant the grid paints turned `chernobyl` into a search for
+  `nobyl`, and 150 ms later into `ernobyl`; from about 300 ms it was right. A production build narrows that
+  window without closing it, which makes it *harder* to diagnose, not rarer to hit — it reads as the search
+  being unreliable, because whether it bites depends only on how fast you start typing.
+  `useTypedBeforeHydration` fixes it by adopting whatever is in the element in **`onBeforeMount`** — by
+  `onMounted` the directive has already overwritten it, so reading there returns `''` every time and looks
+  like proof nothing was lost. Found by `id` for the same reason: a template ref is populated at mount, one
+  step too late. `/browse` uses it; the other six debounced boxes (`admin/library`, `admin/people`,
+  `admin/comments`, `admin/requests`, `CreditsEditor`, `useRemoteSearch`) have the same hazard and not yet
+  the same fix.
+- A test that *retries* a field — `fillStable` — cannot catch this, and one that types a key at a time can.
+  `viewer.spec.ts` deliberately uses `pressSequentially` with no retry for exactly one test, and the comment
+  there says so, because the obvious tidy-up is to route it through the helper like every other.
 - **A media event can fire before hydration too, and nothing replays it.** On a hard load the `<video>` and
   its `<source>` are in the server-rendered HTML, so the browser starts fetching before Vue attaches
   `@loadedmetadata` — the event lands on nothing. `VideoPlayer` therefore *asks* in `onMounted`

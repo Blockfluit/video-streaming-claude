@@ -59,6 +59,18 @@ function apply(change: Partial<BrowseFilters>): void {
 // `useDebounced` for why that wait is not optional.
 const search = ref(filters.value.q)
 
+/** Stable, because the composable below finds that box by id rather than by ref. */
+const SEARCH_INPUT_ID = 'browse-search'
+
+/*
+ * Whatever was typed into the server-rendered box before Vue was listening.
+ *
+ * Landing here and searching immediately is the ordinary way to use this page,
+ * and the ordinary way to lose the first few letters of it — see
+ * `useTypedBeforeHydration`, which is where the timing is written down.
+ */
+useTypedBeforeHydration(SEARCH_INPUT_ID, search)
+
 useDebounced(search, (value) => apply({ q: value }))
 
 // The back button moves the URL without touching the box, so it is followed.
@@ -391,6 +403,7 @@ useHead({ title: 'Browse' })
           of a wide screen.
         -->
         <UInput
+          :id="SEARCH_INPUT_ID"
           v-model="search"
           icon="i-lucide-search"
           placeholder="Search titles, genres and cast"

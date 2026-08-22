@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { normaliseTitle } from '@video/shared';
 import request from 'supertest';
 
+import { RELEVANCE_POOL } from '../src/library/merge';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { DbHarness, PASSWORD } from './db/harness';
 
@@ -671,6 +672,53 @@ describe('Catalogue (real database)', () => {
 
       expect(film).not.toHaveProperty('score');
       expect(film).not.toHaveProperty('normalisedTitle');
+    });
+
+    /**
+     * The bound falls on the weakest match, never on the latest alphabetically.
+     *
+     * A search cannot window, so something has to cap what it reads — and the
+     * order that cap falls in decides which answers exist at all. Cutting a
+     * library-ordered read at `RELEVANCE_POOL` cuts by title, which has nothing
+     * to do with the search: the film actually called *Winter* sorts after five
+     * hundred rows whose only claim is the word in their synopsis, so it was
+     * fetched, dropped, and never scored. Searching a title and not being shown
+     * it is the whole feature failing, and it failed on nothing more legible
+     * than where the title fell in the alphabet.
+     *
+     * So the cut moved to the one place that can rank before cutting:
+     * `candidates.ts` orders by similarity and hands back the strongest
+     * `RELEVANCE_POOL` ids, and nothing downstream cuts by anything else.
+     *
+     * `SATURATION` only has to exceed that bound — the point is a pool with no
+     * room left, not a particular number.
+     */
+    it('keeps the exact title when weaker matches fill the pool ahead of it', async () => {
+      const SATURATION = RELEVANCE_POOL + 20;
+
+      await prisma.video.createMany({
+        data: Array.from({ length: SATURATION }, (_, index) => ({
+          slug: `filler-${index}`,
+          title: `Alpha Filler ${index}`,
+          normalisedTitle: normaliseTitle(`Alpha Filler ${index}`),
+          // Matches on the synopsis alone, which is the weakest route there is —
+          // and sorts before "Winter", which is what used to decide it.
+          description: 'Shot over a single winter.',
+          storageKey: `drive/filler-${index}.mp4`,
+          contentTag: 'tag',
+          originalName: `filler-${index}.mp4`,
+          mimeType: 'video/mp4',
+          sizeBytes: BigInt(1024),
+          fileMtime: new Date('2026-01-01T00:00:00Z'),
+          state: 'PUBLISHED' as const,
+        })),
+      });
+
+      await video('Winter');
+
+      const found = await titles(admin, '?q=winter&sort=relevance');
+
+      expect(found[0]).toBe('Winter');
     });
   });
 

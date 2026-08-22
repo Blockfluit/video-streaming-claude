@@ -1,12 +1,6 @@
 import { librarySortSchema } from '@video/shared';
 
-import {
-  LIBRARY_SORTS,
-  mergePage,
-  perSideWindow,
-  RELEVANCE_POOL,
-  type LibraryEntry,
-} from './merge';
+import { LIBRARY_SORTS, mergePage, perSideWindow, type LibraryEntry } from './merge';
 
 /**
  * The two kinds, built so a test reads as the thing it is about. `createdAt`
@@ -185,24 +179,25 @@ describe('perSideWindow', () => {
     // table, so neither side may skip. The first `offset + limit` rows of the
     // union can only come from the first `offset + limit` rows of each side,
     // which is what makes taking that many exact rather than approximate.
-    expect(perSideWindow(100, 50, false)).toEqual({ skip: 0, take: 150 });
+    expect(perSideWindow(100, 50)).toEqual({ skip: 0, take: 150 });
   });
 
   it('asks for the page itself when there is no offset', () => {
-    expect(perSideWindow(0, 50, false)).toEqual({ skip: 0, take: 50 });
+    expect(perSideWindow(0, 50)).toEqual({ skip: 0, take: 50 });
   });
 
-  it('reads the whole pool while searching, because a window would be wrong', () => {
-    /*
-     * The argument the other two cases rest on — that the first `offset + limit`
-     * rows of the union came from the first that many of each side — assumes the
-     * per-side SQL order is the merged order. Under a score Postgres never
-     * computed it is not, so there is no window to take and the pool is read
-     * whole.
-     */
-    expect(perSideWindow(100, 50, true)).toEqual({ skip: 0, take: RELEVANCE_POOL });
-    expect(perSideWindow(0, 50, true)).toEqual({ skip: 0, take: RELEVANCE_POOL });
-  });
+  /*
+   * There is no searching case here any more, and its absence is the point.
+   *
+   * The argument the two cases above rest on — that the first `offset + limit`
+   * rows of the union came from the first that many of each side — assumes the
+   * per-side SQL order is the merged order. Under a score Postgres never
+   * computed it is not, so there is no window to take. This answered that with
+   * `{ skip: 0, take: RELEVANCE_POOL }`, which is not "no window" but a smaller
+   * one, cutting a read ordered by title — and a title match sorting late was
+   * dropped for a synopsis match sorting early. A search now reads exactly what
+   * `candidates.ts` bounded, so it has nothing to ask this. See `RELEVANCE_POOL`.
+   */
 });
 
 describe('mergePage', () => {
