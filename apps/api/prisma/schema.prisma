@@ -237,6 +237,15 @@ model Collection {
   @@unique([tmdbType, tmdbId])
   @@index([state])
   @@index([normalisedTitle])
+  /// Trigram indexes, for the fuzzy half of `/browse` search — see
+  /// library/candidates.ts. `title` keeps its spaces, so `word_similarity` can
+  /// find a short query inside a long one; `normalisedTitle` is already accent-
+  /// and case-folded, which is the half `title` cannot answer. Neither replaces
+  /// the other, and that is measured rather than assumed: "star wa" scores 0.875
+  /// against the first and 0.222 against the second, while "amelie" scores 0.400
+  /// and 1.000.
+  @@index([title(ops: raw("gin_trgm_ops"))], map: "Collection_title_trgm_idx", type: Gin)
+  @@index([normalisedTitle(ops: raw("gin_trgm_ops"))], map: "Collection_normalisedTitle_trgm_idx", type: Gin)
 }
 
 model Season {
@@ -397,6 +406,15 @@ model Video {
   @@index([state])
   @@index([contentTag])
   @@index([normalisedTitle])
+  /// Trigram indexes, for the fuzzy half of `/browse` search — see
+  /// library/candidates.ts. `title` keeps its spaces, so `word_similarity` can
+  /// find a short query inside a long one; `normalisedTitle` is already accent-
+  /// and case-folded, which is the half `title` cannot answer. Neither replaces
+  /// the other, and that is measured rather than assumed: "star wa" scores 0.875
+  /// against the first and 0.222 against the second, while "amelie" scores 0.400
+  /// and 1.000.
+  @@index([title(ops: raw("gin_trgm_ops"))], map: "Video_title_trgm_idx", type: Gin)
+  @@index([normalisedTitle(ops: raw("gin_trgm_ops"))], map: "Video_normalisedTitle_trgm_idx", type: Gin)
 }
 
 // ---------------------------------------------------------------------------
@@ -482,6 +500,11 @@ model Person {
   credits   Credit[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// `name` is already unique, but a unique B-tree cannot answer "contains" —
+  /// searching the cast is a substring match, and that is a sequential scan
+  /// without this. Trigram, like the two on the catalogue's titles.
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "Person_name_trgm_idx", type: Gin)
 }
 
 model Credit {

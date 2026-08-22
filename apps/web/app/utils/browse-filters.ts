@@ -23,8 +23,20 @@ import type { LocationQuery } from 'vue-router'
  */
 export const ANY = 'ANY'
 
-export const BROWSE_SORTS = ['title', 'year', 'added'] as const
+/**
+ * The orders a reader can ask for.
+ *
+ * `relevance` is the odd one out and the list is ordered to say so: the other
+ * three sort the library by something every entry has, and it ranks a *search*
+ * by how well each entry answered it. It means nothing without one, which is
+ * why `parseBrowseFilters` will not read it from a URL that carries no `q` and
+ * `browseSortOptions` does not offer it.
+ */
+export const BROWSE_SORTS = ['relevance', 'title', 'year', 'added'] as const
 export type BrowseSort = (typeof BROWSE_SORTS)[number]
+
+/** The three that mean something with nothing typed in the search box. */
+const ORDERED_SORTS = ['title', 'year', 'added'] as const
 
 export const BROWSE_KINDS = ['FILM', 'SHOW'] as const
 export type BrowseKind = (typeof BROWSE_KINDS)[number] | typeof ANY
@@ -106,14 +118,80 @@ export function asState(value: string): string {
 }
 
 export function parseBrowseFilters(query: LocationQuery): BrowseFilters {
+  const q = one(query.q)
+
   return {
-    q: one(query.q),
+    q,
     genres: many(query.genre),
     tag: one(query.tag) || null,
     kind: oneOf(query.kind, BROWSE_KINDS, ANY),
     state: oneOf(query.state, BROWSE_STATES, ANY),
-    sort: oneOf(query.sort, BROWSE_SORTS, 'title'),
+    /*
+     * Relevance is only a sort while there is something to be relevant to.
+     *
+     * Collapsed here, at the parse boundary, rather than when the request is
+     * built — it is the same treatment every other unreadable value in a URL
+     * gets, and it means `/browse` and `/browse?sort=relevance` describe one
+     * list rather than two. They would otherwise produce two different query
+     * strings, and `browsePlaceKey` is keyed on that string, so the same list
+     * would remember two scroll positions.
+     */
+    sort: q ? oneOf(query.sort, BROWSE_SORTS, 'title') : oneOf(query.sort, ORDERED_SORTS, 'title'),
   }
+}
+
+/**
+ * The filters after a change, including the sort that change implies.
+ *
+ * Typing a search and then reading the answer alphabetically is not what
+ * anybody means by searching, so the sort follows the search — but only while
+ * nobody has said otherwise. A sort somebody chose is a decision, and a control
+ * that quietly undoes your decision every time you type a letter is worse than
+ * one that never helps at all.
+ *
+ * Three rules, and between them they behave in all four directions: choose Year
+ * and then type, and it stays Year; type, take Best match, then choose Year,
+ * and it stays Year; clear the box from Year and it stays Year; clear it from
+ * Best match and it goes back to Title, because there is nothing left to be
+ * relevant to.
+ *
+ * Here rather than in the page because `vitest.config.ts` mounts nothing —
+ * anything a component decides is untested by construction.
+ */
+export function applyBrowseChange(
+  current: BrowseFilters,
+  change: Partial<BrowseFilters>,
+): BrowseFilters {
+  const next = { ...current, ...change }
+
+  // An explicit choice wins, in either direction.
+  if (change.sort !== undefined) return next
+
+  // Searching began, and nothing had been chosen.
+  if (next.q && !current.q && current.sort === 'title') return { ...next, sort: 'relevance' }
+
+  // Searching ended, so the sort it implied has nothing left to rank.
+  if (!next.q && current.sort === 'relevance') return { ...next, sort: 'title' }
+
+  return next
+}
+
+const ORDERED_SORT_OPTIONS = [
+  { label: 'Title', value: 'title' as const },
+  { label: 'Year', value: 'year' as const },
+  { label: 'Recently added', value: 'added' as const },
+]
+
+/**
+ * The sorts on offer. "Best match" is one of them only while there is a search.
+ *
+ * First rather than last: with a search running it is both the active one and
+ * the useful one.
+ */
+export function browseSortOptions(filters: BrowseFilters) {
+  return filters.q
+    ? [{ label: 'Best match', value: 'relevance' as const }, ...ORDERED_SORT_OPTIONS]
+    : ORDERED_SORT_OPTIONS
 }
 
 /**

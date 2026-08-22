@@ -14,7 +14,9 @@ import { narrowToVisibleStates, whereVisible } from '../common/publishing';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
+import { searchCandidates, type SearchCandidates } from './candidates';
 import { LIBRARY_SORTS, mergePage, perSideWindow, type LibraryEntry } from './merge';
+import { prepareSearch, scoreEntry, scoreText, WEIGHTS, type Search } from './relevance';
 
 /**
  * The catalogue, as one list.
@@ -90,12 +92,128 @@ interface FilmRow extends Omit<CollectionRow, '_count'> {
   durationSec: number | null;
 }
 
+/** What `candidates.ts` found, carried together because they are always used together. */
+interface Found {
+  candidates: SearchCandidates;
+  personIds: string[];
+}
+
+/** How many credits and videos are worth reading to explain one card's score. */
+const EVIDENCE_CREDITS = 10;
+const EVIDENCE_VIDEOS = 20;
+
+/**
+ * The extra columns a search needs, and only a search.
+ *
+ * Read conditionally rather than always: a synopsis on every card of every page
+ * is a great deal of text nobody renders, and browsing does not score anything.
+ *
+ * The nested `videos` carries `whereVisible(role)` for the same reason the
+ * `where` does — this is the read that decides how a shelf scores, and scoring
+ * it on a draft episode a viewer cannot see would put that episode's title back
+ * into their results through the shelf.
+ */
+function collectionEvidence(role: Role, videoIds: string[], personIds: string[]) {
+  /*
+   * Typed as `object` so that `whereVisible`'s optional `state` can be spread
+   * into it. Prisma's nested relation filter is a union whose other branch
+   * requires the key to be absent outright, which an optional property that may
+   * be `undefined` does not satisfy — the same reason `collectionWhere` returns
+   * `object` rather than a `CollectionWhereInput`.
+   */
+  const onThisShelf: object = {
+    video: {
+      ...whereVisible(role),
+      OR: [{ id: { in: videoIds } }, { credits: { some: creditedTo(personIds) } }],
+    },
+  };
+
+  return {
+    description: true,
+    credits: {
+      where: creditedTo(personIds),
+      select: { personId: true },
+      take: EVIDENCE_CREDITS,
+    },
+    videos: {
+      where: onThisShelf,
+      // Deterministic, so that the cut at `EVIDENCE_VIDEOS` falls the same way
+      // on every request and a shelf does not score differently between pages.
+      orderBy: { video: { normalisedTitle: 'asc' as const } },
+      select: {
+        video: {
+          select: {
+            title: true,
+            normalisedTitle: true,
+            credits: {
+              where: creditedTo(personIds),
+              select: { personId: true },
+              take: EVIDENCE_CREDITS,
+            },
+          },
+        },
+      },
+      take: EVIDENCE_VIDEOS,
+    },
+  };
+}
+
+function filmEvidence(personIds: string[]) {
+  return {
+    description: true,
+    credits: {
+      where: creditedTo(personIds),
+      select: { personId: true },
+      take: EVIDENCE_CREDITS,
+    },
+  };
+}
+
+interface CreditRef {
+  personId: string;
+}
+
+interface SearchedCollectionRow extends CollectionRow {
+  description: string | null;
+  credits: CreditRef[];
+  videos: {
+    video: { title: string; normalisedTitle: string; credits: CreditRef[] };
+  }[];
+}
+
+interface SearchedFilmRow extends FilmRow {
+  description: string | null;
+  credits: CreditRef[];
+}
+
+/** The best any one of these names did. */
+function bestOf(search: Search, names: string[]): number {
+  return names.reduce((best, name) => Math.max(best, scoreText(search, name)), 0);
+}
+
 @Injectable()
 export class LibraryService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Two honest reads rather than one clever one.
+   *
+   * A search is a different question from browsing, and pretending otherwise is
+   * what would make this hard: browsing takes a window of an order Postgres
+   * produced, while a search scores a bounded pool in memory and cannot. They
+   * share every filter and neither shares the other's arithmetic.
+   *
+   * `byColumn` is what this method has always been, unchanged — which is what
+   * keeps the home page's `?sort=added&limit=5` hero exactly as it was.
+   */
   async list(query: ListLibraryQuery, role: Role): Promise<Page<LibraryCard>> {
-    const { skip, take } = perSideWindow(query.offset, query.limit);
+    return query.q === undefined || query.q.length === 0
+      ? this.byColumn(query, role)
+      : this.searched(query, query.q, role);
+  }
+
+  private async byColumn(query: ListLibraryQuery, role: Role): Promise<Page<LibraryCard>> {
+    const { skip, take } = perSideWindow(query.offset, query.limit, false);
     const { orderBy } = LIBRARY_SORTS[query.sort];
 
     const collectionWhere = this.collectionWhere(query, role);
@@ -122,6 +240,114 @@ export class LibraryService {
     );
 
     return toPage(merged.map(withoutSortKeys), collectionTotal + filmTotal, query);
+  }
+
+  /**
+   * The same library, ordered by how well each entry answers `q`.
+   *
+   * Three steps, and the split between the first two is the safety property:
+   * `candidates.ts` asks Postgres which rows *resemble* the text and knows
+   * nothing else — not what a film is, not who may see a draft. Prisma then
+   * applies every rule it always did, with the candidate ids standing exactly
+   * where the `contains` clauses used to stand. Only then is anything scored.
+   *
+   * The whole pool is read rather than a window of it. `perSideWindow` explains
+   * why; the short version is that a score is not a column, so no prefix of one
+   * side is a prefix of the answer.
+   */
+  private async searched(
+    query: ListLibraryQuery,
+    q: string,
+    role: Role,
+  ): Promise<Page<LibraryCard>> {
+    const search = prepareSearch(q);
+    const candidates = await searchCandidates(this.prisma, q, search.normalised);
+
+    const personIds = candidates.people.map((person) => person.id);
+    const names = new Map(candidates.people.map((person) => [person.id, person.name]));
+
+    const { skip, take } = perSideWindow(query.offset, query.limit, true);
+    const { orderBy } = LIBRARY_SORTS[query.sort];
+
+    const [collections, films] = await this.prisma.$transaction([
+      this.prisma.collection.findMany({
+        where: this.collectionWhere(query, role, { candidates, personIds }),
+        select: { ...COLLECTION_CARD, ...collectionEvidence(role, candidates.videoIds, personIds) },
+        orderBy,
+        skip,
+        take,
+      }),
+      this.prisma.video.findMany({
+        where: this.filmWhere(query, role, { candidates, personIds }),
+        select: { ...FILM_CARD, ...filmEvidence(personIds) },
+        orderBy,
+        skip,
+        take,
+      }),
+    ]);
+
+    const cast = (credits: { personId: string }[]): string[] =>
+      credits.map((credit) => names.get(credit.personId)).filter((name): name is string => !!name);
+
+    const scored: SortableCard[] = [
+      ...(collections as SearchedCollectionRow[]).map((row) => ({
+        ...toCollectionCard(row),
+        score: scoreEntry(search, {
+          title: row.title,
+          normalisedTitle: row.normalisedTitle,
+          description: row.description,
+          castNames: cast(row.credits),
+          genres: row.genres,
+          /*
+           * The best any video standing on this shelf did.
+           *
+           * `collectionEvidence` already restricted these to what the caller may
+           * see, so a draft episode cannot raise its shelf into a viewer's
+           * results — the same rule the `where` enforces, applied to the same
+           * relation, because scoring on rows the filter excluded would put the
+           * shelf back by the side door.
+           */
+          viaVideo: row.videos.reduce(
+            (best, on) =>
+              Math.max(
+                best,
+                scoreText(search, on.video.title, on.video.normalisedTitle),
+                WEIGHTS.cast * bestOf(search, cast(on.video.credits)),
+              ),
+            0,
+          ),
+        }),
+      })),
+      ...(films as SearchedFilmRow[]).map((row) => ({
+        ...toFilmCard(row),
+        score: scoreEntry(search, {
+          title: row.title,
+          normalisedTitle: row.normalisedTitle,
+          description: row.description,
+          castNames: cast(row.credits),
+          genres: row.genres,
+        }),
+      })),
+    ];
+
+    /*
+     * Anything the scorer found no reason for is dropped, and the total is what
+     * survives rather than a `count()`.
+     *
+     * Both halves of that are one decision. Postgres was asked a generous
+     * question on purpose, so some of what it offered is a row whose only
+     * connection to the query is a trigram — and a count taken from the database
+     * would then promise more cards than paging can ever reach, which is not a
+     * cosmetic wrong number: `nextBrowsePage` walks until `loaded >= total`, so
+     * the browse page would scroll for a page that never arrives.
+     */
+    const pool = scored.filter((entry) => entry.score > 0);
+
+    return toPage(
+      mergePage<SortableCard>([pool], query.sort, query.offset, query.limit).map(withoutSortKeys),
+      pool.length,
+      query,
+    );
   }
 
   /**
@@ -162,7 +388,7 @@ export class LibraryService {
     return toPage(facets.slice(query.offset, query.offset + query.limit), facets.length, query);
   }
 
-  private collectionWhere(query: ListLibraryQuery, role: Role): object {
+  private collectionWhere(query: ListLibraryQuery, role: Role, found?: Found): object {
     return {
       ...this.sharedFilters(query),
       /*
@@ -177,13 +403,13 @@ export class LibraryService {
        */
       ...(query.kind === 'SHOW' ? { seasons: { some: {} } } : {}),
       ...(query.kind === 'FILM' ? { seasons: { none: {} } } : {}),
-      ...(query.q ? { OR: this.collectionSearch(query.q, role) } : {}),
+      ...(found ? { OR: this.collectionSearch(found, role) } : {}),
       // Last, so nothing above can overwrite the visibility constraint.
       ...narrowToVisibleStates(role, query.state),
     };
   }
 
-  private filmWhere(query: ListLibraryQuery, role: Role): object {
+  private filmWhere(query: ListLibraryQuery, role: Role, found?: Found): object {
     return {
       ...this.sharedFilters(query),
       /*
@@ -200,7 +426,7 @@ export class LibraryService {
        */
       AND: [
         ...whereFilm().AND,
-        ...(query.q ? [{ OR: this.filmSearch(query.q) }] : []),
+        ...(found ? [{ OR: this.filmSearch(found) }] : []),
         ...(query.kind === 'SHOW' ? [{ id: { in: [] as string[] } }] : []),
       ],
       ...narrowToVisibleStates(role, query.state),
@@ -240,16 +466,19 @@ export class LibraryService {
    * to learn what is in something the caller cannot see. That `OR` is the only
    * one inside the nested `video`, so it collides with nothing.
    */
-  private collectionSearch(q: string, role: Role): object[] {
+  private collectionSearch({ candidates, personIds }: Found, role: Role): object[] {
     return [
-      ...textClauses(q),
-      { credits: { some: personNamed(q) } },
+      { id: { in: candidates.collectionIds } },
+      { credits: { some: creditedTo(personIds) } },
       {
         videos: {
           some: {
             video: {
               ...whereVisible(role),
-              OR: [{ title: insensitive(q) }, { credits: { some: personNamed(q) } }],
+              OR: [
+                { id: { in: candidates.videoIds } },
+                { credits: { some: creditedTo(personIds) } },
+              ],
             },
           },
         },
@@ -267,20 +496,19 @@ export class LibraryService {
    * claims, so there is no shelf whose credits could match. The case it served
    * is answered by `collectionSearch` returning the shelf instead.
    */
-  private filmSearch(q: string): object[] {
-    return [...textClauses(q), { credits: { some: personNamed(q) } }];
+  private filmSearch({ candidates, personIds }: Found): object[] {
+    return [{ id: { in: candidates.videoIds } }, { credits: { some: creditedTo(personIds) } }];
   }
 }
 
-const insensitive = (q: string) => ({ contains: q, mode: 'insensitive' as const });
-
-/** The words on the record itself. Identical on both models. */
-function textClauses(q: string): object[] {
-  return [{ title: insensitive(q) }, { description: insensitive(q) }];
-}
-
-function personNamed(q: string): object {
-  return { person: { name: insensitive(q) } };
+/**
+ * Credited to one of the people the search turned up.
+ *
+ * The name matching happened in `candidates.ts`; by here a person is an id, and
+ * the join is the same `EXISTS` it always was.
+ */
+function creditedTo(personIds: string[]): object {
+  return { personId: { in: personIds } };
 }
 
 /** Byte-ish order, matching `merge.ts` — see the note on `byText` there. */
@@ -306,6 +534,8 @@ function toCollectionCard(row: CollectionRow): SortableCard {
     trailerYoutubeId: row.trailerYoutubeId,
     normalisedTitle: row.normalisedTitle,
     createdAt: row.createdAt,
+    // Browsing does not score anything; `searched` overwrites this.
+    score: 0,
   };
 }
 
@@ -323,6 +553,7 @@ function toFilmCard(row: FilmRow): SortableCard {
     trailerYoutubeId: row.trailerYoutubeId,
     normalisedTitle: row.normalisedTitle,
     createdAt: row.createdAt,
+    score: 0,
   };
 }
 

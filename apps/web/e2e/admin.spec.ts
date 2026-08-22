@@ -4,6 +4,7 @@ import {
   expectApiRejection,
   expectsRequest,
   fillStable,
+  openBrowseFilters,
   removeSeasonWithFolder,
   savesThenRestores,
   test,
@@ -147,6 +148,10 @@ test.describe('admin', () => {
    */
   test('an admin can filter browse by lifecycle state', async ({ page }) => {
     await visit(page, '/browse')
+    // The filters fold away at every width, so the control is one press away
+    // rather than on screen — `viewer.spec.ts` pins that, and this test was left
+    // clicking a hidden select when it changed.
+    await openBrowseFilters(page)
 
     await expectsRequest(page, /\/api\/library\?.*state=DRAFT/, 'GET', async () => {
       await page.getByLabel('Filter by lifecycle state').click()

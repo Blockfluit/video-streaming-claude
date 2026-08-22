@@ -203,8 +203,16 @@ export type LibraryKind = z.infer<typeof libraryKindSchema>;
  * entry's kind and id — offset paging over a non-total order repeats and skips
  * rows, and here the rows come from two tables that number themselves
  * independently, so ties are the norm rather than the exception.
+ *
+ * `relevance` is total for a *different* reason and that difference is the
+ * whole safety argument: the other three are ordered by a column Postgres also
+ * ordered by, so a page is a window onto a query. Relevance is scored in
+ * memory, so it is ordered by nothing the database knows — which is why it
+ * reads a bounded pool whole instead of taking a window of one. See
+ * `library/merge.ts`. Called "Best match" everywhere a person reads it; the
+ * wire value names the ordering rather than the label.
  */
-export const librarySortSchema = z.enum(['title', 'year', 'added']);
+export const librarySortSchema = z.enum(['title', 'year', 'added', 'relevance']);
 export type LibrarySort = z.infer<typeof librarySortSchema>;
 
 /**
@@ -241,7 +249,25 @@ export const listLibrarySchema = pageQuerySchema.extend({
   genre: listParam(20).optional(),
   kind: libraryKindSchema.optional(),
   sort: librarySortSchema.default('title'),
-});
+})
+  /*
+   * Relevance to *what*?
+   *
+   * A sort by score with nothing to score against is not a sort, so it becomes
+   * the default here rather than a refusal — and here rather than in the
+   * service, which then never sees the impossible combination and needs no
+   * defensive branch for it.
+   *
+   * Not a 400, because the combination arises innocently: a hand-edited URL, a
+   * bookmark saved mid-search, and the one that actually happens — clearing the
+   * search box while "Best match" is selected, which leaves a request already in
+   * flight carrying both. The browser suite fails a test on any response of 400
+   * or worse, and a page that 400s where it could have answered has not degraded,
+   * it has broken.
+   */
+  .transform((query) =>
+    query.sort === 'relevance' && !query.q ? { ...query, sort: 'title' as const } : query,
+  );
 export type ListLibraryQuery = z.infer<typeof listLibrarySchema>;
 
 /**

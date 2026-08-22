@@ -4,8 +4,10 @@ import {
   ANY,
   DEFAULT_BROWSE_FILTERS,
   activeFilterChips,
+  applyBrowseChange,
   browseFiltersToQuery,
   browseSearchParams,
+  browseSortOptions,
   parseBrowseFilters,
 } from './browse-filters'
 
@@ -49,6 +51,20 @@ describe('parseBrowseFilters', () => {
 
   it('keeps the tag the collection pages link with', () => {
     expect(parseBrowseFilters({ tag: 'christmas' }).tag).toBe('christmas')
+  })
+})
+
+describe('parseBrowseFilters — relevance', () => {
+  it('reads relevance when there is a search to be relevant to', () => {
+    expect(parseBrowseFilters({ q: 'matrix', sort: 'relevance' }).sort).toBe('relevance')
+  })
+
+  it('refuses relevance from a URL carrying no search', () => {
+    // A bookmark saved mid-search, or a hand-edited address. Collapsed here so
+    // that `/browse` and `/browse?sort=relevance` produce one query string
+    // rather than two — `browsePlaceKey` is keyed on that string, so otherwise
+    // one list would remember two scroll positions.
+    expect(parseBrowseFilters({ sort: 'relevance' }).sort).toBe('title')
   })
 })
 
@@ -170,5 +186,68 @@ describe('activeFilterChips', () => {
     expect(activeFilterChips({ ...DEFAULT_BROWSE_FILTERS, state: 'DRAFT' })).toEqual([
       { label: 'Draft', clear: { state: ANY } },
     ])
+  })
+})
+
+describe('applyBrowseChange', () => {
+  const searching = { ...DEFAULT_BROWSE_FILTERS, q: 'matrix', sort: 'relevance' as const }
+
+  it('selects Best match when a search begins', () => {
+    // Typing a search and then reading the answer alphabetically is not what
+    // anybody means by searching.
+    expect(applyBrowseChange(DEFAULT_BROWSE_FILTERS, { q: 'matrix' }).sort).toBe('relevance')
+  })
+
+  it('puts Title back when the search is cleared', () => {
+    expect(applyBrowseChange(searching, { q: '' }).sort).toBe('title')
+  })
+
+  it('leaves a sort somebody chose alone while they type', () => {
+    // A control that undoes your decision every time you press a key is worse
+    // than one that never helps.
+    const byYear = { ...DEFAULT_BROWSE_FILTERS, sort: 'year' as const }
+
+    expect(applyBrowseChange(byYear, { q: 'matrix' }).sort).toBe('year')
+  })
+
+  it('leaves a sort somebody chose alone when they clear the box', () => {
+    const byYear = { ...DEFAULT_BROWSE_FILTERS, q: 'matrix', sort: 'year' as const }
+
+    expect(applyBrowseChange(byYear, { q: '' }).sort).toBe('year')
+  })
+
+  it('takes an explicit choice in either direction', () => {
+    expect(applyBrowseChange(searching, { sort: 'year' }).sort).toBe('year')
+    expect(applyBrowseChange(DEFAULT_BROWSE_FILTERS, { sort: 'year' }).sort).toBe('year')
+  })
+
+  it('keeps Best match while the search is only being edited', () => {
+    expect(applyBrowseChange(searching, { q: 'matrix reloaded' }).sort).toBe('relevance')
+  })
+
+  it('does not disturb the sort when some other filter moves', () => {
+    expect(applyBrowseChange(searching, { genres: ['Drama'] }).sort).toBe('relevance')
+    expect(applyBrowseChange(DEFAULT_BROWSE_FILTERS, { kind: 'FILM' }).sort).toBe('title')
+  })
+})
+
+describe('browseSortOptions', () => {
+  it('offers Best match only while there is a search, and offers it first', () => {
+    expect(browseSortOptions(DEFAULT_BROWSE_FILTERS).map((option) => option.value)).toEqual([
+      'title',
+      'year',
+      'added',
+    ])
+
+    expect(
+      browseSortOptions({ ...DEFAULT_BROWSE_FILTERS, q: 'matrix' }).map((option) => option.value),
+    ).toEqual(['relevance', 'title', 'year', 'added'])
+  })
+
+  it('names it for what it does rather than for the wire value', () => {
+    expect(browseSortOptions({ ...DEFAULT_BROWSE_FILTERS, q: 'matrix' })[0]).toEqual({
+      label: 'Best match',
+      value: 'relevance',
+    })
   })
 })

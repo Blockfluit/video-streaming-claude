@@ -562,6 +562,47 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `whereVisible(role)`, or a draft episode's credit becomes a way to learn who is in something unpublished.
 - On the film side the search `OR` goes **inside** `whereFilm`'s `AND` array, never beside it. Two `OR`
   keys spread into one object leave only the last — the same trap `films.ts` documents from the other side.
+- **Search is recall then precision.** `candidates.ts` asks Postgres which rows *resemble* the text;
+  `relevance.ts` (pure) decides what each is worth. This is the one place the catalogue writes raw SQL, and
+  what makes it safe is that **it never crosses a relation**: each query asks one table about its own text
+  and answers with ids. It does not know what a film is or who may see a draft. Every rule stays in Prisma
+  in the shape it already had, with candidate ids standing exactly where the `contains` clauses stood.
+  The version that resolved "this shelf matches, because a video on it does" in SQL would have restated
+  `whereFilm` — the thing `genres` refuses raw SQL over — and would have **leaked**: the shelf's own state
+  passes the visibility filter while the draft video's is never asked.
+- The scores Postgres computes are **thrown away**. They decide only which rows survive `CANDIDATE_LIMIT`,
+  never the order. Making SQL's similarity and the scorer agree would recreate the seam `merge.ts` guards,
+  for nothing — here a disagreement costs a near-zero row its place in the pool, not a page boundary.
+- `pg_trgm` indexes **both** `title` and `normalisedTitle`, and neither is redundant. Measured: "star wa"
+  scores 0.875 by `word_similarity` on `title` and 0.222 by `similarity` on `normalisedTitle`; "amelie"
+  against "Amélie" scores 0.400 and 1.000. `title` keeps its spaces, so it answers word order and partial
+  words; `normalisedTitle` is already accent- and case-folded, so it answers misspellings and accents — and
+  it is the only folded form that *can* be indexed, since `unaccent()` is STABLE rather than IMMUTABLE.
+- The threshold is **0.3**, which is also Postgres's own default — so pinning it with `set_config` is belt
+  and braces and a failure to pin degrades to identical behaviour. Measured, not guessed: the weakest true
+  positive scored 0.4 and the worst false positive 0.259.
+- Fuzz never touches a **description**, and never a token of three characters or fewer. A synopsis is long
+  prose where edit distance finds a near-match for almost anything, and three letters is two edits from most
+  of the dictionary — `the` would find `she`. A fuzzy search returning junk is worse than one returning
+  nothing, and these two rules are what stop it.
+- **A search reads a bounded pool whole; it cannot window.** `perSideWindow`'s argument assumes the per-side
+  SQL order *is* the merged order, and a score Postgres never computed is not a column. `RELEVANCE_POOL`
+  bounds it instead. Keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
+  drops unmatched rows whatever order it is then shown in, and a `q` meaning one thing under Best match and
+  another under Title would be indefensible.
+- `total` for a search comes from the **scored pool**, never a `count()`. Postgres was asked a generous
+  question, so a database count promises cards that scored nothing and were dropped — and `nextBrowsePage`
+  walks until `loaded >= total`, so an overcount is a browse page that scrolls forever.
+- Every indirect route scores **below one** — cast, genre, and a shelf reached through a video on it. That is
+  what keeps `merge.ts`'s collection-before-film tie-break deciding anything: a shelf that could accumulate
+  its way past the film it shares a name with would quietly retire the rule.
+- The candidate query's `ORDER BY` ends in **`id`**, like every paged query. Without it the cut at
+  `CANDIDATE_LIMIT` falls wherever Postgres likes, and infinite scroll shows a card twice.
+- `sort=relevance` with no `q` is demoted to `title` **in the schema**, so the service never sees the
+  combination. Not a 400: clearing the search box while Best match is selected leaves a request in flight
+  carrying both, and the browser suite fails any response ≥ 400.
+- Searching matches **genres** too. The box has said "titles, genres and cast" all along while never reading
+  one, and the chips on a collection page link here as `?q=…`.
 - `genre` narrows with `hasEvery` and is repeatable; `tag` stays a single value, because the chips on a
   collection page link here as `?tag=…` and those links keep meaning what they meant. The two vocabularies
   stay apart for the same reason the columns do.

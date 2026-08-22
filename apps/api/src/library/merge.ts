@@ -30,6 +30,17 @@ export interface LibraryEntry {
   normalisedTitle: string;
   year: number | null;
   createdAt: Date;
+  /**
+   * How well this entry answered the search, from `relevance.ts`. Zero when
+   * there was no search, which is every request that is not sorted by it.
+   *
+   * The one field here that is not a column. It is **required** rather than
+   * optional for the same reason `trailerYoutubeId` is required on a card: an
+   * optional one forgotten at a mapper is `undefined` at runtime with nothing to
+   * fail, and `undefined` through this comparator is `NaN`, which compares false
+   * against everything and reshuffles the page silently.
+   */
+  score: number;
 }
 
 /**
@@ -41,6 +52,24 @@ export interface LibraryEntry {
  * so it is the one comparison that exists only here.
  */
 const KIND_ORDER: Record<LibraryEntryKind, number> = { collection: 0, film: 1 };
+
+/**
+ * How many rows one side may contribute to a relevance answer.
+ *
+ * The bound a scored sort needs instead of a window. It is not a page size:
+ * every one of these rows is fetched, scored and ordered on every request, and
+ * the page is then cut out of the result — so this is the most a search can
+ * cost, not the most it can show.
+ *
+ * Ordering by the metric before the cut is what keeps the bound from changing
+ * the answer: `candidates.ts` has already thrown away everything that does not
+ * resemble the query at all, so five hundred survivors per side is far more
+ * than a private library will produce for a query anybody actually types. Same
+ * argument, and the same escape hatch, as `POOL_LIMIT` in
+ * `lists/sources/computed.ts` — if this ever needs raising past what one query
+ * should return, the ranking belongs in SQL rather than in a bigger number.
+ */
+export const RELEVANCE_POOL = 500;
 
 /**
  * Ascending order on a `normalisedTitle`, matching Postgres.
@@ -122,6 +151,28 @@ export const LIBRARY_SORTS: Record<
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     compare: (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || byIdentity(a, b, -1),
   },
+
+  relevance: {
+    /*
+     * The **pool** order, not the merged order — the one row in this table where
+     * those are different things, and the difference is the whole safety
+     * argument.
+     *
+     * Every other sort here names a column Postgres ordered by, which is what
+     * lets a page be a window onto a query. A score is computed in memory from
+     * text, so Postgres cannot order by it and no prefix of one side is a prefix
+     * of the answer. `perSideWindow` therefore reads the whole pool for this
+     * sort rather than a window of it, and this `orderBy` exists only so that
+     * when the pool is cut at `RELEVANCE_POOL` it is cut the same way on every
+     * request. A nondeterministic cut is how page two repeats a card page one
+     * already showed.
+     */
+    orderBy: [{ normalisedTitle: 'asc' }, { id: 'asc' }],
+    // Ends in `byIdentity` like the rest, so the order is still total and the
+    // collection-before-film rule still decides an exact tie.
+    compare: (a, b) =>
+      b.score - a.score || byText(a.normalisedTitle, b.normalisedTitle) || byIdentity(a, b, 1),
+  },
 };
 
 /** Descending, with an unknown year after every known one. */
@@ -146,8 +197,27 @@ function byYear(a: number | null, b: number | null): number {
  * The cost is real and worth naming — page 40 reads 2 000 rows from each table
  * to return 50. That is what `MAX_LIBRARY_OFFSET` bounds; a library nobody can
  * find anything in past page 200 wants a filter, not a deeper page.
+ *
+ * **A search cannot window at all**, and the argument above is exactly why: it
+ * assumes the per-side SQL order *is* the merged order, and a searching request
+ * is ordered by a score Postgres never computed. So a search reads a bounded
+ * pool whole and the bound moves elsewhere — `candidates.ts` caps what may match
+ * at all, and `RELEVANCE_POOL` caps what one side may contribute once the
+ * filters have had their say.
+ *
+ * Keyed on whether there is a search rather than on `sort === 'relevance'`,
+ * because every sort is affected. A search scores its results whatever order
+ * they are then shown in — that is what lets a fuzzy match be dropped for
+ * matching nothing — and a `q` that meant one thing under Best match and
+ * another under Title would be indefensible.
  */
-export function perSideWindow(offset: number, limit: number): { skip: number; take: number } {
+export function perSideWindow(
+  offset: number,
+  limit: number,
+  searching: boolean,
+): { skip: number; take: number } {
+  if (searching) return { skip: 0, take: RELEVANCE_POOL };
+
   return { skip: 0, take: offset + limit };
 }
 

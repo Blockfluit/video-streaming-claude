@@ -53,14 +53,7 @@ const TRAILING_BRACKETED_YEAR = /[([]\s*(?:1[5-9]\d{2}|2[01]\d{2})\s*[)\]]\s*$/;
  */
 export function normaliseTitle(raw: string): string {
   const withoutYear = raw.replace(TRAILING_BRACKETED_YEAR, '');
-
-  const folded = withoutYear
-    // NFKD splits an accented character into its base plus a combining mark…
-    .normalize('NFKD')
-    // …which this then drops, leaving the base letter behind.
-    .replace(/\p{Mn}/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '');
+  const folded = fold(withoutYear).replace(/[^a-z0-9]+/g, '');
 
   if (folded.length > 0) return folded;
 
@@ -68,4 +61,47 @@ export function normaliseTitle(raw: string): string {
   // Its lowercased self still distinguishes it from a different one, which is
   // all a comparison key has to do.
   return withoutYear.trim().toLowerCase();
+}
+
+/**
+ * The same fold, with the word boundaries left in.
+ *
+ * `normaliseTitle` removes every separator, which is exactly right for asking
+ * "is this the same title" and exactly wrong for asking "which of these words
+ * did somebody type". `Star Wars` normalises to `starwars`, and no amount of
+ * comparing that to `star wa` recovers the fact that two words were meant.
+ *
+ * So this is its sibling rather than its replacement, and search uses both:
+ * this one for anything token-shaped — words in any order, a word typed
+ * partly, a word misspelled — and `normaliseTitle` for the contiguous
+ * questions, where whitespace is noise.
+ *
+ *     "Star Wars: Episode IV"   -> "star wars episode iv"
+ *     "Amélie"                  -> "amelie"
+ *     "WALL·E"                  -> "wall e"
+ *
+ * The trailing bracketed year goes for the same reason it goes there: it is
+ * metadata somebody typed into the name, not part of what the film is called,
+ * and the two functions must agree about where the title ends or a match found
+ * by one is unexplainable by the other.
+ */
+export function foldForSearch(raw: string): string {
+  const withoutYear = raw.replace(TRAILING_BRACKETED_YEAR, '');
+  const folded = fold(withoutYear).replace(/[^a-z0-9]+/g, ' ').trim();
+
+  if (folded.length > 0) return folded;
+
+  return withoutYear.trim().toLowerCase();
+}
+
+/** Accents dropped and case dropped, with every separator still standing. */
+function fold(raw: string): string {
+  return (
+    raw
+      // NFKD splits an accented character into its base plus a combining mark…
+      .normalize('NFKD')
+      // …which this then drops, leaving the base letter behind.
+      .replace(/\p{Mn}/gu, '')
+      .toLowerCase()
+  );
 }
