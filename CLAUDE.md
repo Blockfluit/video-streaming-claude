@@ -987,6 +987,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   profile refuses, and the test asserting playback fails against working code. Tests about *where a seek
   lands* call `freeze()` (`e2e/viewer.spec.ts`), which pauses **and** re-pauses on `play`, since the
   autoplay attempt can settle after a bare `pause()`.
+- **The stored volume is applied at the top of `onMounted`, before anything can call `play()`.** That
+  handler's `readyState >= 1` branch calls `onLoadedMetadata` synchronously, which starts playback — so
+  restoring afterwards sounds the opening seconds at the old volume and only then turns it down, the
+  audible twin of the resume-seek bug above. `parseVolume` (`app/utils/volume.ts`) returns `null` for
+  anything unusable rather than a number: `el.volume` **throws** on `NaN` or a value outside 0–1, and a
+  throw in `onMounted` takes the whole player down. `muted` is stored beside the level, never folded into
+  it — a zero would lose the level to come back to — and only a literal `true` mutes, since coercing reads
+  the string `"false"` as a reason to start something silently. Both `localStorage` calls are wrapped:
+  Safari in private mode throws on the API itself, and losing a preference must not stop playback.
 - **`/watch/:slug` never reaches `networkidle`, so `visit()` cannot open it.** A playing video keeps issuing
   range requests, so the wait inside `visit` runs until the *test* times out — a hang with no failing
   assertion to point at the cause. `visitPlayer()` (`e2e/fixtures.ts`) waits for `readyState >= 1` instead,

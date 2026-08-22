@@ -8,6 +8,10 @@
  * for the same reason: `/watch/:slug` is the address of a thing playing, not a
  * page about one. See `onLoadedMetadata`, where it happens.
  *
+ * The volume is the viewer's, not the video's: it is restored from
+ * `localStorage` before the first frame is audible and written back on every
+ * change. See `restoreVolume`.
+ *
  * Watch time is accumulated from `timeupdate` deltas with **jumps over 2s
  * discarded**, so scrubbing through a film does not report the film as
  * watched. Beats go out every 10s while playing, plus on pause, end and tab
@@ -252,7 +256,63 @@ function onVisibility() {
   if (document.visibilityState === 'hidden') beat()
 }
 
+/**
+ * The volume the viewer last chose, before anything is audible.
+ *
+ * Applied at the very top of `onMounted`, ahead of the `readyState` branch
+ * below — that branch calls `onLoadedMetadata`, which calls `play()`
+ * synchronously, so restoring afterwards would sound the opening seconds at the
+ * old volume and only then turn it down. It is the audible twin of the resume
+ * seek that `onLoadedMetadata` already exists to get ahead of.
+ *
+ * A viewer who left it muted gets a silent start, which is also the one case
+ * where the browser will not refuse the `play()` below.
+ */
+function restoreVolume() {
+  const el = video.value
+  if (!el) return
+
+  let stored: string | null
+  try {
+    stored = localStorage.getItem(VOLUME_STORAGE_KEY)
+  } catch {
+    // Safari in private mode throws on the whole API rather than returning
+    // nothing. The browser's default volume is a fine answer.
+    return
+  }
+
+  const setting = parseVolume(stored)
+  if (!setting) return
+
+  el.volume = setting.volume
+  el.muted = setting.muted
+}
+
+/**
+ * Writes the level back on every change the native control makes.
+ *
+ * `restoreVolume` triggers this too, by setting the properties it reads — which
+ * writes the same value it just read, so there is nothing here to loop on.
+ */
+function rememberVolume() {
+  const el = video.value
+  if (!el) return
+
+  try {
+    localStorage.setItem(
+      VOLUME_STORAGE_KEY,
+      JSON.stringify({ volume: el.volume, muted: el.muted }),
+    )
+  } catch {
+    // A full quota or a browser refusing storage loses the preference and
+    // nothing else. Interrupting playback over it would be the larger fault.
+  }
+}
+
 onMounted(() => {
+  // Before the branch below, which can start playback in the same tick.
+  restoreVolume()
+
   /*
    * The metadata may already be here.
    *
@@ -291,6 +351,7 @@ onBeforeUnmount(() => {
       @timeupdate="onTimeUpdate"
       @seeked="onSeeked"
       @loadedmetadata="onLoadedMetadata"
+      @volumechange="rememberVolume"
       @pause="beat()"
       @ended="beat()"
     >
