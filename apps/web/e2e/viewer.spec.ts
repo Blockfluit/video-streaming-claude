@@ -318,6 +318,45 @@ test.describe('viewer', () => {
   })
 
   /**
+   * Searching selects Best match, and clearing the box puts Title back.
+   *
+   * The whole feature from the outside: a person types, and the answers arrive
+   * in the order that makes them answers. Asserted through `expectsRequest`
+   * because the sort a control *displays* and the sort the endpoint is *asked*
+   * for are two different things, and only the second one orders the grid.
+   */
+  test('searching switches the sort to Best match, and clearing it switches back', async ({
+    page,
+  }) => {
+    await visit(page, '/browse')
+
+    await expectsRequest(page, /\/api\/library\?.*sort=relevance/, 'GET', async () => {
+      await fillStable(page, SEARCH, 'the')
+    })
+
+    await expect(page).toHaveURL(/sort=relevance/)
+
+    await openBrowseFilters(page)
+    await expect(page.getByLabel('Sort the library')).toContainText('Best match')
+
+    await expectsRequest(page, /\/api\/library\?.*sort=title/, 'GET', async () => {
+      await fillStable(page, SEARCH, '')
+    })
+
+    await expect(page).not.toHaveURL(/sort=relevance/)
+  })
+
+  /** Offering an order that ranks nothing is offering a control that does nothing. */
+  test('does not offer Best match while the search box is empty', async ({ page }) => {
+    await visit(page, '/browse')
+    await openBrowseFilters(page)
+
+    await page.getByLabel('Sort the library').click()
+    await expect(page.getByRole('option', { name: 'Title' })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Best match' })).toHaveCount(0)
+  })
+
+  /**
    * The genre control offers the vocabulary the library actually holds, so a
    * library with no imported metadata legitimately has nothing to offer. The
    * skip is decided from the **data** rather than from `locator.count()`,
