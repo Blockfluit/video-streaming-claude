@@ -237,6 +237,49 @@ test.describe('reordering episodes', () => {
   })
 })
 
+test.describe('the browse filters', () => {
+
+  /*
+   * Folded away by default, because four stacked selects put the whole reason
+   * for the page — the posters — below the fold on a phone.
+   *
+   * The controls are the *same* elements the desktop lays out inline; only
+   * their container's `display` differs, so there is one set of filters rather
+   * than two that drift. This checks the fold rather than the button, and that
+   * opening it really reveals them.
+   */
+  test('stay out of the way until they are asked for', async ({ page }) => {
+    await visit(page, '/browse')
+
+    const filters = page.locator('#browse-filters')
+    const genre = page.getByLabel('Filter by genre')
+
+    await expect(page.getByRole('button', { name: /^Filters/ })).toBeVisible()
+    await expect(filters).toBeHidden()
+    await expect(genre).toBeHidden()
+
+    // The posters, which are what the page is for, are on screen without it.
+    await expect(page.locator('.poster-grid').first()).toBeVisible()
+
+    await page.getByRole('button', { name: /^Filters/ }).click()
+    await expect(filters).toBeVisible()
+    await expect(genre).toBeVisible()
+  })
+
+  /*
+   * Folding the controls away must not hide that they are on. A filter left
+   * applied behind a closed panel is a list quietly answering a question you
+   * cannot see, which is the same fault as a search box whose windows were
+   * fetched for something else.
+   */
+  test('say how many are narrowing the list while folded away', async ({ page }) => {
+    await visit(page, '/browse?kind=SHOW')
+
+    await expect(page.getByRole('button', { name: 'Filters (1)' })).toBeVisible()
+    await expect(page.locator('#browse-filters')).toBeHidden()
+  })
+})
+
 test.describe('the poster wall', () => {
 
   /*

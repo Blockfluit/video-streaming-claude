@@ -462,8 +462,16 @@ useHead({ title: 'Home' })
           A 10px dot is a 10px thing to hit with a thumb, and this one is also
           the stop control for content that moves on its own — the worst of both,
           since you reach for it precisely when something is about to change
-          under you. `.tap` gives it 44px on a coarse pointer and nothing at all
-          on a fine one, so the row is unchanged with a mouse.
+          under you.
+
+          **Tall, not square.** `.tap` was the obvious reach and it looked
+          wrong: five 44px-wide boxes with a gap between them spread five 10px
+          dots about 52px apart, which reads as five unrelated controls rather
+          than one row of bullets. Height is what makes a bullet easy to hit —
+          the row is wide and shallow, and a thumb lands somewhere in the
+          vertical band — so the box is 44px tall and 24px wide, still clear of
+          WCAG 2.5.8's floor, at a pitch that looks deliberate. Coarse pointers
+          only, so a mouse sees the row exactly as it was.
 
           The dot keeps its **colour**-based dimming rather than gaining an
           opacity: `visible.spec.ts` multiplies opacity up the ancestor chain
@@ -474,7 +482,7 @@ useHead({ title: 'Home' })
           v-for="(entry, index) in entries"
           :key="entry.id"
           type="button"
-          class="tap group grid place-items-center"
+          class="group grid place-items-center pointer-coarse:min-h-11 pointer-coarse:min-w-6"
           :aria-label="index === active
             ? (stopped ? 'Resume the rotation' : 'Pause the rotation')
             : `Show ${entry.title}`"
