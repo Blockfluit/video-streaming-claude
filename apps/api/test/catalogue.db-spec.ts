@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { normaliseTitle } from '@video/shared';
 import request from 'supertest';
 
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -69,7 +70,12 @@ describe('Catalogue (real database)', () => {
       data: {
         slug: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${seq}`,
         title,
-        normalisedTitle: title.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        // `normaliseTitle`, not a hand-rolled version of it. The one this
+        // replaced did not fold accents, so `Amélie` was stored as `mlie` — and
+        // every trigram query in the searching block runs against this column,
+        // so an accent test would have failed for a reason nothing to do with
+        // the code it was testing. The service writes this through `titleData()`.
+        normalisedTitle: normaliseTitle(title),
         storageKey: `drive/${title}-${seq}.mp4`,
         contentTag: 'tag',
         originalName: `${title}.mp4`,
@@ -460,6 +466,211 @@ describe('Catalogue (real database)', () => {
       await video('Brazil');
 
       expect(await titles(admin, '?q=brazil')).toEqual(['Brazil']);
+    });
+  });
+
+  /**
+   * The four things a search has to tolerate, end to end.
+   *
+   * Pinned here as well as in `relevance.spec.ts` because they are the only
+   * cases that prove the *recall* half: the scorer can rank a misspelling
+   * perfectly and still never see the row, because whether `intersteller` ever
+   * reaches it is a question about `pg_trgm`, an index and a threshold. A unit
+   * test cannot fail for that reason, and this one can.
+   */
+  describe('fuzzy searching', () => {
+    it('finds a title through a misspelling', async () => {
+      await video('Interstellar');
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=intersteller')).toEqual(['Interstellar']);
+    });
+
+    it('finds a title from a word typed only partly', async () => {
+      await video('Star Wars: Episode IV');
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=star wa')).toEqual(['Star Wars: Episode IV']);
+    });
+
+    it('finds a title with the words in the wrong order', async () => {
+      await video('The Matrix Reloaded');
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=reloaded matrix')).toEqual(['The Matrix Reloaded']);
+    });
+
+    it('finds a title whose accent nobody typed', async () => {
+      await video('Amélie');
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=amelie')).toEqual(['Amélie']);
+    });
+
+    it('finds a title by a genre, which the search box has always claimed to read', async () => {
+      await video('Alien', { genres: ['Horror'] });
+      await video('Brazil', { genres: ['Comedy'] });
+
+      expect(await titles(admin, '?q=horror')).toEqual(['Alien']);
+    });
+
+    /**
+     * The half that keeps fuzzy search from being worse than none.
+     *
+     * Recall is deliberately generous — Postgres is asked which rows *resemble*
+     * the text — so the thing worth pinning is that generosity stops somewhere.
+     * A search that answers everything has not been made cleverer.
+     */
+    it('does not answer a query nothing resembles', async () => {
+      await video('Brazil');
+      await video('Alien', { description: 'A creature.' });
+
+      expect(await titles(admin, '?q=zzzznothing')).toEqual([]);
+    });
+
+    it('does not fuzz a short word into a different one', async () => {
+      await video('Wax');
+
+      expect(await titles(admin, '?q=war')).toEqual([]);
+    });
+
+    /** The leak, under fuzz. The exact rule the direct-title case pins, misspelled. */
+    it('does not reach a viewer through a misspelling of a draft video’s title', async () => {
+      const potter = await shelf('Harry Potter');
+      await video('Unreleased Sequel', { collectionId: potter.id, state: 'DRAFT' });
+
+      expect(await titles(await asUser(), '?q=unreleesed')).toEqual([]);
+      expect(await titles(admin, '?q=unreleesed')).toEqual(['Harry Potter']);
+    });
+
+    it('does not reach a viewer through a misspelling of a draft episode’s credits', async () => {
+      const rickman = await person('Alan Rickman');
+      const potter = await shelf('Harry Potter');
+      const secret = await video('Unreleased', { collectionId: potter.id, state: 'DRAFT' });
+      await creditVideo(secret.id, rickman);
+
+      expect(await titles(await asUser(), '?q=rickmann')).toEqual([]);
+      expect(await titles(admin, '?q=rickmann')).toEqual(['Harry Potter']);
+    });
+  });
+
+  describe('ranking', () => {
+    it('answers with the best match first', async () => {
+      await video('The Matrix Reloaded');
+      await video('Matrix');
+      await video('Alien', { description: 'Shot on a matrix of soundstages.' });
+
+      // Exact title, then the one that starts with it, then the synopsis.
+      expect(await titles(admin, '?q=matrix&sort=relevance')).toEqual([
+        'Matrix',
+        'The Matrix Reloaded',
+        'Alien',
+      ]);
+    });
+
+    it('ranks a film named for the query above one merely credited to it', async () => {
+      const rickman = await person('Alan Rickman');
+      const film = await video('Die Hard');
+      await creditVideo(film.id, rickman);
+      await video('Rickman');
+
+      expect(await titles(admin, '?q=rickman&sort=relevance')).toEqual(['Rickman', 'Die Hard']);
+    });
+
+    it('ranks a shelf named for the query above one reached through a video on it', async () => {
+      const potter = await shelf('Harry Potter');
+      await video('Prisoner of Azkaban', { collectionId: potter.id });
+      await shelf('Azkaban');
+
+      expect(await titles(admin, '?q=azkaban&sort=relevance')).toEqual([
+        'Azkaban',
+        'Harry Potter',
+      ]);
+    });
+
+    it('still puts a shelf before a film it ties with exactly', async () => {
+      // The tie-break `relevance.ts` weights every indirect route below one to
+      // protect — a shelf must not be able to accumulate past the film.
+      await shelf('Dune');
+      await video('Dune');
+
+      const { items } = (await admin.get('/library?q=dune&sort=relevance').expect(200)).body;
+
+      expect(items.map((item: { kind: string }) => item.kind)).toEqual(['collection', 'film']);
+    });
+
+    it('answers a search with no sort exactly as it answers Best match', async () => {
+      // `q` means one thing whatever order the answer is shown in: the fuzzy
+      // recall and the dropping of unmatched rows happen for every sort. Only
+      // the order differs.
+      await video('Interstellar');
+      await video('Brazil');
+
+      expect(await titles(admin, '?q=intersteller')).toEqual(
+        await titles(admin, '?q=intersteller&sort=relevance'),
+      );
+    });
+
+    it('reads relevance with no query as the plain title order', async () => {
+      // A bookmark, or a search box cleared while Best match was selected. It
+      // answers rather than refusing — the browser suite fails any 4xx.
+      await video('Brazil');
+      await video('Alien');
+
+      expect(await titles(admin, '?sort=relevance')).toEqual(['Alien', 'Brazil']);
+    });
+
+    /**
+     * Infinite scroll concatenates offset pages, and `browse-paging.ts` says in
+     * as many words that this is sound only because the order is total. A score
+     * gives whole groups of entries the same number, so ties are the norm here
+     * rather than the exception — which makes this the one place a
+     * non-total relevance order would show up as a duplicated card.
+     */
+    it('walks a whole search once, with no repeat and no gap', async () => {
+      await shelf('Matrix Alpha');
+      await shelf('Matrix Charlie');
+      await video('Matrix Bravo');
+      await video('Matrix Delta');
+      await video('Matrix Echo');
+      await video('Matrix Foxtrot');
+
+      const walked = [
+        ...(await titles(admin, '?q=matrix&sort=relevance&limit=2&offset=0')),
+        ...(await titles(admin, '?q=matrix&sort=relevance&limit=2&offset=2')),
+        ...(await titles(admin, '?q=matrix&sort=relevance&limit=2&offset=4')),
+      ];
+
+      expect(new Set(walked).size).toBe(6);
+      expect(walked).toEqual(await titles(admin, '?q=matrix&sort=relevance&limit=100'));
+    });
+
+    it('counts exactly what paging can reach', async () => {
+      /*
+       * The total comes from the scored pool rather than a `count()`, and it has
+       * to: Postgres is asked a generous question, so a count taken from it
+       * would promise cards that scored nothing and were dropped.
+       * `nextBrowsePage` walks until `loaded >= total`, so a total that
+       * overcounts is a browse page that scrolls forever waiting for a page
+       * that never comes.
+       */
+      await video('Matrix');
+      await video('Brazil');
+      await video('Alien');
+
+      const response = await admin.get('/library?q=matrix&sort=relevance').expect(200);
+
+      expect(response.body).toMatchObject({ total: 1, hasMore: false });
+      expect(response.body.items).toHaveLength(1);
+    });
+
+    it('does not leak the score it sorted on', async () => {
+      await video('Brazil');
+
+      const [film] = (await admin.get('/library?q=brazil&sort=relevance').expect(200)).body.items;
+
+      expect(film).not.toHaveProperty('score');
+      expect(film).not.toHaveProperty('normalisedTitle');
     });
   });
 

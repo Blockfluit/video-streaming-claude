@@ -1,4 +1,12 @@
-import { LIBRARY_SORTS, mergePage, perSideWindow, type LibraryEntry } from './merge';
+import { librarySortSchema } from '@video/shared';
+
+import {
+  LIBRARY_SORTS,
+  mergePage,
+  perSideWindow,
+  RELEVANCE_POOL,
+  type LibraryEntry,
+} from './merge';
 
 /**
  * The two kinds, built so a test reads as the thing it is about. `createdAt`
@@ -17,6 +25,7 @@ const shelf = (
   normalisedTitle,
   year: null,
   createdAt: EPOCH,
+  score: 0,
   ...extra,
 });
 
@@ -30,6 +39,7 @@ const film = (
   normalisedTitle,
   year: null,
   createdAt: EPOCH,
+  score: 0,
   ...extra,
 });
 
@@ -124,9 +134,42 @@ describe('LIBRARY_SORTS', () => {
   });
 
   it('names a Prisma order for every sort', () => {
-    for (const sort of ['title', 'year', 'added'] as const) {
+    // Read off the schema rather than written out here. A hand-written list
+    // stops guarding the moment a sort is added to the enum and not to this
+    // array — silently, and while still passing, which is the one failure mode
+    // a guard must not have.
+    for (const sort of librarySortSchema.options) {
       expect(LIBRARY_SORTS[sort].orderBy.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('LIBRARY_SORTS.relevance', () => {
+  const { compare } = LIBRARY_SORTS.relevance;
+
+  it('puts the better match first', () => {
+    expect(compare(film('a', 'matrix', { score: 1 }), film('b', 'thematrix', { score: 0.8 }))).toBeLessThan(0);
+  });
+
+  it('falls back to the title when two entries matched equally well', () => {
+    // Ties are the norm here rather than the exception — a tier-based score
+    // gives whole groups of entries the same number — so what happens next is
+    // most of the order a reader actually sees.
+    expect(compare(film('b', 'alien', { score: 0.8 }), film('a', 'brazil', { score: 0.8 }))).toBeLessThan(0);
+  });
+
+  it('still puts a collection before a film they tie with', () => {
+    // The rule `relevance.ts` weights every indirect route below one to protect:
+    // a shelf must not be able to accumulate its way past the film it shares a
+    // name with, because this is what decides that pair.
+    expect(compare(shelf('c', 'dune', { score: 1 }), film('v', 'dune', { score: 1 }))).toBeLessThan(0);
+  });
+
+  it('never returns zero for two different entries', () => {
+    // Offset paging over a non-total order repeats and skips rows, and
+    // `browse-paging.ts` concatenates pages on exactly this promise.
+    expect(compare(shelf('a', 'dune', { score: 1 }), film('a', 'dune', { score: 1 }))).not.toBe(0);
+    expect(compare(film('a', 'dune', { score: 1 }), film('b', 'dune', { score: 1 }))).not.toBe(0);
   });
 });
 
@@ -136,11 +179,23 @@ describe('perSideWindow', () => {
     // table, so neither side may skip. The first `offset + limit` rows of the
     // union can only come from the first `offset + limit` rows of each side,
     // which is what makes taking that many exact rather than approximate.
-    expect(perSideWindow(100, 50)).toEqual({ skip: 0, take: 150 });
+    expect(perSideWindow(100, 50, false)).toEqual({ skip: 0, take: 150 });
   });
 
   it('asks for the page itself when there is no offset', () => {
-    expect(perSideWindow(0, 50)).toEqual({ skip: 0, take: 50 });
+    expect(perSideWindow(0, 50, false)).toEqual({ skip: 0, take: 50 });
+  });
+
+  it('reads the whole pool while searching, because a window would be wrong', () => {
+    /*
+     * The argument the other two cases rest on — that the first `offset + limit`
+     * rows of the union came from the first that many of each side — assumes the
+     * per-side SQL order is the merged order. Under a score Postgres never
+     * computed it is not, so there is no window to take and the pool is read
+     * whole.
+     */
+    expect(perSideWindow(100, 50, true)).toEqual({ skip: 0, take: RELEVANCE_POOL });
+    expect(perSideWindow(0, 50, true)).toEqual({ skip: 0, take: RELEVANCE_POOL });
   });
 });
 
