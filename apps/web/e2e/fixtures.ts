@@ -224,6 +224,22 @@ export async function savesThenRestores(
  * default; a test is the one caller that wants the other one.
  */
 /**
+ * Opens `/browse`'s filter controls, which are folded away at every width.
+ *
+ * Searching is what that page is for; the four selects are one press behind a
+ * button rather than a permanent row above the posters. Anything driving a
+ * filter has to open them first, and doing it here means the tests say what
+ * they are testing rather than repeating the disclosure.
+ */
+export async function openBrowseFilters(page: Page): Promise<void> {
+  const filters = page.locator('#browse-filters')
+  if (await filters.isVisible()) return
+
+  await page.getByRole('button', { name: /^Filters/ }).click()
+  await expect(filters).toBeVisible()
+}
+
+/**
  * Drags one element onto another with real pointer events.
  *
  * **Not `locator.dragTo`.** That issues the HTML5 drag-and-drop protocol, which
