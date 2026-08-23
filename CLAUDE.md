@@ -962,11 +962,29 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   episodes of one of them. It asks **`GET /library`** for both halves at once; it used to fetch
   `/collections` and `/videos?film=true` separately and stitch them together here, which is why the merge
   moved to the API — see **The catalogue** above.
-- Every filter lives in the **URL**, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
+- Every filter **reaches** the URL, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
   library is something you share and come back to, and none of that survives state held only in a `ref`.
-  The search box is the one control that types locally, debounced 250ms into the URL. Changing any filter
-  resets `offset`, or narrowing while on page seven lands on an empty page that looks exactly like an empty
-  library.
+  Changing any filter resets `offset`, or narrowing while on page seven lands on an empty page that looks
+  exactly like an empty library.
+- **The URL is no longer where the question lives, and that is the whole of the search box feeling quick.**
+  `browse.vue` holds the filters in a `ref` and writes them out on a slower clock (`SETTLE_MS`, 600ms)
+  than it asks the API on (`INSTANT_MS`, 150ms), because the two are wanted for different things: the grid
+  should follow the box as closely as the server can answer, while the address bar only has to agree
+  eventually. It used to be one 250ms debounce doing both, so nothing could move until a `router.replace`
+  had landed — measured on a 3 800-title library, the wait between the last keystroke and the answer went
+  **245ms → 133ms**, and the server was only 45ms of either. `INSTANT_MS` is deliberately not lower: near
+  90ms is where a search stops being noticeable, and asking that often is only kind to a server that
+  answers in single digits.
+- The cost is a **second copy of the state**, so one watcher keeps them honest when the URL is the copy
+  that moved — a link into `/browse` from a page already on it, or a back navigation. It follows the
+  **box** as well as the filters: the box is a third copy of the same text and the only one anybody can
+  see. A hard load re-runs setup and seeds all three for free, which is why a test that arrives with
+  `page.goto` proves nothing here — the first version of that test passed with the sync deleted.
+- **`fill()` is gated on the box having settled and the first page having landed.** `loadMore` can drop a
+  stale *answer* but cannot un-ask: scrolling while a new question's first page is in flight reaches it
+  with a `total` describing the previous list, and the window that comes back is appended to the new one.
+  Measured, so the comment does not overclaim: at 1280×720 and at 1600×2200 one search costs exactly one
+  request with or without the gate, because fifty cards are taller than both viewports.
 - The genre control is filled from **`GET /library/genres`**, never a hardcoded list: `genres` is free text
   as far as Postgres is concerned, so a control offering a vocabulary the library does not use is a control
   that mostly returns nothing.

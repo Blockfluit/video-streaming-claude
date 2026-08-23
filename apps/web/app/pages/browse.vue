@@ -38,25 +38,60 @@ const route = useRoute()
 const router = useRouter()
 const { isAdmin } = useSession()
 
-/** The filters, read from the URL — which is the only place they live. */
-const filters = computed(() => parseBrowseFilters(route.query))
+/**
+ * The question the grid is answering.
+ *
+ * Seeded from the URL and thereafter held here, which is a change worth being
+ * clear about: the URL used to be the only place the filters lived, and the list
+ * could not move until a `router.replace` had landed.
+ *
+ * The two want different clocks. The list should follow the search box as
+ * closely as the server can answer; the URL is for sharing, bookmarking and
+ * coming back, so it only has to agree *eventually* — see `SETTLE_MS`. Keeping
+ * one object as the question, and writing it out on a lag, is what lets the
+ * first happen without waiting on the second.
+ *
+ * Still the only definition of the filters: everything downstream reads this,
+ * and `browse-filters.ts` remains the sole owner of both directions of the
+ * mapping to and from the URL.
+ */
+const filters = ref<BrowseFilters>(parseBrowseFilters(route.query))
+
+/** The question as the API is asked it — and the identity of the list on screen. */
+const query = computed(() => browseSearchParams(filters.value))
+
+/**
+ * The URL, brought into line with the question.
+ *
+ * Compared as query strings before writing, because this runs from a debounce
+ * *and* from every control, and a `router.replace` to where the router already
+ * is still costs a navigation — and would re-enter the watcher below.
+ */
+function writeUrl(): void {
+  if (browseSearchParams(parseBrowseFilters(route.query)) === query.value) return
+
+  router.replace({ query: browseFiltersToQuery(filters.value) })
+}
 
 /**
  * Change one thing, and start the list again.
  *
- * Nothing to reset here any more — the filters are the whole of the URL now, and
- * everything loaded past the first page is discarded by the watcher below, which
+ * Everything loaded past the first page is discarded by the watcher below, which
  * cannot be forgotten the way an explicit reset here could be.
+ *
+ * The URL is written at once here, unlike for the search box: pressing a select
+ * is a deliberate act with nothing following it, so there is no burst to absorb.
  */
 function apply(change: Partial<BrowseFilters>): void {
   // Through `applyBrowseChange`, which decides whether the change implies a
   // different sort — starting to search selects Best match, clearing it puts
   // Title back, and an explicit choice survives both.
-  router.replace({ query: browseFiltersToQuery(applyBrowseChange(filters.value, change)) })
+  filters.value = applyBrowseChange(filters.value, change)
+  writeUrl()
 }
 
-// The search box types locally and lands in the URL 250ms later — see
-// `useDebounced` for why that wait is not optional.
+// The search box types locally and reaches the list `INSTANT_MS` later, the URL
+// `SETTLE_MS` after that — see `useDebounced` for why those are two numbers.
 const search = ref(filters.value.q)
 
 /** Stable, because the composable below finds that box by id rather than by ref. */
@@ -71,17 +106,54 @@ const SEARCH_INPUT_ID = 'browse-search'
  */
 useTypedBeforeHydration(SEARCH_INPUT_ID, search)
 
-useDebounced(search, (value) => apply({ q: value }))
+/**
+ * Whether a keystroke is still settling.
+ *
+ * Read by `fill` below, which must not start pulling further pages of a question
+ * the person is in the middle of changing.
+ */
+const typing = ref(false)
 
-// The back button moves the URL without touching the box, so it is followed.
-watch(
-  () => filters.value.q,
+watch(search, () => {
+  typing.value = true
+})
+
+// The list follows the box. No URL write here — that is the watcher below.
+useDebounced(
+  search,
   (value) => {
-    if (value !== search.value) search.value = value
+    typing.value = false
+    filters.value = applyBrowseChange(filters.value, { q: value })
   },
+  INSTANT_MS,
 )
 
-const query = computed(() => browseSearchParams(filters.value))
+// And the address bar catches up in its own time.
+useDebounced(filters, writeUrl, SETTLE_MS)
+
+/**
+ * The URL moving on its own — a link into `/browse` from a page already on it,
+ * or a back navigation between two of them.
+ *
+ * This is the cost of holding the question here as well as in the URL: two
+ * copies, and something has to keep them honest when the one this page does not
+ * own is the one that moved. The box is followed as well as the filters, because
+ * the box is a third copy of the same text and the only one a person can see.
+ *
+ * Guarded by comparing the question rather than by a flag: `writeUrl` and this
+ * watcher point at each other, and a flag would have to be right about every
+ * order they can run in.
+ */
+watch(
+  () => route.query,
+  (incoming) => {
+    const fromUrl = parseBrowseFilters(incoming)
+    if (browseSearchParams(fromUrl) === query.value) return
+
+    filters.value = fromUrl
+    if (fromUrl.q !== search.value) search.value = fromUrl.q
+  },
+)
 
 const { data, status, error } = await useApiData<Page<LibraryCard>>(
   'browse-library',
@@ -271,9 +343,27 @@ function sentinelInView(): boolean {
 
 let filling = false
 
-/** Keep loading until the end of the list is off screen, or there is no more of it. */
+/**
+ * Keep loading until the end of the list is off screen, or there is no more of it.
+ *
+ * **Two guards beyond the in-flight one, and they are about a stale `total`
+ * rather than about saving requests.** `loadMore` already drops an *answer* that
+ * belongs to a question since replaced; what it cannot do is un-ask. Scrolling
+ * while a new question's first page is still in flight reaches here with `total`
+ * still describing the previous list, so `nextBrowsePage` picks an offset into a
+ * list that no longer exists — and the window that comes back is appended to the
+ * new one, which is how a card arrives twice or not at all.
+ *
+ * `typing` holds off while the box is still moving; `status` holds off until this
+ * question's own first page has landed, which is the only point at which `total`
+ * means anything.
+ *
+ * Measured before assuming: on a 1280×720 and on a 1600×2200 viewport one search
+ * costs exactly one request either way, because fifty cards are taller than both.
+ * This is a correctness guard, and it earns its place there.
+ */
 async function fill(): Promise<void> {
-  if (filling) return
+  if (filling || typing.value || status.value !== 'success') return
   filling = true
 
   try {
@@ -286,6 +376,20 @@ async function fill(): Promise<void> {
     filling = false
   }
 }
+
+/*
+ * The fill the observer cannot ask for.
+ *
+ * It reports *changes*, and holding it off above means the moment it would have
+ * fired — the sentinel arriving in view as the new page renders — is a moment
+ * when this refuses. By the time the answer lands the sentinel is already
+ * sitting there with nothing new to say, which is the same trap `sentinelInView`
+ * exists for, one step further along. So the answer landing is itself a reason
+ * to look.
+ */
+watch(status, (settled) => {
+  if (settled === 'success') void fill()
+})
 
 /** The button under the grid, which also clears a failure so it can be retried. */
 function loadMoreNow(): void {
