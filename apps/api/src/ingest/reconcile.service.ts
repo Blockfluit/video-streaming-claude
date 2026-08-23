@@ -4,6 +4,7 @@ import { freeSlug, seasonSlug, slugify, uniqueSlug } from '../common/slug';
 import { StorageService } from '../common/storage.service';
 import { titleData } from '../common/title';
 import { MediaService } from '../media/media.service';
+import { IndexerService } from '../search/indexer.service';
 import { SubtitlesService } from '../subtitles/subtitles.service';
 import type { IngestIssueKind, PublishState } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,6 +75,7 @@ export class ReconcileService {
     private readonly storage: StorageService,
     private readonly media: MediaService,
     private readonly subtitles: SubtitlesService,
+    private readonly indexer: IndexerService,
   ) {}
 
   get isRunning(): boolean {
@@ -96,6 +98,20 @@ export class ReconcileService {
     this.running = this.reconcile()
       .then((summary) => {
         this.lastSummary = summary;
+        /*
+         * The one hook that covers every write in this file.
+         *
+         * A pass creates videos, creates collections and seasons, moves files,
+         * and sweeps a whole library to `MISSING` — all in unbounded single-row
+         * loops with no transaction and nothing row-level to subscribe to. Rather
+         * than tracking each, the index is rebuilt after the pass, which at this
+         * library's size is seconds. `IndexerService` argues the trade.
+         *
+         * Not awaited, and that is load-bearing: `run()` is awaited by
+         * `uploads.service.ts`, so waiting here would make every upload pay for a
+         * rebuild.
+         */
+        this.indexer.markDirty();
         return summary;
       })
       .finally(() => {

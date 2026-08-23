@@ -20,6 +20,33 @@ import { onBeforeUnmount, watch, type WatchSource } from 'vue'
 export const DEBOUNCE_MS = 250
 
 /**
+ * The interval for *asking* a question, as opposed to recording it.
+ *
+ * A debounce exists so nobody is asked about text that is still changing, and
+ * 250 ms is longer than that needs: a fluent typist leaves 100–200 ms between
+ * keys, so a quarter of a second is a deliberate pause rather than a natural
+ * one. On `/browse` that quarter-second is the first term of the wait somebody
+ * feels after they stop typing, and it is pure dead time.
+ *
+ * Deliberately **not** as low as it could be. The number that makes a search
+ * feel instant is nearer 90 ms, and asking that often is only kind to a server
+ * that can answer in single-digit milliseconds — `/library?q=` cannot yet, so
+ * dropping further would trade a shorter wait for more of them. This comes down
+ * again when the API does.
+ */
+export const INSTANT_MS = 150
+
+/**
+ * How long a question waits before it is written to the URL.
+ *
+ * The list and the address bar want different clocks. The list should follow
+ * the box as closely as the server allows; the URL exists to be shared,
+ * bookmarked and returned to, so it only has to agree *eventually* — and a
+ * `router.replace` per settled keystroke is history churn nobody asked for.
+ */
+export const SETTLE_MS = 600
+
+/**
  * Runs `callback` once the watched value has been still for `delay`.
  *
  * Deliberately not immediate on the first change: every caller here is a search

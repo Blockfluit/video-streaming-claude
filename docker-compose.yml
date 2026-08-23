@@ -19,5 +19,31 @@ services:
       timeout: 5s
       retries: 10
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.24
+    container_name: video-streaming-meilisearch
+    restart: unless-stopped
+    environment:
+      # No master key in development, which is what Meilisearch's own
+      # development mode is for. Production refuses to start without one.
+      MEILI_ENV: development
+      # On by default otherwise, and a private library reporting its usage to a
+      # third party is exactly what the opt-in rules elsewhere here argue against.
+      MEILI_NO_ANALYTICS: 'true'
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      # Same reason Postgres has one: the API's boot-time rebuild would otherwise
+      # race a service that is still opening its database.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7700/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
+  # Disposable, and worth saying so: Postgres is the source of truth and this is
+  # derived from it. Losing it costs one rebuild, which is seconds.
+  meilidata:

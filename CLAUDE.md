@@ -604,6 +604,40 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Searching is keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
   drops unmatched rows whatever order it is then shown in, and a `q` meaning one thing under Best match and
   another under Title would be indefensible.
+- **Search can run on Meilisearch** (`apps/api/src/search/`), and runs on Postgres when it does not.
+  `MEILI_URL` unset is the default everywhere including every test tier, which is what stops the
+  fallback rotting — it is not a branch kept for an outage, it is what a search *is* until somebody
+  opts in. The engine answers the **recall** half only: `relevance.ts` still ranks and Prisma still
+  decides who sees what.
+- **An engine is asked about one table's own text and answers with ids.** No collection document holds
+  the titles of the videos on it, and no title document holds the names of its cast. That is the leak
+  the Prisma re-read *cannot* catch: a shelf found because a draft episode on it matched is a shelf
+  that passes every downstream filter on its own state. So the shelf-via-video route stays in Prisma
+  with `whereVisible(role)` on the episode, and `documents.spec.ts` asserts the shape rather than
+  trusting it. What a stale index can do is bounded to losing recall — `search.db-spec.ts` hands the
+  service a deleted, drafted and renamed id and pins the answer each time.
+- Index only what `relevance.ts` scores — title, description, genres. Recall the scorer throws away is
+  worse than useless: it spends the candidate budget and then drops the row. `originalTitle`, `tags`
+  and `tagline` are populated and unindexed for exactly that reason, and indexing them is a change to
+  what a search *means*, not a setting.
+- **The index is rebuilt in full, never patched.** After every reconcile pass, at boot, and on
+  `POST /admin/search/reindex`. At this library's size that is seconds, which buys out of tracking ~40
+  write sites across unbounded reconcile loops, TMDB applies, and three cascade deletes that
+  invalidate documents they never name. Rebuilds go through a **shadow index and an atomic swap**:
+  delete-then-add leaves a window where the index is empty, and because Meilisearch writes are
+  background tasks that window is real — a query answered 138 rows one moment and 25 the next, mid-
+  rebuild, which is how it was found.
+- **The engine client uses `node:http`, not `fetch`, and that is worth 48ms a search.** Measured
+  container-to-container on one 113-id answer: `fetch` (undici) on a keep-alive connection **50.5ms**,
+  `fetch` with `Connection: close` 4.5ms, `node:http` keep-alive **1.6ms** — against Meilisearch's own
+  reported 0–1ms. The cost appears as a step between a 20-hit answer and a 60-hit one, which is where
+  the response outgrows one TCP segment: a delayed-ACK stall, not parsing. Until this was found,
+  searching *through Meilisearch was slower than searching through Postgres*, which is the only reason
+  it was looked for. `fetchUpstream` stays right for TMDB and OpenSubtitles, where a request crosses
+  the internet once and 50ms is noise.
+- End to end on a 3 800-title library, p50 of 15: Postgres 34–84ms, Meilisearch **15–36ms**. With the
+  engine stopped mid-flight the answers are identical and the timings return to the Postgres numbers —
+  the breaker stops it dialling a dead host, so a failed engine costs nothing per request.
 - **The five recall clauses are a `UNION`, never one `OR`.** Postgres answers a disjunction from indexes only
   when *every* branch has one, so a single un-indexed clause makes all five GIN indexes unreachable and the
   search scans the table computing a trigram similarity per row. That is what it did: measured over 20 000
@@ -962,11 +996,29 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   episodes of one of them. It asks **`GET /library`** for both halves at once; it used to fetch
   `/collections` and `/videos?film=true` separately and stitch them together here, which is why the merge
   moved to the API — see **The catalogue** above.
-- Every filter lives in the **URL**, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
+- Every filter **reaches** the URL, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
   library is something you share and come back to, and none of that survives state held only in a `ref`.
-  The search box is the one control that types locally, debounced 250ms into the URL. Changing any filter
-  resets `offset`, or narrowing while on page seven lands on an empty page that looks exactly like an empty
-  library.
+  Changing any filter resets `offset`, or narrowing while on page seven lands on an empty page that looks
+  exactly like an empty library.
+- **The URL is no longer where the question lives, and that is the whole of the search box feeling quick.**
+  `browse.vue` holds the filters in a `ref` and writes them out on a slower clock (`SETTLE_MS`, 600ms)
+  than it asks the API on (`INSTANT_MS`, 150ms), because the two are wanted for different things: the grid
+  should follow the box as closely as the server can answer, while the address bar only has to agree
+  eventually. It used to be one 250ms debounce doing both, so nothing could move until a `router.replace`
+  had landed — measured on a 3 800-title library, the wait between the last keystroke and the answer went
+  **245ms → 133ms**, and the server was only 45ms of either. `INSTANT_MS` is deliberately not lower: near
+  90ms is where a search stops being noticeable, and asking that often is only kind to a server that
+  answers in single digits.
+- The cost is a **second copy of the state**, so one watcher keeps them honest when the URL is the copy
+  that moved — a link into `/browse` from a page already on it, or a back navigation. It follows the
+  **box** as well as the filters: the box is a third copy of the same text and the only one anybody can
+  see. A hard load re-runs setup and seeds all three for free, which is why a test that arrives with
+  `page.goto` proves nothing here — the first version of that test passed with the sync deleted.
+- **`fill()` is gated on the box having settled and the first page having landed.** `loadMore` can drop a
+  stale *answer* but cannot un-ask: scrolling while a new question's first page is in flight reaches it
+  with a `total` describing the previous list, and the window that comes back is appended to the new one.
+  Measured, so the comment does not overclaim: at 1280×720 and at 1600×2200 one search costs exactly one
+  request with or without the gate, because fifty cards are taller than both viewports.
 - The genre control is filled from **`GET /library/genres`**, never a hardcoded list: `genres` is free text
   as far as Postgres is concerned, so a control offering a vocabulary the library does not use is a control
   that mostly returns nothing.

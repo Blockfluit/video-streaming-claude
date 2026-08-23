@@ -317,6 +317,34 @@ test.describe('viewer', () => {
   })
 
   /**
+   * The URL moving under a page that is already mounted.
+   *
+   * The question the grid answers is held on the page now and written to the URL
+   * on a slower clock, so that typing does not wait on a navigation. That buys a
+   * second copy of the state, and a second copy is a thing that can disagree.
+   *
+   * A **client-side** navigation is the case that catches it, and getting that
+   * right is most of this test. Arriving by `page.goto` re-runs setup, which
+   * seeds the box from the URL for free — so a hard load proves nothing here, and
+   * an earlier version of this test passed happily with the sync deleted. Pressing
+   * "Browse" in the header while already on a searched `/browse` keeps the
+   * component mounted and changes only the query, which is exactly the case
+   * nothing else covers.
+   */
+  test('clearing the search from the header empties the box and the filter', async ({ page }) => {
+    await visit(page, '/browse?q=zzzznothing')
+    await expect(page.getByText(/Nothing matches/)).toBeVisible()
+    await expect(page.locator(SEARCH)).toHaveValue('zzzznothing')
+
+    await page.locator('header').getByRole('link', { name: 'Browse' }).click()
+
+    await expect(page).toHaveURL(/\/browse$/)
+    // The box is the copy a person can see, so it is the one worth asserting.
+    await expect(page.locator(SEARCH)).toHaveValue('')
+    await expect(page.locator('main a[href^="/c/"]').first()).toBeVisible()
+  })
+
+  /**
    * Typing the instant the page appears, which is how people search.
    *
    * Deliberately **not** through `fillStable`. That helper retries the whole

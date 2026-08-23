@@ -1,5 +1,11 @@
 /**
- * Which rows resemble what somebody typed — and nothing else about them.
+ * Which rows resemble what somebody typed, asked of Postgres.
+ *
+ * **The built-in answer to `SearchEngine`, and the one every install runs until
+ * an operator configures something else.** Not a legacy path and not a stub for
+ * an outage: with no engine configured this is what a search *is*, which is what
+ * keeps it from rotting — `MEILI_URL` unset is the default everywhere,
+ * including every test tier.
  *
  * The recall half of search. `relevance.ts` decides what a match is *worth*;
  * this decides what Postgres is even willing to offer, which is the one part
@@ -36,7 +42,8 @@
 
 import type { PrismaService } from '../prisma/prisma.service';
 
-import { RELEVANCE_POOL } from './merge';
+import type { SearchCandidates } from './engine';
+import { RELEVANCE_POOL } from '../library/merge';
 
 /**
  * How many rows one table may offer before the query stops looking.
@@ -57,7 +64,7 @@ import { RELEVANCE_POOL } from './merge';
  * heavily filtered library and paid for it in the answer to every ordinary
  * search; `library.service.ts` explains what reads this.
  */
-const CANDIDATE_LIMIT = RELEVANCE_POOL;
+export const CANDIDATE_LIMIT = RELEVANCE_POOL;
 
 /**
  * How alike two strings must be to be worth offering.
@@ -73,14 +80,6 @@ const CANDIDATE_LIMIT = RELEVANCE_POOL;
  * scored 0.259. The gap is wide and 0.3 sits in it.
  */
 const THRESHOLD = '0.3';
-
-/** Ids only. Nothing here has been filtered for who may see it. */
-export interface SearchCandidates {
-  collectionIds: string[];
-  videoIds: string[];
-  /** Names come back because `relevance.ts` scores them; the ids do the joining. */
-  people: { id: string; name: string }[];
-}
 
 interface IdRow {
   id: string;
