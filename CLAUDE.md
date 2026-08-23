@@ -604,6 +604,40 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Searching is keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
   drops unmatched rows whatever order it is then shown in, and a `q` meaning one thing under Best match and
   another under Title would be indefensible.
+- **Search can run on Meilisearch** (`apps/api/src/search/`), and runs on Postgres when it does not.
+  `MEILI_URL` unset is the default everywhere including every test tier, which is what stops the
+  fallback rotting — it is not a branch kept for an outage, it is what a search *is* until somebody
+  opts in. The engine answers the **recall** half only: `relevance.ts` still ranks and Prisma still
+  decides who sees what.
+- **An engine is asked about one table's own text and answers with ids.** No collection document holds
+  the titles of the videos on it, and no title document holds the names of its cast. That is the leak
+  the Prisma re-read *cannot* catch: a shelf found because a draft episode on it matched is a shelf
+  that passes every downstream filter on its own state. So the shelf-via-video route stays in Prisma
+  with `whereVisible(role)` on the episode, and `documents.spec.ts` asserts the shape rather than
+  trusting it. What a stale index can do is bounded to losing recall — `search.db-spec.ts` hands the
+  service a deleted, drafted and renamed id and pins the answer each time.
+- Index only what `relevance.ts` scores — title, description, genres. Recall the scorer throws away is
+  worse than useless: it spends the candidate budget and then drops the row. `originalTitle`, `tags`
+  and `tagline` are populated and unindexed for exactly that reason, and indexing them is a change to
+  what a search *means*, not a setting.
+- **The index is rebuilt in full, never patched.** After every reconcile pass, at boot, and on
+  `POST /admin/search/reindex`. At this library's size that is seconds, which buys out of tracking ~40
+  write sites across unbounded reconcile loops, TMDB applies, and three cascade deletes that
+  invalidate documents they never name. Rebuilds go through a **shadow index and an atomic swap**:
+  delete-then-add leaves a window where the index is empty, and because Meilisearch writes are
+  background tasks that window is real — a query answered 138 rows one moment and 25 the next, mid-
+  rebuild, which is how it was found.
+- **The engine client uses `node:http`, not `fetch`, and that is worth 48ms a search.** Measured
+  container-to-container on one 113-id answer: `fetch` (undici) on a keep-alive connection **50.5ms**,
+  `fetch` with `Connection: close` 4.5ms, `node:http` keep-alive **1.6ms** — against Meilisearch's own
+  reported 0–1ms. The cost appears as a step between a 20-hit answer and a 60-hit one, which is where
+  the response outgrows one TCP segment: a delayed-ACK stall, not parsing. Until this was found,
+  searching *through Meilisearch was slower than searching through Postgres*, which is the only reason
+  it was looked for. `fetchUpstream` stays right for TMDB and OpenSubtitles, where a request crosses
+  the internet once and 50ms is noise.
+- End to end on a 3 800-title library, p50 of 15: Postgres 34–84ms, Meilisearch **15–36ms**. With the
+  engine stopped mid-flight the answers are identical and the timings return to the Postgres numbers —
+  the breaker stops it dialling a dead host, so a failed engine costs nothing per request.
 - **The five recall clauses are a `UNION`, never one `OR`.** Postgres answers a disjunction from indexes only
   when *every* branch has one, so a single un-indexed clause makes all five GIN indexes unreachable and the
   search scans the table computing a trigram similarity per row. That is what it did: measured over 20 000

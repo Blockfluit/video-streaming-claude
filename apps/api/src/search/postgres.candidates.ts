@@ -4,7 +4,8 @@
  * **The built-in answer to `SearchEngine`, and the one every install runs until
  * an operator configures something else.** Not a legacy path and not a stub for
  * an outage: with no engine configured this is what a search *is*, which is what
- * keeps it from rotting — see `NoSearchEngine`.
+ * keeps it from rotting — `MEILI_URL` unset is the default everywhere,
+ * including every test tier.
  *
  * The recall half of search. `relevance.ts` decides what a match is *worth*;
  * this decides what Postgres is even willing to offer, which is the one part

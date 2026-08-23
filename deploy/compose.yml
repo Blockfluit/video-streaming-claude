@@ -43,6 +43,32 @@ services:
       # either — the local development compose file publishes 5432, this does not.
       - internal
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.24
+    container_name: ${STACK_NAME}-meilisearch
+    restart: unless-stopped
+    environment:
+      # Production mode refuses to start without a key of at least 16 bytes,
+      # which is why the `:?` below is the right shape rather than decorative.
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in the stack environment}
+      # On by default otherwise, and a private library reporting its usage to a
+      # third party is exactly what every other opt-in here argues against.
+      MEILI_NO_ANALYTICS: 'true'
+      MEILI_MAX_INDEXING_MEMORY: 512Mb
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:7700/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      # `internal` only, like Postgres and for a stronger reason: with the master
+      # key this is a full read/write API over the whole catalogue. No published
+      # port, and never on the traefik network.
+      - internal
+
   # The service name `api` is load-bearing. apps/web bakes NUXT_API_TARGET into
   # the Nitro bundle at image-build time (default http://api:4000), so renaming
   # this service breaks every request the frontend makes, at runtime, with no
@@ -88,6 +114,13 @@ services:
       # apps/api/src/main.ts. It is the difference between a working login and
       # one that returns 200 and does nothing.
       TRUST_PROXY: 'true'
+      # Search runs on Postgres without these; with them the recall half is
+      # answered by Meilisearch and falls back on its own if that stops working.
+      # Set here rather than in `env_file`, so nothing in stack.env can point the
+      # API at a different engine than the one this file starts.
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_INDEX_PREFIX: ${STACK_NAME}
 
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
 
@@ -196,4 +229,8 @@ networks:
 
 volumes:
   pgdata:
+  # Disposable, and worth saying so where somebody planning backups will read it:
+  # Postgres is the source of truth and this is derived from it. Losing it costs
+  # one rebuild, which the API does on its next boot.
+  meilidata:
   apistate:

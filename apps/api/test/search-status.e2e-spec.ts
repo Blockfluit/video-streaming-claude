@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
+import { IndexerService } from '../src/search/indexer.service';
 import { SearchController } from '../src/search/search.controller';
 import { SearchService } from '../src/search/search.service';
 
@@ -25,10 +26,13 @@ import { SearchService } from '../src/search/search.service';
 describe('Search status (stubbed)', () => {
   let app: INestApplication;
 
-  async function boot(search: Partial<SearchService>): Promise<void> {
+  async function boot(search: Partial<SearchService>, builtAt: Date | null = null): Promise<void> {
     const moduleRef = await Test.createTestingModule({
       controllers: [SearchController],
-      providers: [{ provide: SearchService, useValue: search }],
+      providers: [
+        { provide: SearchService, useValue: search },
+        { provide: IndexerService, useValue: { builtAt, rebuild: () => Promise.resolve() } },
+      ],
     }).compile();
 
     app = moduleRef.createNestApplication();
@@ -42,14 +46,41 @@ describe('Search status (stubbed)', () => {
 
     const response = await request(app.getHttpServer()).get('/search/status').expect(200);
 
-    expect(response.body).toEqual({ engine: 'postgres', configured: false, healthy: false });
+    expect(response.body).toEqual({
+      engine: 'postgres',
+      configured: false,
+      healthy: false,
+      indexedAt: null,
+    });
   });
 
   it('separates "not using one" from "we thought we were"', async () => {
-    await boot({ engineName: 'meilisearch', isConfigured: true, isHealthy: false });
+    const built = new Date('2026-08-23T10:00:00.000Z');
+    await boot({ engineName: 'meilisearch', isConfigured: true, isHealthy: false }, built);
 
     const response = await request(app.getHttpServer()).get('/search/status').expect(200);
 
-    expect(response.body).toEqual({ engine: 'meilisearch', configured: true, healthy: false });
+    expect(response.body).toEqual({
+      engine: 'meilisearch',
+      configured: true,
+      healthy: false,
+      indexedAt: built.toISOString(),
+    });
+  });
+
+  it('never reports the master key or where the engine lives', async () => {
+    // A full read/write credential over the whole catalogue. The same rule every
+    // other secret here follows: it does not appear in a message, a log, or a
+    // response.
+    await boot({ engineName: 'meilisearch', isConfigured: true, isHealthy: true });
+
+    const response = await request(app.getHttpServer()).get('/search/status').expect(200);
+
+    expect(Object.keys(response.body).sort()).toEqual([
+      'configured',
+      'engine',
+      'healthy',
+      'indexedAt',
+    ]);
   });
 });

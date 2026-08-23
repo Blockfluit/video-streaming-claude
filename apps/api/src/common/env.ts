@@ -74,6 +74,13 @@ export const envSchema = z.looseObject({
   OPENSUBTITLES_USERNAME: nonEmpty.optional(),
   OPENSUBTITLES_PASSWORD: nonEmpty.optional(),
   OPENSUBTITLES_USER_AGENT: nonEmpty.optional(),
+
+  // Unset, search runs on Postgres exactly as it always has. `MEILI_URL` is the
+  // switch; the key is only required by Meilisearch's own production mode, and
+  // the prefix lets two deployments share one engine without sharing an index.
+  MEILI_URL: nonEmpty.url('must be a URL, like http://meilisearch:7700').optional(),
+  MEILI_MASTER_KEY: nonEmpty.optional(),
+  MEILI_INDEX_PREFIX: nonEmpty.optional(),
 });
 
 /**
