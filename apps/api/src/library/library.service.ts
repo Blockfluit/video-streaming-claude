@@ -14,7 +14,9 @@ import { narrowToVisibleStates, whereVisible } from '../common/publishing';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
-import { searchCandidates, type SearchCandidates } from './candidates';
+import type { SearchCandidates } from '../search/engine';
+import { CANDIDATE_LIMIT } from '../search/postgres.candidates';
+import { SearchService } from '../search/search.service';
 import {
   LIBRARY_SORTS,
   mergePage,
@@ -210,7 +212,10 @@ function bestOf(search: Search, names: string[]): number {
 
 @Injectable()
 export class LibraryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly recall: SearchService,
+  ) {}
 
   /**
    * Two honest reads rather than one clever one.
@@ -302,7 +307,7 @@ export class LibraryService {
     role: Role,
   ): Promise<Page<LibraryCard>> {
     const search = prepareSearch(q);
-    const candidates = await searchCandidates(this.prisma, q, search.normalised);
+    const candidates = await this.recall.candidates(q, search.normalised, role, CANDIDATE_LIMIT);
 
     const personIds = candidates.people.map((person) => person.id);
     const names = new Map(candidates.people.map((person) => [person.id, person.name]));

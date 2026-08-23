@@ -19,6 +19,7 @@ import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RequestsModule } from './requests/requests.module';
+import { SearchModule } from './search/search.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { TranscodeModule } from './transcode/transcode.module';
 import { UploadsModule } from './uploads/uploads.module';
@@ -49,6 +50,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     CollectionsModule,
     VideosModule,
     LibraryModule,
+    SearchModule,
     SubtitlesModule,
     TranscodeModule,
     UploadsModule,
