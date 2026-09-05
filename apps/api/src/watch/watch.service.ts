@@ -27,8 +27,11 @@ const HISTORY_VIDEO_SELECT = {
   state: true,
   // Where a video sits, per collection it belongs to. Continue Watching
   // shows which show an episode came from, and it may have come from more
-  // than one.
+  // than one. Ordered by `addedAt` so "the first membership" is a stable
+  // answer rather than whatever order Postgres happens to return — the same
+  // convention `subtitle-search.service.ts` uses to pick one collection.
   collections: {
+    orderBy: { addedAt: 'asc' },
     select: {
       orderIndex: true,
       collection: { select: { id: true, slug: true, title: true } },
@@ -45,6 +48,12 @@ const PROGRESS_SELECT = {
   completed: true,
   lastWatchedAt: true,
 } as const;
+
+/**
+ * Enough unfinished rows to find every distinct collection without scanning the
+ * whole table — `perCollection` mode dedupes in JS, so this bounds that work.
+ */
+const CONTINUE_WATCHING_SCAN_LIMIT = 300;
 
 @Injectable()
 export class WatchService {
@@ -128,6 +137,32 @@ export class WatchService {
         ...whereVisible(role),
       },
     };
+
+    if (query.perCollection) {
+      const rows = await this.prisma.watchProgress.findMany({
+        where,
+        select: { ...PROGRESS_SELECT, video: { select: HISTORY_VIDEO_SELECT } },
+        orderBy: [{ lastWatchedAt: 'desc' }, { id: 'desc' }],
+        take: CONTINUE_WATCHING_SCAN_LIMIT,
+      });
+
+      // Rows are already ordered most-recent-first, so the first row seen for
+      // a video's collection is the one to keep. A video with no collection
+      // memberships groups on its own id instead of collapsing into others.
+      const seen = new Set<string>();
+      const deduped = rows.filter(({ video }) => {
+        const key = video.collections[0]?.collection.id ?? video.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const items = deduped
+        .slice(query.offset, query.offset + query.limit)
+        .map(({ video, ...progress }) => ({ video, progress }));
+
+      return toPage(items, deduped.length, query);
+    }
 
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.watchProgress.findMany({
