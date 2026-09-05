@@ -11,11 +11,12 @@ import {
 
 import { COUNTS_HERE_SELECT, whereFilm } from '../common/films';
 import { narrowToVisibleStates, whereVisible } from '../common/publishing';
+import { count, time } from '../common/timing';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { SearchCandidates } from '../search/engine';
-import { CANDIDATE_LIMIT } from '../search/postgres.candidates';
+import { CANDIDATE_LIMIT, PEOPLE_LIMIT } from '../search/postgres.candidates';
 import { SearchService } from '../search/search.service';
 import {
   LIBRARY_SORTS,
@@ -307,10 +308,34 @@ export class LibraryService {
     role: Role,
   ): Promise<Page<LibraryCard>> {
     const search = prepareSearch(q);
-    const candidates = await this.recall.candidates(q, search.normalised, role, CANDIDATE_LIMIT);
+    const candidates = await time('recall', () =>
+      this.recall.candidates(q, search.normalised, role, CANDIDATE_LIMIT, PEOPLE_LIMIT),
+    );
+    count('n.col', candidates.collectionIds.length);
+    count('n.vid', candidates.videoIds.length);
+    count('n.ppl', candidates.people.length);
 
-    const personIds = candidates.people.map((person) => person.id);
-    const names = new Map(candidates.people.map((person) => [person.id, person.name]));
+    /*
+     * People the scorer would credit nothing for, dropped before their ids reach
+     * four separate queries.
+     *
+     * `scoreEntry` folds a cast name through `WEIGHTS.cast * scoreText(name)`
+     * inside a `max`, so a name scoring zero contributes nothing to any entry it
+     * is credited on — on either the direct or the via-video route. Carrying such
+     * a person forward can only add rows that are then scored zero and filtered
+     * out, after their evidence has been read. This is the same function that
+     * decides the final answer, so it can only ever remove work, never change a
+     * score.
+     *
+     * It catches what an engine's term-dropping and typo tolerance offer and the
+     * scorer would not have vouched for — the two do not have to agree, and this
+     * is where the disagreement stops costing anything.
+     */
+    const matched = candidates.people.filter((person) => scoreText(search, person.name) > 0);
+
+    const personIds = matched.map((person) => person.id);
+    const names = new Map(matched.map((person) => [person.id, person.name]));
+    count('n.pplkept', matched.length);
 
     const found: Found = { candidates, personIds };
     const { orderBy } = LIBRARY_SORTS[query.sort];
@@ -320,8 +345,8 @@ export class LibraryService {
     };
     const filmSelect = { ...FILM_CARD, ...filmEvidence(personIds) };
 
-    const [directShelves, indirectShelves, directFilms, indirectFilms] =
-      await this.prisma.$transaction([
+    const [directShelves, indirectShelves, directFilms, indirectFilms] = await time('reads', () =>
+      this.prisma.$transaction([
         this.prisma.collection.findMany({
           where: this.collectionWhere(query, role, found, 'direct'),
           select: collectionSelect,
@@ -344,7 +369,19 @@ export class LibraryService {
           orderBy,
           take: RELEVANCE_POOL,
         }),
-      ]);
+      ]),
+    );
+
+    /*
+     * Whether either indirect read came back holding exactly `RELEVANCE_POOL` is
+     * the most informative number here: it means the cap is binding and those
+     * reads are as large as they can be, which is a different fault from a slow
+     * query over few rows.
+     */
+    count('n.ds', directShelves.length);
+    count('n.is', indirectShelves.length);
+    count('n.df', directFilms.length);
+    count('n.if', indirectFilms.length);
 
     const collections = [...directShelves, ...indirectShelves];
     const films = [...directFilms, ...indirectFilms];
@@ -352,6 +389,7 @@ export class LibraryService {
     const cast = (credits: { personId: string }[]): string[] =>
       credits.map((credit) => names.get(credit.personId)).filter((name): name is string => !!name);
 
+    const scoreStarted = process.hrtime.bigint();
     const scored: SortableCard[] = [
       ...(collections as SearchedCollectionRow[]).map((row) => ({
         ...toCollectionCard(row),
@@ -405,6 +443,9 @@ export class LibraryService {
      * the browse page would scroll for a page that never arrives.
      */
     const pool = scored.filter((entry) => entry.score > 0);
+    count('score', Number(process.hrtime.bigint() - scoreStarted) / 1e6);
+    count('n.scored', scored.length);
+    count('n.pool', pool.length);
 
     return toPage(
       mergePage<SortableCard>([pool], query.sort, query.offset, query.limit).map(withoutSortKeys),

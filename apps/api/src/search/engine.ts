@@ -48,8 +48,17 @@ export interface SearchCandidateRequest {
    */
   role: Role;
 
-  /** The most ids worth having. See `CANDIDATE_LIMIT`. */
+  /** The most title ids worth having. See `CANDIDATE_LIMIT`. */
   limit: number;
+
+  /**
+   * The most *people* worth having, which is a much smaller number.
+   *
+   * Its own field rather than the same one, because the two bounds answer
+   * different questions and shared a constant only by accident. `PEOPLE_LIMIT`
+   * carries the measurement.
+   */
+  peopleLimit: number;
 }
 
 /** Ids only. Nothing here has been filtered for who may see it. */

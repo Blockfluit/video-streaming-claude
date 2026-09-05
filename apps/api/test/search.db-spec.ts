@@ -221,6 +221,53 @@ describe('Search engine (real database)', () => {
   });
 
   /**
+   * People are bounded far more tightly than titles, and on purpose.
+   *
+   * The two shared one constant by sitting in the same call rather than by
+   * sharing an argument, and the cost of that was measured: five hundred people
+   * spread into `creditedTo(…)` in four places filled both indirect reads to
+   * their caps and ran the nested evidence selects five hundred times over. See
+   * `PEOPLE_LIMIT`, which carries the numbers.
+   *
+   * Asserted as *smaller* rather than as a literal, so tuning the constant does
+   * not break a test that is really about the two bounds being different things.
+   */
+  it('gives people a much smaller budget than titles', async () => {
+    await video('Alien');
+    await titles(admin, '?q=alien');
+
+    expect(asked[0]!.peopleLimit).toBeLessThan(asked[0]!.limit);
+  });
+
+  /**
+   * The timing header is a diagnostic, and diagnostics are ADMIN-only here.
+   *
+   * Its counts come from the candidate step, which runs *before* Prisma applies
+   * visibility — and on the Postgres path `searchCandidates` is not even told the
+   * role, by design, because Prisma re-reads afterwards. So a candidate count is
+   * a number about the library rather than about the caller, which is exactly
+   * what a viewer should not be handed.
+   */
+  describe('the timing header', () => {
+    it('reports to an admin', async () => {
+      await video('Alien');
+
+      const response = await admin.get('/library?q=alien').expect(200);
+
+      expect(response.headers['server-timing']).toMatch(/recall;dur=/);
+    });
+
+    it('tells a viewer nothing', async () => {
+      await video('Alien');
+      const user = await asUser();
+
+      const response = await user.get('/library?q=alien').expect(200);
+
+      expect(response.headers['server-timing']).toBeUndefined();
+    });
+  });
+
+  /**
    * The fallback, asserted as sameness rather than as "it returned something".
    *
    * A search answered by Postgres and a search answered after the engine threw

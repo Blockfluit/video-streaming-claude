@@ -176,7 +176,7 @@ export class MeilisearchClient implements SearchEngine {
           // through whatever they are credited on, which Prisma decides.
           indexUid: this.indexes.people,
           q: request.q,
-          limit: request.limit,
+          limit: request.peopleLimit,
           attributesToRetrieve: ['id', 'name'],
         },
       ],

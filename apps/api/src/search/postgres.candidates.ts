@@ -67,6 +67,62 @@ import { RELEVANCE_POOL } from '../library/merge';
 export const CANDIDATE_LIMIT = RELEVANCE_POOL;
 
 /**
+ * How many *people* one search may turn up — a far smaller number, and a
+ * different question from the one above.
+ *
+ * People shared `CANDIDATE_LIMIT` by sitting in the same call, not by sharing
+ * its argument: every word of that docstring is about titles, about a film
+ * called `Winter` cut by the alphabet. Nothing there says a search should
+ * consider five hundred *people*.
+ *
+ * **What five hundred of them cost.** Their ids become `personIds`, which is
+ * spread into `creditedTo(…)` in four places — the two indirect `where`s and
+ * twice inside `collectionEvidence`. It is not the size of the `IN` that hurts
+ * but its *selectivity*: five hundred people scattered across a catalogue make
+ * `credits: { some: { personId: { in: … } } }` match a large share of every
+ * table, which fills both indirect reads to their own cap, which runs the
+ * nested evidence selects five hundred times over. Measured on a fixture with
+ * 30 000 people and 60 000 credits: a title query spent 15 ms in those reads, a
+ * name query with the list full spent 29–40 ms.
+ *
+ * **And it is why moving to an engine did not help.** Postgres reached these
+ * through a similarity *threshold* — a quality gate, which most queries simply
+ * did not have five hundred people above, so the list came back short and the
+ * reads stayed small. A `limit` is not a gate: prefix matching on the last word
+ * (which, from a debounced search box, is every keystroke) plus typo tolerance
+ * fills it every time. Same constant, twenty times the list, same code
+ * downstream.
+ *
+ * **Why cutting here is legitimate where cutting titles was not.**
+ * `RELEVANCE_POOL` insists a bound fall in the order of the thing it is bounding.
+ * People come back ranked by how well the name matches, and a name is a short
+ * single-token string, which is what that ranking is best at — so this cut *is*
+ * by the metric. `relevance.ts` only ever reads a person's name, at
+ * `WEIGHTS.cast = 0.55` inside a `max`.
+ *
+ * **The number is a measured knee, not a taste.** Swept on that fixture, showing
+ * the whole request and how many cards survived scoring:
+ *
+ *     cap    "Jan" (a given name)      "Bakker" (a surname)
+ *      25     22 ms →   2 results       17 ms →  27 results
+ *     100     22 ms →  35 results       22 ms →  97 results
+ *     250     39 ms → 137 results       27 ms → 101 results
+ *     500     64 ms → 306 results       35 ms → 108 results
+ *
+ * Twenty-five was tried first and is **too tight**: it costs real recall on an
+ * ordinary surname, which is exactly the search this route exists to serve. Past
+ * a hundred the curve turns — `Bakker` buys eleven more cards for thirteen more
+ * milliseconds, and `Jan` buys two hundred and seventy-one cards that are all
+ * "somebody with this given name is credited here", which is not what anybody
+ * typing a name is asking.
+ *
+ * So: cast recall is lost only when more than a hundred people match the typed
+ * text, which means a bare given name. For `rickman` or `schwarzenegger`, the
+ * person meant is rank one and nothing is lost at all.
+ */
+export const PEOPLE_LIMIT = 100;
+
+/**
  * How alike two strings must be to be worth offering.
  *
  * 0.3, which is also Postgres's own default for both settings — so pinning it
@@ -200,7 +256,7 @@ export async function searchCandidates(
       )
       SELECT p.id, p.name FROM "Person" p JOIN hits ON hits.id = p.id
        ORDER BY word_similarity(${q}, p."name") DESC, p.id ASC
-       LIMIT ${CANDIDATE_LIMIT}
+       LIMIT ${PEOPLE_LIMIT}
     `;
 
     return {
