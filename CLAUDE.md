@@ -627,6 +627,32 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   delete-then-add leaves a window where the index is empty, and because Meilisearch writes are
   background tasks that window is real — a query answered 138 rows one moment and 25 the next, mid-
   rebuild, which is how it was found.
+- **People are bounded by `PEOPLE_LIMIT` (100), not by `CANDIDATE_LIMIT`.** They shared one constant by
+  sitting in the same call, and it cost: those ids spread into `creditedTo(…)` in four places, and it is
+  their *selectivity* rather than the size of the `IN` that hurts — five hundred people scattered across a
+  catalogue make `credits: { some: { personId: { in } } }` match a large share of every table, filling both
+  indirect reads and running the nested evidence selects five hundred times over. **This is also why moving
+  to an engine did not make search quicker on a real library**: Postgres reached people through a
+  similarity *threshold*, which most queries had few people above, while a `limit` is not a gate — prefix
+  matching on the last word plus typo tolerance fills it on every keystroke. Same constant, twenty times
+  the list, same code downstream. Measured on 3 800 titles / 30 000 people / 60 000 credits: `Jan` went
+  64ms → 20ms and `Bakker` 35ms → 21ms. The number is a swept knee, not a taste — 25 was tried and costs
+  real recall on an ordinary surname; past 100 the curve turns.
+- Candidate people are filtered through `scoreText` before their ids reach any query. A name the scorer
+  credits nothing for can only add rows that are then scored zero and dropped — after their evidence has
+  been read. It is the same function that decides the final answer, so it can only remove work.
+- **`GET /library` reports `Server-Timing`, and only to an ADMIN.** The counts come from the candidate
+  step, which runs *before* Prisma applies visibility — and the Postgres path is not even told the role,
+  by design — so a candidate count is a number about the library rather than about the caller. The same
+  numbers are logged as a warning past `SLOW_MS` for anybody, because the person who notices a slow search
+  is rarely the person who would go looking at a header. Neither ever carries text: no query, no title, no
+  name, no id.
+- The interceptor **subscribes inside** its `AsyncLocalStorage` store. An interceptor returns an Observable
+  and the handler runs on *subscription*, so opening a store around the construction captures nothing —
+  written that way first, and the symptom was a header that never appeared and no error anywhere.
+- Search cost is dominated by the **reads**, not by recall or scoring: measured 15ms of a 20ms request on a
+  title query. The engine answers in 2–3ms and scoring in 1–2ms. Anything that makes search quicker has to
+  make the four evidence reads smaller, which is what bounding people does.
 - **The engine client uses `node:http`, not `fetch`, and that is worth 48ms a search.** Measured
   container-to-container on one 113-id answer: `fetch` (undici) on a keep-alive connection **50.5ms**,
   `fetch` with `Connection: close` 4.5ms, `node:http` keep-alive **1.6ms** — against Meilisearch's own

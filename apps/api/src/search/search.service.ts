@@ -61,11 +61,12 @@ export class SearchService {
     normalised: string,
     role: Role,
     limit: number,
+    peopleLimit: number,
   ): Promise<SearchCandidates> {
     if (!this.isHealthy) return searchCandidates(this.prisma, q, normalised);
 
     try {
-      return await this.engine.candidates({ q, normalised, role, limit });
+      return await this.engine.candidates({ q, normalised, role, limit, peopleLimit });
     }
     catch (cause) {
       /*

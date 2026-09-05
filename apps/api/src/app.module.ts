@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
@@ -18,6 +18,7 @@ import { ListsModule } from './lists/lists.module';
 import { MediaModule } from './media/media.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ServerTimingInterceptor } from './common/server-timing.interceptor';
 import { RequestsModule } from './requests/requests.module';
 import { SearchModule } from './search/search.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
@@ -66,6 +67,13 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
   ],
   controllers: [AppController],
   providers: [
+    /*
+     * Bound globally rather than on one controller, because the phases it reports
+     * are recorded deep inside services — this binding is what makes the store
+     * they write into exist at all. It reports for an ADMIN and logs a slow
+     * request for anybody; see the interceptor for why that split.
+     */
+    { provide: APP_INTERCEPTOR, useClass: ServerTimingInterceptor },
     /*
      * Registered here rather than alongside the session guards, so it runs
      * first: a request that is already over its limit is rejected without
