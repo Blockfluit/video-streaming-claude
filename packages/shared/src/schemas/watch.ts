@@ -33,6 +33,8 @@ export const listHistorySchema = pageQuerySchema.extend({
   collectionId: idSchema.optional(),
   /** Omit for everything; `false` is the continue-watching row. */
   completed: booleanParam.optional(),
+  /** Collapse to the most recently watched video per collection — the home page's row. */
+  perCollection: booleanParam.optional(),
 });
 export type ListHistoryQuery = z.infer<typeof listHistorySchema>;
 

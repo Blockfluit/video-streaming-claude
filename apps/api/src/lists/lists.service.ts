@@ -168,6 +168,9 @@ export class ListsService {
     if (row.source === 'CONTINUE_WATCHING') {
       const page = await this.watch.history(userId, role, {
         completed: false,
+        // One card per show — a user partway through two films of the same
+        // collection must not see it twice.
+        perCollection: true,
         limit: row.maxItems,
         offset: 0,
       });

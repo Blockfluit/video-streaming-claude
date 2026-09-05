@@ -1,4 +1,6 @@
 
+import { randomUUID } from 'node:crypto';
+
 import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
@@ -354,6 +356,27 @@ describe('Computed home-page rows (real database)', () => {
 
       expect(await titlesOf(viewer, rowId)).toEqual(['A Film']);
       expect(await titlesOf(admin, rowId)).toEqual([]);
+    });
+
+    // The bug this row exists to avoid: two unfinished films of one show
+    // must not draw two cards.
+    it('shows one card for a show with two unfinished videos, not one per video', async () => {
+      const first = await seedVideo(showId, { title: 'Episode One', slug: 'episode-one' });
+      const second = await seedVideo(showId, { title: 'Episode Two', slug: 'episode-two' });
+      // Real heartbeats, in order, so `lastWatchedAt` reflects which was
+      // actually watched more recently rather than a hand-set timestamp.
+      await viewer
+        .post(`/videos/${first}/heartbeat`)
+        .send({ playSessionId: randomUUID(), positionSec: 60, deltaSec: 60 })
+        .expect(200);
+      await viewer
+        .post(`/videos/${second}/heartbeat`)
+        .send({ playSessionId: randomUUID(), positionSec: 60, deltaSec: 60 })
+        .expect(200);
+
+      const rowId = await createRow({ title: 'Continue', source: 'CONTINUE_WATCHING' });
+
+      expect(await titlesOf(viewer, rowId)).toEqual(['Episode Two']);
     });
 
     it('resolves my list for the caller', async () => {

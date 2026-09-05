@@ -416,6 +416,31 @@ describe('Watch tracking (real database)', () => {
       ]);
     });
 
+    // The home page's Continue Watching row: two unfinished films from the
+    // same show must not draw two cards.
+    it('collapses to the most recently watched video per collection when asked', async () => {
+      const second = await seedVideo();
+      await beat(viewer, { playSessionId: randomUUID(), positionSec: 10, deltaSec: 10 }).expect(200);
+      await beat(viewer, { playSessionId: randomUUID(), positionSec: 10, deltaSec: 10 }, second).expect(
+        200,
+      );
+
+      const response = await viewer
+        .get('/me/history?completed=false&perCollection=true')
+        .expect(200);
+
+      expect(response.body.items.map((item: { video: { id: string } }) => item.video.id)).toEqual([
+        second,
+      ]);
+
+      // Without the flag both still show — `/history` must keep its full list.
+      const full = await viewer.get('/me/history?completed=false').expect(200);
+      expect(full.body.items.map((item: { video: { id: string } }) => item.video.id)).toEqual([
+        second,
+        videoId,
+      ]);
+    });
+
     it('is the caller’s own, not the library’s', async () => {
       await beat(admin, { playSessionId: randomUUID(), positionSec: 10, deltaSec: 10 }).expect(200);
 
