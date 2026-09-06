@@ -149,6 +149,7 @@ export class ReconcileService {
         // To notice a file that is not what it was when the row was written.
         sizeBytes: true,
         fileMtime: true,
+        titleSource: true,
       },
     });
 
@@ -285,7 +286,7 @@ export class ReconcileService {
       );
 
       if (candidate) {
-        await this.applyMove(candidate.id, file, contentTag);
+        await this.applyMove(candidate.id, file, contentTag, candidate.titleSource);
         byStorageKey.set(file.relPath, { ...candidate, storageKey: file.relPath });
         present.add(candidate.id);
         // A move can change which file plays, so its probe is no longer trusted.
@@ -493,18 +494,28 @@ export class ReconcileService {
     return { bound, removed };
   }
 
-  private async applyMove(id: string, file: ScannedFile, contentTag: string): Promise<void> {
+  private async applyMove(
+    id: string,
+    file: ScannedFile,
+    contentTag: string,
+    titleSource: string,
+  ): Promise<void> {
     if (file.parsed.kind !== 'video') return;
 
     /**
-     * A move follows the file and changes nothing else.
+     * A move follows the file and changes nothing else — except the title, and
+     * only while it is still AUTO.
      *
      * The row id survives, and with it every comment, progress row and
      * watchlist entry pointing at this video — that is the whole point of
      * detecting a move rather than deleting and recreating. Its collections
      * survive for the same reason: the folder was a suggestion when the video
      * was discovered, and re-reading it now would undo whatever an admin has
-     * since arranged, on the strength of someone tidying up a disk.
+     * since arranged, on the strength of someone tidying up a disk. The title
+     * is different: nobody arranges a title by hand *unless* they have edited
+     * it, which is exactly what flips it to MANUAL, so an AUTO title tracking
+     * a rename on disk is the filename doing what it always did — describing
+     * the file — rather than reconcile overriding a curator's choice.
      */
     await this.prisma.video.update({
       where: { id },
@@ -516,6 +527,7 @@ export class ReconcileService {
         // A moved file is present again, so it is no longer missing.
         state: undefined,
         missingSince: null,
+        ...(titleSource === 'AUTO' ? titleData(file.parsed.title) : {}),
       },
     });
   }

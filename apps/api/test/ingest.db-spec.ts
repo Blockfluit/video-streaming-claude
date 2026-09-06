@@ -249,6 +249,48 @@ describe('Ingest (real database)', () => {
       });
     });
 
+    /**
+     * The other half of "the folder is a suggestion, taken once": a title
+     * derived from the filename keeps tracking it, because nobody has ever
+     * chosen a different one by hand. `titleSource` starts AUTO on every
+     * ingested video for exactly this reason.
+     */
+    it('updates the title to match a renamed file, while it is still AUTO', async () => {
+      await put('disk1/Inception/Inception.mp4', 'the-same-bytes');
+      await reconcile.run();
+      const [before] = await videos();
+      expect(before.titleSource).toBe('AUTO');
+
+      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception (2010).mp4');
+      await reconcile.run();
+
+      const [after] = await videos();
+      expect(after.id).toBe(before.id);
+      expect(after.title).toBe('Inception (2010)');
+      expect(after.normalisedTitle).toBe('inception2010');
+    });
+
+    /**
+     * The one-way half of the same rule: an admin typing a title is what
+     * flips it to MANUAL, and from then on a rename must leave it alone —
+     * the mirror image of `posterSource`/`bannerSource` never being
+     * clobbered by a reprobe.
+     */
+    it('leaves a manually-retitled video alone when its file is renamed', async () => {
+      await put('disk1/Inception/Inception.mp4', 'the-same-bytes');
+      await reconcile.run();
+      const [before] = await videos();
+
+      await admin.patch(`/videos/${before.id}`).send({ title: 'My Favourite Film' }).expect(200);
+
+      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception (2010).mp4');
+      await reconcile.run();
+
+      const [after] = await videos();
+      expect(after.title).toBe('My Favourite Film');
+      expect(after.titleSource).toBe('MANUAL');
+    });
+
     it('does not put a moved video into a collection it was never in', async () => {
       await put('disk1/Inception/Inception.mp4', 'the-same-bytes');
       await reconcile.run();
