@@ -4,11 +4,16 @@
  * Pen, rectangle, arrow and text on top of a captured screenshot.
  *
  * The stage is drawn at the screenshot's natural resolution and scaled down
- * with `scaleX`/`scaleY` to fit the dialog — Konva reports pointer positions
- * already converted into that natural coordinate space, so every shape is
- * stored and drawn in the same units the exported image uses. `export()`
- * asks for `pixelRatio: 1 / scale`, which renders the export back up to the
- * screenshot's original size regardless of how small the editor displayed it.
+ * with `scaleX`/`scaleY` to fit the dialog. Konva's `Stage.getPointerPosition()`
+ * only undoes *CSS* layout scaling of the canvas element — it knows nothing
+ * about the stage's own `scaleX`/`scaleY` node transform, so it answers in
+ * display-space (the shrunk-down size), not the natural space shapes are
+ * stored and drawn in. `getRelativePointerPosition()` is the one that inverts
+ * the stage's own transform on top of that, which is why `pointerPosition()`
+ * below calls it instead — every shape then ends up stored in the same units
+ * the exported image uses. `export()` asks for `pixelRatio: 1 / scale`, which
+ * renders the export back up to the screenshot's original size regardless of
+ * how small the editor displayed it.
  *
  * Shape ids are a plain counter, not `crypto.randomUUID()` — that API does
  * not exist on an insecure context (this app is opened from a phone on the
@@ -83,10 +88,10 @@ const imageConfig = computed(() => ({
 const textInput = ref<{ x: number, y: number, displayX: number, displayY: number } | null>(null)
 const textValue = ref('')
 
-interface KonvaPointerEvent { target: { getStage: () => { getPointerPosition: () => { x: number, y: number } | null } } }
+interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } } }
 
 function pointerPosition(event: KonvaPointerEvent): { x: number, y: number } | null {
-  return event.target.getStage().getPointerPosition()
+  return event.target.getStage().getRelativePointerPosition()
 }
 
 function onPointerDown(event: KonvaPointerEvent) {
