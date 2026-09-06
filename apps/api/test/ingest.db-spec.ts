@@ -261,13 +261,13 @@ describe('Ingest (real database)', () => {
       const [before] = await videos();
       expect(before.titleSource).toBe('AUTO');
 
-      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception (2010).mp4');
+      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception Remastered.mp4');
       await reconcile.run();
 
       const [after] = await videos();
       expect(after.id).toBe(before.id);
-      expect(after.title).toBe('Inception (2010)');
-      expect(after.normalisedTitle).toBe('inception2010');
+      expect(after.title).toBe('Inception Remastered');
+      expect(after.normalisedTitle).toBe('inceptionremastered');
     });
 
     /**
@@ -283,7 +283,7 @@ describe('Ingest (real database)', () => {
 
       await admin.patch(`/videos/${before.id}`).send({ title: 'My Favourite Film' }).expect(200);
 
-      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception (2010).mp4');
+      await move('disk1/Inception/Inception.mp4', 'disk1/Inception/Inception Remastered.mp4');
       await reconcile.run();
 
       const [after] = await videos();
