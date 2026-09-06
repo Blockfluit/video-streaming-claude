@@ -70,6 +70,19 @@ enum SubtitleDefaultSource {
   MANUAL
 }
 
+/// Same contract as ArtworkSource and SubtitleDefaultSource — MANUAL is never
+/// reapplied over — but its own enum for the same reason those are separate
+/// from each other: one enum answering several questions is how a migration
+/// ends up unsafe to reason about.
+///
+/// AUTO tracks the filename a video's title was derived from across a rename
+/// on disk; MANUAL is an admin's own title, typed on purpose, and a later
+/// rename must not touch it.
+enum TitleSource {
+  AUTO
+  MANUAL
+}
+
 enum CreditRole {
   ACTOR
   DIRECTOR
@@ -308,6 +321,9 @@ model Video {
   title        String
   /// normaliseTitle(title) — see the note on Collection.normalisedTitle.
   normalisedTitle String @default("")
+  /// AUTO tracks the filename across a rename; MANUAL is an admin's own title
+  /// and survives a later, unrelated rename untouched.
+  titleSource  TitleSource  @default(AUTO)
   description  String?
   tags         String[]     @default([])
   state        PublishState @default(DRAFT)

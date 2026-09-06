@@ -150,6 +150,15 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   poster and still get a fresh banner; losing a hand-picked one to a routine rescan loses an afternoon
   of curation. Each shape is captured and reported on its own, or a poster that fails takes the banner
   with it and a probe ends with neither picture.
+- `Video.titleSource` is the same `AUTO`/`MANUAL` contract, one level up: a renamed file's `applyMove`
+  re-derives `title` (and `normalisedTitle` with it) only while `titleSource` is still `AUTO`. Editing a
+  title through `PATCH /videos/:id` is what flips it to `MANUAL`, and from then on a rename on disk
+  leaves it alone — the same "an admin's explicit choice survives a routine rescan" rule as artwork, in
+  the other direction of travel: the filesystem is allowed to drive the title until a person overrides
+  it, but a person's title is never allowed to drive the filesystem. Collections and Seasons do not get
+  this: their folder identity is taken once, at discovery, and deliberately never revisited afterwards —
+  `applyMove` only follows the file, and does not touch which collections it belongs to — so there is
+  nothing left for a `titleSource` on either of them to track.
 - The poster crop is `crop=min(iw\,ih*2/3):min(ih\,iw*3/2)`, **not** `crop=ih*2/3:ih`. The latter reads
   correctly, works on every landscape file — which is most of a library — and then fails outright on a
   portrait one by asking for a crop wider than the source. Both dimensions must be capped by what the

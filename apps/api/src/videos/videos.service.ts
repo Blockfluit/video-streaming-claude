@@ -221,6 +221,10 @@ export class VideosService {
       data: {
         // Carries normalisedTitle with it — see common/title.ts.
         ...titleUpdate(dto.title),
+        // An admin typing a title is exactly what flips it to MANUAL, so a
+        // later rename on disk (reconcile.service.ts#applyMove) leaves it
+        // alone instead of overwriting a curator's choice with a filename.
+        titleSource: dto.title !== undefined ? 'MANUAL' : undefined,
         description: dto.description,
         year: dto.year,
         tags: dto.tags,
