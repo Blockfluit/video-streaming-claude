@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { Logger, type INestApplication } from '@nestjs/common';
 import { Test, type TestingModuleBuilder } from '@nestjs/testing';
+import { json, urlencoded } from 'express';
 import request from 'supertest';
 
 import { AppModule } from '../../src/app.module';
@@ -203,6 +204,13 @@ export class DbHarness {
     // Must match production: `BigInt` does not survive `JSON.stringify`, and a
     // test app without this replacer differs from the server it is testing.
     this.app.getHttpAdapter().getInstance().set('json replacer', bigIntReplacer);
+    // Must also match production: main.ts raises this to 7mb for feedback
+    // screenshots. Registered before `init()` runs Nest's own default (100kb)
+    // parser, so body-parser's own `req._body` check makes the default one a
+    // no-op — same effective result as main.ts's `bodyParser: false`, without
+    // needing it here too.
+    this.app.use(json({ limit: '7mb' }));
+    this.app.use(urlencoded({ extended: true, limit: '7mb' }));
     this.app.use(this.app.get(SessionStoreService).createMiddleware());
     await this.app.init();
 
