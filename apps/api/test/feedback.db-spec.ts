@@ -64,6 +64,25 @@ describe('Feedback (real database)', () => {
       await ada.post('/feedback').send(body({ message: '   ' })).expect(400);
     });
 
+    /**
+     * `pageUrl` is rendered on `/admin/feedback` as `<a :href="...">`, which an
+     * admin may click — so a `USER`-supplied value has to be a same-site path,
+     * enforced server-side since the client is the untrusted party here.
+     */
+    it.each([
+      ['a javascript: URL', 'javascript:alert(1)'],
+      ['an off-site URL', 'https://evil.example/phish'],
+      ['a protocol-relative URL', '//evil.example'],
+      ['a backslash-normalised off-site URL', '/\\evil.example'],
+      ['no leading slash', 'watch/heat'],
+    ])('refuses %s as pageUrl', async (_label, pageUrl) => {
+      await ada.post('/feedback').send(body({ pageUrl })).expect(400);
+    });
+
+    it('accepts an ordinary same-site path', async () => {
+      await ada.post('/feedback').send(body({ pageUrl: '/browse?genre=Horror' })).expect(201);
+    });
+
     it('decodes and stores a screenshot, and it streams back byte-for-byte', async () => {
       const response = await ada
         .post('/feedback')
