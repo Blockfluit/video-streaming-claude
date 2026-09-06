@@ -26,7 +26,7 @@ interface FeedbackAdminView {
 const api = useApi()
 const toast = useToast()
 
-const { data, refresh } = await useApiData<Page<FeedbackAdminView>>(
+const { data, error, refresh } = await useApiData<Page<FeedbackAdminView>>(
   'admin-feedback',
   () => '/admin/feedback?limit=100',
   {},
@@ -105,6 +105,10 @@ useHead({ title: 'Feedback' })
         </button>
       </article>
     </div>
+
+    <p v-else-if="error" class="py-20 text-center text-(--ui-text-muted)">
+      Could not load feedback. Try refreshing the page.
+    </p>
 
     <p v-else class="py-20 text-center text-(--ui-text-muted)">
       Nobody has submitted feedback yet.
