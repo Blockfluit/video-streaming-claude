@@ -22,6 +22,7 @@ export * from './youtube.js';
 export * from './schemas/accounts.js';
 export * from './schemas/auth.js';
 export * from './schemas/comments.js';
+export * from './schemas/feedback.js';
 export * from './schemas/library.js';
 export * from './schemas/lists.js';
 export * from './schemas/metadata.js';
