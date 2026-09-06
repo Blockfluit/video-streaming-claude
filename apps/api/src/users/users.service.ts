@@ -14,6 +14,8 @@ import {
 } from '@video/shared';
 
 import { PasswordService } from '../auth/password.service';
+import { StorageService } from '../common/storage.service';
+import { feedbackScreenshotKey } from '../feedback/keys';
 import type { Role } from '../prisma/generated/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { DELETED, wouldRemoveLastActiveAdmin, type AccountState } from './last-admin';
@@ -47,6 +49,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwords: PasswordService,
+    private readonly storage: StorageService,
   ) {}
 
   async list(query: ListUsersQuery): Promise<Page<UserView>> {
@@ -117,17 +120,37 @@ export class UsersService {
 
   /**
    * A real delete, not a deactivation — `PATCH { isActive: false }` is the
-   * reversible option. Cascades take the account's comments, watch history and
-   * watchlist with it; uploads survive with a null uploader.
+   * reversible option. Cascades take the account's comments, watch history,
+   * watchlist and feedback rows with it; uploads survive with a null uploader.
+   *
+   * The cascade can delete a `Feedback` row, but it cannot touch a filesystem
+   * — nothing else sweeps a screenshot under `derived/feedback/`, so a row
+   * with `hasScreenshot: true` has its id read **before** the transaction
+   * commits (the row, and the file it names, are both gone the moment it
+   * does) and its screenshot deleted **after**, the same "generated output of
+   * a row that has stopped existing must be swept" rule videos and their
+   * artwork already follow. Best-effort: `StorageService.delete` already
+   * no-ops on a missing file, so there is nothing to guard here either.
    */
   async remove(id: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    const feedbackScreenshots = await this.prisma.$transaction(async (tx) => {
       const current = await this.loadForChange(tx, id);
 
       await this.assertKeepsAnAdmin(tx, current, DELETED, id);
 
+      const feedback = await tx.feedback.findMany({
+        where: { userId: id, hasScreenshot: true },
+        select: { id: true },
+      });
+
       await tx.user.delete({ where: { id } });
+
+      return feedback;
     });
+
+    for (const { id: feedbackId } of feedbackScreenshots) {
+      await this.storage.delete('derived', feedbackScreenshotKey(feedbackId));
+    }
   }
 
   private async loadForChange(
