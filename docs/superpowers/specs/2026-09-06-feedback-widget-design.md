@@ -148,7 +148,10 @@ Documented limitation: `html2canvas` cannot capture cross-origin iframes
 those render blank or frozen in the captured image. Not worked around; the
 text message still describes what's wrong.
 
-**`FeedbackDialog.vue`** (`UModal`, `data-feedback-ui`) — if `screenshot` prop
+**`FeedbackDialog.vue`** (`UModal`, `data-feedback-ui`) — dismissible by
+clicking outside it, like every other `UModal` in this app (none override
+`dismissible`/`preventClose`, so this one shouldn't either): closing this
+way discards the draft, the same as Cancel. If `screenshot` prop
 is non-null, renders `FeedbackAnnotator` with it; otherwise shows a note that
 no screenshot was captured. Below that, a message `UTextarea` (required,
 capped client-side at `MAX_FEEDBACK_MESSAGE_LENGTH`), Cancel/Submit buttons.
