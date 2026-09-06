@@ -242,6 +242,29 @@ describe('mapSearchResults', () => {
 
     expect(mapSearchResults(withPerson, 'movie')).toEqual([]);
   });
+
+  /**
+   * TMDB numbers films and shows in separate sequences, so `tmdbId` alone is
+   * not a unique key across a multi-search — this composite is what the admin
+   * UI's "load more" de-duplicates appended pages against.
+   */
+  it('gives each candidate a composite id, since tmdbId alone is ambiguous across catalogues', () => {
+    expect(mapSearchResults(search, 'movie')[0]).toMatchObject({ id: 'movie-329865' });
+  });
+
+  it('gives a film and a show the same numeric id different composite ids', () => {
+    const mixed = {
+      results: [
+        { id: 550, name: 'A Show', media_type: 'tv', first_air_date: '2020-01-01' },
+        { id: 550, title: 'A Film', media_type: 'movie', release_date: '2019-01-01' },
+      ],
+    };
+
+    expect(mapSearchResults(mixed, 'movie').map((entry) => entry.id)).toEqual([
+      'tv-550',
+      'movie-550',
+    ]);
+  });
 });
 
 describe('mapEpisodes', () => {

@@ -7,7 +7,7 @@
  * everything would need a source column per field to be safe, and this needs
  * none, because a person has looked at both values.
  */
-import type { MetadataField } from '@video/shared'
+import type { MetadataField, Page } from '@video/shared'
 
 import type { ArtworkShape } from '~/composables/useArtworkBust'
 
@@ -32,6 +32,9 @@ const emit = defineEmits<{ applied: [replaced: ArtworkShape[]] }>()
 const api = useApi()
 const toast = useToast()
 
+/** TMDB's own page size, so one "Load more" click is roughly one more page. */
+const PAGE_SIZE = 20
+
 const open = ref(false)
 const query = ref(props.title)
 const kindFilter = ref<'both' | 'movie' | 'tv'>('both')
@@ -39,6 +42,7 @@ const searching = ref(false)
 const applying = ref(false)
 
 interface Candidate {
+  id: string
   tmdbId: number
   tmdbType: 'movie' | 'tv'
   title: string
@@ -65,7 +69,35 @@ interface Preview {
   episodes: { seasons: number } | null
 }
 
-const candidates = ref<Candidate[]>([])
+/** The window `search()` fetched directly; `useLoadMore` appends to it. */
+const firstWindow = ref<Candidate[]>([])
+const total = ref(0)
+
+/**
+ * What was actually searched, as opposed to what the form currently holds —
+ * `useLoadMore`'s question/query must keep asking about the search that ran,
+ * not whatever the admin has typed since.
+ */
+const activeTitle = ref('')
+const activeKind = ref<'both' | 'movie' | 'tv'>('both')
+const activeYear = ref<number | null>(null)
+
+const {
+  items: candidates,
+  label: moreLabel,
+  loading: loadingMore,
+  loadMore,
+  reset: resetMore,
+} = useLoadMore<Candidate>({
+  first: () => firstWindow.value,
+  total: () => total.value,
+  pageSize: PAGE_SIZE,
+  question: () => `${activeTitle.value}|${activeKind.value}|${activeYear.value ?? ''}`,
+  query: offset =>
+    metadataSearchQuery(activeTitle.value, activeKind.value, activeYear.value, offset, PAGE_SIZE),
+  failure: 'Could not load more results',
+})
+
 const preview = ref<Preview | null>(null)
 const chosen = ref<Candidate | null>(null)
 
@@ -95,7 +127,9 @@ const configured = computed(() => status.value?.configured === true)
 watch(open, (isOpen) => {
   if (!isOpen) return
   query.value = props.title
-  candidates.value = []
+  firstWindow.value = []
+  total.value = 0
+  resetMore()
   preview.value = null
   chosen.value = null
   void search()
@@ -104,13 +138,16 @@ watch(open, (isOpen) => {
 async function search() {
   if (query.value.trim().length === 0) return
   searching.value = true
+  activeTitle.value = query.value.trim()
+  activeKind.value = kindFilter.value
+  activeYear.value = props.year ?? null
+  resetMore()
   try {
-    const params = new URLSearchParams({ title: query.value.trim(), limit: '10' })
-    if (kindFilter.value !== 'both') params.set('type', kindFilter.value)
-    if (props.year) params.set('year', String(props.year))
-
-    const page = await api<{ items: Candidate[] }>(`/admin/metadata/search?${params}`)
-    candidates.value = page.items
+    const page = await api<Page<Candidate>>(
+      metadataSearchQuery(activeTitle.value, activeKind.value, activeYear.value, 0, PAGE_SIZE),
+    )
+    firstWindow.value = page.items
+    total.value = page.total
     if (page.items.length === 0) {
       toast.add({ title: 'Nothing matched that title', color: 'warning' })
     }
@@ -258,6 +295,12 @@ function show(value: unknown): string {
               </button>
             </li>
           </ul>
+
+          <div v-if="!chosen && moreLabel" class="flex justify-center pt-2">
+            <UButton color="neutral" variant="subtle" :loading="loadingMore" @click="loadMore">
+              {{ moreLabel }}
+            </UButton>
+          </div>
 
           <!-- Step three: what it would change. -->
           <div v-if="chosen && preview" class="space-y-4">

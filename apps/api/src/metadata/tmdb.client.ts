@@ -87,6 +87,7 @@ export class TmdbClient {
     title: string,
     type: TmdbType | undefined,
     year: number | undefined,
+    page = 1,
   ): Promise<TmdbSearchResponse> {
     // No type means "either", and TMDB has one endpoint for that. It also
     // returns people, which the mapper drops.
@@ -99,6 +100,10 @@ export class TmdbClient {
       if (type === 'movie') params.set('primary_release_year', String(year));
       else if (type === 'tv') params.set('first_air_date_year', String(year));
     }
+
+    // TMDB defaults to page 1 itself; writing it out for the common case would
+    // read like a parameter that matters when it does not.
+    if (page > 1) params.set('page', String(page));
 
     return this.get<TmdbSearchResponse>(path, params);
   }
