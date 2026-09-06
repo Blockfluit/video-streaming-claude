@@ -18,7 +18,15 @@ const props = defineProps<{ videoId: string }>()
 const api = useApi()
 const toast = useToast()
 
-const { data, refresh } = await useApiData<Page<Job>>(
+/**
+ * Deliberately not awaited: `data` and `refresh` are live the moment this
+ * call returns (SSR fetching still happens via `useApiData`'s own internal
+ * `onServerPrefetch`), and an `await` here would give this component's
+ * `setup()` a top-level await of its own — which loses this component's
+ * `defineExpose` the race against Vue binding `jobs`'s template ref, in a
+ * production build only. See `expose-needs-sync-setup.spec.ts`.
+ */
+const { data, refresh } = useApiData<Page<Job>>(
   `video-jobs-${props.videoId}`,
   () => `/admin/jobs?videoId=${props.videoId}&limit=5`,
 )
