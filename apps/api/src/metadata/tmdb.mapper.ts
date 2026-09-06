@@ -66,6 +66,12 @@ export interface MetadataProposal {
 }
 
 export interface MetadataCandidate {
+  /**
+   * `${tmdbType}-${tmdbId}`. TMDB numbers films and shows in separate
+   * sequences, so `tmdbId` alone is not a unique key — this is what the admin
+   * UI's "load more" de-duplicates appended pages against.
+   */
+  id: string;
   tmdbId: number;
   tmdbType: TmdbType;
   title: string;
@@ -132,15 +138,16 @@ export function mapSearchResults(
     const type = result.media_type ?? fallbackType;
     if (type !== 'movie' && type !== 'tv') return [];
 
-    const id = positive(result.id);
+    const tmdbId = positive(result.id);
     const title = text(result.title) ?? text(result.name);
-    if (id === null || title === null) return [];
+    if (tmdbId === null || title === null) return [];
 
     const releaseDate = date(result.release_date ?? result.first_air_date);
 
     return [
       {
-        tmdbId: id,
+        id: `${type}-${tmdbId}`,
+        tmdbId,
         tmdbType: type,
         title,
         year: releaseDate?.getUTCFullYear() ?? null,

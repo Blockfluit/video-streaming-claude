@@ -15,7 +15,13 @@ import {
 
 import { buildDiff, COLLECTION_FIELDS, VIDEO_FIELDS, type FieldDiff } from './diff';
 import { TmdbClient } from './tmdb.client';
-import { mapEpisodes, mapSearchResults, mapTitle, type MetadataProposal } from './tmdb.mapper';
+import {
+  mapEpisodes,
+  mapSearchResults,
+  mapTitle,
+  type MetadataCandidate,
+  type MetadataProposal,
+} from './tmdb.mapper';
 import { isUniqueViolation } from '../common/errors';
 import { titleUpdate } from '../common/title';
 import { CollectionArtworkService, MediaService } from '../media/media.service';
@@ -37,6 +43,17 @@ import { PrismaService } from '../prisma/prisma.service';
  */
 
 export type Target = { kind: 'collection' | 'video'; id: string };
+
+/** TMDB's own fixed page size for search results. */
+const TMDB_PAGE_SIZE = 20;
+
+/**
+ * The most pages one search will fetch from TMDB, however large a window is
+ * asked for. Three pages is sixty raw results — enough for a couple of "load
+ * more" clicks — bounding one admin search from becoming an unbounded crawl
+ * of somebody else's API.
+ */
+const MAX_TMDB_PAGES = 3;
 
 export interface MetadataPreview {
   target: Target;
@@ -60,8 +77,21 @@ export class MetadataService {
   ) {}
 
   async search(query: SearchMetadataQuery): Promise<Page<unknown>> {
-    const response = await this.tmdb.searchTitles(query.title, query.type, query.year);
-    const all = mapSearchResults(response, query.type ?? 'movie');
+    const all: MetadataCandidate[] = [];
+    const need = query.offset + query.limit;
+
+    for (let page = 1; page <= MAX_TMDB_PAGES; page += 1) {
+      const response = await this.tmdb.searchTitles(query.title, query.type, query.year, page);
+      all.push(...mapSearchResults(response, query.type ?? 'movie'));
+
+      const rawCount = response.results?.length ?? 0;
+      // A page shorter than TMDB's own page size is TMDB's way of saying there
+      // is nothing further — there is nothing left to look ahead to.
+      if (rawCount < TMDB_PAGE_SIZE) break;
+      // One mapped result past what was asked for is enough to know more
+      // exists, without paying for every page it would take to say how many.
+      if (all.length > need) break;
+    }
 
     // TMDB pages at twenty and this pages at whatever was asked for, so the
     // window is applied here. `total` is the number actually retrieved rather

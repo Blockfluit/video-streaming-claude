@@ -139,6 +139,51 @@ describe('Metadata import (real database)', () => {
     });
   });
 
+  describe('search pagination', () => {
+    /** A full page of raw, distinct, well-formed results. */
+    const page = (start: number, count: number) => ({
+      results: Array.from({ length: count }, (_, index) => ({
+        id: start + index,
+        title: `Title ${start + index}`,
+        media_type: 'movie' as const,
+        release_date: '2020-01-01',
+      })),
+    });
+
+    it('asks TMDB for a second page when the first is full, so a load-more click has something to append', async () => {
+      tmdbStub.searchTitles
+        .mockResolvedValueOnce(page(1, 20))
+        .mockResolvedValueOnce(page(21, 5));
+
+      const response = await admin.get('/admin/metadata/search?title=Arrival&limit=20').expect(200);
+
+      expect(response.body.total).toBe(25);
+      expect(response.body.hasMore).toBe(true);
+      expect(response.body.items).toHaveLength(20);
+      expect(response.body.items.every((item: { id: string }) => item.id.length > 0)).toBe(true);
+    });
+
+    it('stops offering more once the three-page cap is exhausted, even if TMDB has more', async () => {
+      tmdbStub.searchTitles.mockResolvedValue(page(1, 20));
+
+      const response = await admin
+        .get('/admin/metadata/search?title=Arrival&limit=20&offset=40')
+        .expect(200);
+
+      expect(tmdbStub.searchTitles.mock.calls.length).toBeLessThanOrEqual(3);
+      expect(response.body.total).toBe(60);
+      expect(response.body.hasMore).toBe(false);
+    });
+
+    it('never calls TmdbClient more than three times for one request', async () => {
+      tmdbStub.searchTitles.mockResolvedValue(page(1, 20));
+
+      await admin.get('/admin/metadata/search?title=Arrival&limit=100').expect(200);
+
+      expect(tmdbStub.searchTitles.mock.calls.length).toBeLessThanOrEqual(3);
+    });
+  });
+
   describe('applying fields', () => {
     it('writes only the fields that were named', async () => {
       await applyToVideo({ fields: ['description', 'year'] }).expect(201);
