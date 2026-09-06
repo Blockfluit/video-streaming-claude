@@ -22,6 +22,7 @@ const sections = [
   { label: 'Home page rows', to: '/admin/lists', icon: 'i-lucide-rows-3' },
   { label: 'Comments', to: '/admin/comments', icon: 'i-lucide-message-square' },
   { label: 'Requests', to: '/admin/requests', icon: 'i-lucide-ticket' },
+  { label: 'Feedback', to: '/admin/feedback', icon: 'i-lucide-message-circle-warning' },
   { label: 'People', to: '/admin/people', icon: 'i-lucide-users' },
   { label: 'Accounts', to: '/admin/users', icon: 'i-lucide-key-round' },
 ]
