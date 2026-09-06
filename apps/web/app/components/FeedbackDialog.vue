@@ -1,6 +1,6 @@
 <!-- apps/web/app/components/FeedbackDialog.vue -->
 <script setup lang="ts">
-import { MAX_FEEDBACK_MESSAGE_LENGTH } from '@video/shared'
+import { MAX_FEEDBACK_MESSAGE_LENGTH, MAX_FEEDBACK_SCREENSHOT_BYTES } from '@video/shared'
 
 import FeedbackAnnotatorComponent from './FeedbackAnnotator.vue'
 
@@ -27,6 +27,23 @@ async function submit() {
 
   submitting.value = true
   try {
+    const captured = annotator.value?.export() ?? props.screenshot ?? undefined
+
+    /*
+     * The API would reject an oversized screenshot with a 400 that this
+     * dialog has no way to recover from — resubmitting fails identically
+     * forever, since the image never gets smaller on its own. Checked here,
+     * before the request goes out, so the worst case is losing the picture
+     * rather than losing the feedback too.
+     */
+    const oversized = captured !== undefined && decodedByteLength(captured) > MAX_FEEDBACK_SCREENSHOT_BYTES
+    if (oversized) {
+      toast.add({
+        title: 'Your screenshot was too large to attach, but your message will still be sent.',
+        color: 'warning',
+      })
+    }
+
     await api('/feedback', {
       method: 'POST',
       body: {
@@ -35,7 +52,7 @@ async function submit() {
         userAgent: navigator.userAgent,
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
-        screenshot: annotator.value?.export() ?? props.screenshot ?? undefined,
+        screenshot: oversized ? undefined : captured,
       },
     })
     toast.add({ title: 'Thanks — feedback sent', color: 'success' })

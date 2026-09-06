@@ -37,7 +37,6 @@ type Shape = LineShape | RectShape | ArrowShape | TextShape
 const STROKE_COLOR = '#ef4444'
 const STROKE_WIDTH = 4
 const MAX_DISPLAY_WIDTH = 640
-const MAX_DISPLAY_HEIGHT = 480
 
 const tool = ref<Tool>('pen')
 const shapes = ref<Shape[]>([])
@@ -62,9 +61,18 @@ onMounted(() => {
   img.src = props.screenshot
 })
 
+/*
+ * Width-only. Capping height too meant a tall capture — the common shape once
+ * I2 scopes the capture to one viewport, but especially before that, when it
+ * was the whole scrolled document — got scaled down until it fit *both*
+ * dimensions, which for anything much taller than it is wide produced a thin,
+ * unusable sliver. Letting the height fall out of the width scale and giving
+ * the container its own scrollbar (below) keeps the drawing surface at a
+ * usable size instead of compressing it.
+ */
 const scale = computed(() => {
   if (naturalWidth.value === 0) return 1
-  return Math.min(1, MAX_DISPLAY_WIDTH / naturalWidth.value, MAX_DISPLAY_HEIGHT / naturalHeight.value)
+  return Math.min(1, MAX_DISPLAY_WIDTH / naturalWidth.value)
 })
 const displayWidth = computed(() => naturalWidth.value * scale.value)
 const displayHeight = computed(() => naturalHeight.value * scale.value)
@@ -87,6 +95,19 @@ const imageConfig = computed(() => ({
 /** Position placing an inline `<input>` for the text tool. `null` when not active. */
 const textInput = ref<{ x: number, y: number, displayX: number, displayY: number } | null>(null)
 const textValue = ref('')
+
+/*
+ * `autofocus` is not reliably honoured on an element inserted into the DOM
+ * after the initial page load — it is a load-time attribute, and this input
+ * appears from a click long after that. Focusing explicitly once the element
+ * has actually mounted is the fix; `nextTick` is needed because `textInput`
+ * flips to non-null in the same tick as the click handler, before Vue has
+ * patched the DOM and the `v-if` has rendered the element the ref points at.
+ */
+const textInputEl = useTemplateRef<HTMLInputElement>('textInputEl')
+watch(textInput, (value) => {
+  if (value) nextTick(() => textInputEl.value?.focus())
+})
 
 interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } } }
 
@@ -189,41 +210,49 @@ defineExpose({ export: exportImage })
       <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
     </div>
 
-    <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
-      <v-stage
-        v-if="image"
-        ref="stage"
-        :config="stageConfig"
-        @pointerdown="onPointerDown"
-        @pointermove="onPointerMove"
-        @pointerup="onPointerUp"
-      >
-        <v-layer>
-          <v-image :config="imageConfig" />
-          <template v-for="shape in shapes" :key="shape.id">
-            <v-line v-if="shape.type === 'line'" :config="shape.config" />
-            <v-rect v-else-if="shape.type === 'rect'" :config="shape.config" />
-            <v-arrow v-else-if="shape.type === 'arrow'" :config="shape.config" />
-            <v-text v-else :config="shape.config" />
-          </template>
-          <template v-if="currentShape">
-            <v-line v-if="currentShape.type === 'line'" :config="currentShape.config" />
-            <v-rect v-else-if="currentShape.type === 'rect'" :config="currentShape.config" />
-            <v-arrow v-else-if="currentShape.type === 'arrow'" :config="currentShape.config" />
-          </template>
-        </v-layer>
-      </v-stage>
+    <!--
+      Width-only scaling (see `scale` above) can leave a tall capture taller
+      than the dialog has room for. Scrolling this box rather than shrinking
+      the stage further keeps pen strokes and text at a size someone can
+      actually draw and read.
+    -->
+    <div class="max-h-[70vh] overflow-y-auto">
+      <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
+        <v-stage
+          v-if="image"
+          ref="stage"
+          :config="stageConfig"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerUp"
+        >
+          <v-layer>
+            <v-image :config="imageConfig" />
+            <template v-for="shape in shapes" :key="shape.id">
+              <v-line v-if="shape.type === 'line'" :config="shape.config" />
+              <v-rect v-else-if="shape.type === 'rect'" :config="shape.config" />
+              <v-arrow v-else-if="shape.type === 'arrow'" :config="shape.config" />
+              <v-text v-else :config="shape.config" />
+            </template>
+            <template v-if="currentShape">
+              <v-line v-if="currentShape.type === 'line'" :config="currentShape.config" />
+              <v-rect v-else-if="currentShape.type === 'rect'" :config="currentShape.config" />
+              <v-arrow v-else-if="currentShape.type === 'arrow'" :config="currentShape.config" />
+            </template>
+          </v-layer>
+        </v-stage>
 
-      <input
-        v-if="textInput"
-        v-model="textValue"
-        type="text"
-        autofocus
-        class="absolute rounded border border-(--ui-border) bg-(--ui-bg) px-1 text-sm"
-        :style="{ left: `${textInput.displayX}px`, top: `${textInput.displayY - 12}px` }"
-        @blur="commitText"
-        @keydown.enter="commitText"
-      >
+        <input
+          v-if="textInput"
+          ref="textInputEl"
+          v-model="textValue"
+          type="text"
+          class="absolute rounded border border-(--ui-border) bg-(--ui-bg) px-1 text-sm"
+          :style="{ left: `${textInput.displayX}px`, top: `${textInput.displayY - 12}px` }"
+          @blur="commitText"
+          @keydown.enter="commitText"
+        >
+      </div>
     </div>
   </div>
 </template>
