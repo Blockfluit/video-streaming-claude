@@ -10,6 +10,7 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import {
   createFeedbackSchema,
@@ -44,6 +45,12 @@ export class FeedbackController {
     return this.feedback.listForAdmin(query);
   }
 
+  /**
+   * The admin list requests up to a window of these per load, and a delete
+   * refetches the same window — the same "a shelf issues a poster request per
+   * card" shape every other image route is exempt for.
+   */
+  @SkipThrottle()
   @Get('admin/feedback/:id/screenshot')
   @Roles('ADMIN')
   screenshot(@Param('id') id: string, @Res() response: Response) {

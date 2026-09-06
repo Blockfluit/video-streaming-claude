@@ -94,7 +94,11 @@ export class FeedbackService {
     const etag = `W/"${stat.size.toString(16)}-${stat.mtime.getTime().toString(16)}"`;
     response.setHeader('Content-Type', 'image/png');
     response.setHeader('ETag', etag);
-    response.setHeader('Cache-Control', 'private, no-cache');
+    // Unlike video/collection artwork, this file is written once at creation
+    // and never replaced — there is no "just uploaded a new one" case to keep
+    // fresh for, so it can be cached for real rather than revalidated on
+    // every render the way `no-cache` artwork is.
+    response.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
 
     if (response.req.headers['if-none-match'] === etag) {
       response.status(304).end();
