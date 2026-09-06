@@ -1,6 +1,6 @@
 <!-- apps/web/app/pages/admin/feedback.vue -->
 <script setup lang="ts">
-import type { Page } from '@video/shared'
+import { MAX_PAGE_LIMIT, type Page } from '@video/shared'
 
 /**
  * Everything submitted through the floating feedback button, newest first.
@@ -8,6 +8,10 @@ import type { Page } from '@video/shared'
  * No status workflow, unlike Comments or Requests — read it, act on it, and
  * delete it when you're done. The screenshot (when there is one) is served
  * from its own admin-only route rather than embedded in this response.
+ *
+ * Feedback is never filtered or searched — the only question this screen asks
+ * is "the next window" — so this is `useLoadMore` on its own, the way
+ * `admin/people.vue` uses it, minus the search box and its debounce.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin' })
 
@@ -26,19 +30,53 @@ interface FeedbackAdminView {
 const api = useApi()
 const toast = useToast()
 
+/** A hundred at a time — the most the endpoint will serve in one request. */
+const PAGE_SIZE = MAX_PAGE_LIMIT
+
+function feedbackQuery(offset: number): string {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
+  // Left out at zero: `?offset=0` says the same thing and reads like a bug.
+  if (offset > 0) params.set('offset', String(offset))
+  return `/admin/feedback?${params.toString()}`
+}
+
 const { data, error, refresh } = await useApiData<Page<FeedbackAdminView>>(
   'admin-feedback',
-  () => '/admin/feedback?limit=100',
+  () => feedbackQuery(0),
   {},
 )
 
-const items = computed(() => data.value?.items ?? [])
+const total = computed(() => data.value?.total ?? 0)
+
+const {
+  items,
+  label: moreLabel,
+  loading: loadingMore,
+  loadMore,
+  reset,
+} = useLoadMore<FeedbackAdminView>({
+  first: () => data.value?.items ?? [],
+  total: () => total.value,
+  pageSize: PAGE_SIZE,
+  // There is no filter here, so every call is the same question.
+  question: () => true,
+  query: feedbackQuery,
+  failure: 'Could not load more feedback',
+})
 
 const viewing = ref<FeedbackAdminView | null>(null)
 
+/**
+ * Back to one window, and re-fetch it.
+ *
+ * `refresh()` alone would leave appended windows in place across a delete
+ * that shifted every later row up by one — see `useLoadMore`'s own doc
+ * comment for why that reads as a row vanishing rather than moving.
+ */
 async function remove(item: FeedbackAdminView) {
   try {
     await api(`/admin/feedback/${item.id}`, { method: 'DELETE' })
+    reset()
     await refresh()
     toast.add({ title: 'Feedback removed', color: 'success' })
   }
@@ -56,6 +94,7 @@ useHead({ title: 'Feedback' })
       <h1 class="text-2xl font-bold tracking-tight">Feedback</h1>
       <p class="text-sm text-(--ui-text-muted)">
         Everything submitted through the feedback button, newest first.
+        <span v-if="total">· {{ total }} {{ total === 1 ? 'submission' : 'submissions' }}</span>
       </p>
     </div>
 
@@ -113,6 +152,13 @@ useHead({ title: 'Feedback' })
     <p v-else class="py-20 text-center text-(--ui-text-muted)">
       Nobody has submitted feedback yet.
     </p>
+
+    <!-- The offer names what is left, same as `admin/people.vue` and for the same reason. -->
+    <div v-if="moreLabel" class="flex justify-center pt-2">
+      <UButton color="neutral" variant="subtle" :loading="loadingMore" @click="loadMore">
+        {{ moreLabel }}
+      </UButton>
+    </div>
 
     <UModal :open="viewing !== null" title="Screenshot" @update:open="viewing = null">
       <template #body>
