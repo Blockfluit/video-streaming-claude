@@ -18,6 +18,7 @@ export * from './pagination.js';
 export * from './quality.js';
 export * from './primitives.js';
 export * from './title.js';
+export * from './tmdb-id.js';
 export * from './youtube.js';
 export * from './schemas/accounts.js';
 export * from './schemas/auth.js';
