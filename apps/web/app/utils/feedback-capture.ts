@@ -2,12 +2,19 @@
 /**
  * Snapshots the current page into a PNG data URL for the feedback dialog.
  *
- * Dynamically imported so html2canvas — which touches `document` at module
- * scope — is never pulled into the SSR bundle; this only ever runs from a
- * click. Cannot capture cross-origin iframes (the hero trailer) or reliably
- * capture <video>/live <canvas> content — those render blank or frozen. Not
- * worked around; the text message still describes what's wrong, and a failed
- * capture degrades to a text-only submission rather than blocking the dialog.
+ * Dynamically imported so html2canvas-pro — which touches `document` at
+ * module scope — is never pulled into the SSR bundle; this only ever runs
+ * from a click. Cannot capture cross-origin iframes (the hero trailer) or
+ * reliably capture <video>/live <canvas> content — those render blank or
+ * frozen. Not worked around; the text message still describes what's wrong,
+ * and a failed capture degrades to a text-only submission rather than
+ * blocking the dialog.
+ *
+ * `-pro`, not the original `html2canvas`: the original cannot parse the
+ * `oklab`/`oklch` colors this app's Tailwind4/`@nuxt/ui` theme resolves
+ * computed colors to, so it threw on nearly every real page (the header's
+ * gradient, card overlays, the hero scrim) and silently degraded to the
+ * text-only fallback below every time. This fork adds exactly that support.
  *
  * Capped to the viewport, not the whole scrolled document. `html2canvas`
  * defaults to `document.body`'s full scrollable size *and* to
@@ -20,7 +27,7 @@
  */
 export async function captureScreenshot(): Promise<string | null> {
   try {
-    const { default: html2canvas } = await import('html2canvas')
+    const { default: html2canvas } = await import('html2canvas-pro')
     const canvas = await html2canvas(document.body, {
       ignoreElements: el => el.closest('[data-feedback-ui]') !== null,
       scale: 1,
