@@ -29,102 +29,93 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `MEDIA_ROOT` (`media/`) holds source files and is watched. `DERIVED_ROOT` (`derived/`) holds posters,
   banners and converted VTT, and is **never** inside `media/` — generated output landing in the watched
   tree causes a watcher feedback loop.
-- **The converted MP4 is the one exception**, and it is deliberate: it lives in `MEDIA_ROOT`, in the same
-  folder as its source (`Heat.mkv` → `Heat.mp4`). A transcode is hours of CPU rather than something
-  regenerated on demand, and for a reclaimed video it is the only copy of the film — so it belongs on the
-  archival disk, not the scratch one. Note the disk-space consequence: a conversion now needs headroom on
-  the *source's* drive, and reclaiming genuinely frees space there, which it never did before.
+- **The converted MP4 is the one exception**, and it is deliberate: it lives in `MEDIA_ROOT`, beside its
+  source (`Heat.mkv` → `Heat.mp4`). A transcode is hours of CPU, not something regenerated on demand, and
+  for a reclaimed video it's the only copy — so it belongs on the archival disk, not the scratch one.
+  Consequence: a conversion needs headroom on the *source's* drive, and reclaiming now genuinely frees
+  space there.
 - What stops the watcher feeding on it is not its location but the column: **reconcile drops from its scan
   any path that is a row's `playbackKey`, or a live job's `outputKey`** (`ingest/converted-output.ts`,
-  applied to the whole `ScanResult` — `issues` as well as `videos`, since a converted file beside a loose
-  source parses as an issue). That filter is sound only because of its partner invariant: **`playbackKey`
-  is written to the row *before* the file appears at that path**, so reading the rows *after* the scan
-  cannot miss a conversion that finished in between. Reverse either half and the library grows a duplicate
-  row per conversion. Both ends carry a comment saying so.
-- The filter is on **stored keys only**, never on names. Skipping `Heat.mp4` because `Heat.mkv` sits beside
-  it would silently swallow a real second file an admin dropped there — forever, with no issue raised.
+  applied to the whole `ScanResult` — issues too, since a converted file beside a loose source parses as
+  one). Sound only because of its partner invariant: **`playbackKey` is written to the row *before* the
+  file appears at that path**, so reading rows *after* the scan cannot miss a conversion finishing
+  mid-scan. Reverse either half and the library grows a duplicate row per conversion. Both ends carry a
+  comment saying so.
+- The filter is on **stored keys only**, never names. Skipping `Heat.mp4` because `Heat.mkv` sits beside
+  it would silently swallow a real second file an admin dropped there — forever, unnoticed.
 - `convertedKeyFor` never returns its argument. An `.mp4` source would otherwise map to itself, and ffmpeg
-  truncates its output the moment it opens it, so the film would be gone before the encode read a frame;
-  that case becomes `Heat.converted.mp4`. Collisions past that take `-2`, `-3` like uploads do, checking
-  the filesystem **and** both `storageKey` and `playbackKey` — but a reconvert excludes the row's own key,
-  or it would pick a new name and orphan its previous output in a watched folder.
+  truncates its output the moment it opens it, so the film would vanish before the encode read a frame;
+  that case becomes `Heat.converted.mp4`. Collisions past that take `-2`, `-3` like uploads, checking the
+  filesystem **and** both `storageKey`/`playbackKey` — but a reconvert excludes the row's own key, or it
+  would pick a new name and orphan its previous output.
 - The encode writes to a **dot-prefixed neighbour of its destination** (`.<stem>.converting-<jobId>.mp4`),
-  not to `derived/tmp/`: dot-prefixed so the scanner and watcher pass over a half-written file inside the
-  watched tree, and in the destination's own directory so the rename into place is same-filesystem and
-  therefore atomic. Interrupted jobs have theirs swept at startup — in `derived/tmp/` an orphan was
-  invisible dead weight, in a media folder it is multiple gigabytes of the admin's disk.
-- A **move does not take the converted file with it.** It is written once, beside where the source was at
+  not `derived/tmp/`: dot-prefixed so the scanner/watcher pass over a half-written file inside the watched
+  tree, and in the destination's own directory so the rename is same-filesystem and atomic. Interrupted
+  jobs are swept at startup — in `derived/tmp/` an orphan was dead weight; in a media folder it's
+  gigabytes of the admin's disk.
+- A **move does not take the converted file with it.** It's written once, beside where the source was at
   the time. Relocating it inside `reconcile()` would mean a cross-filesystem copy of gigabytes on the
-  watcher's debounce path, and every ordering has a crash window ending in an unclaimed `.mp4` in a watched
-  folder. Being stranded costs tidiness; being ingested twice costs the curation.
-- Existing installs are moved by `POST /admin/jobs/relocate-conversions`, **not** by a migration. SQL cannot
-  move a file, and these files cannot be abandoned the way `derived/thumbnails/` was when artwork moved.
-  Not a boot hook either: copying a library across two filesystems with the bootstrap held open is how a
-  healthcheck turns a slow start into a restart loop. `playbackRoot()` keeps both layouts playable until it
-  has run, and is meant to be deleted afterwards.
-- **Every folder directly under `MEDIA_ROOT` is a drive**, a symlink to a physical disk in production. A
-  drive is where bytes live and is never a collection. The convention is
-  `media/<drive>/<item>/<season>/file`, and what an item folder *becomes* is decided by what is inside it
-  (`ingest/structure.ts`): season folders or two videos make a collection, a lone video does not.
-- The scanner follows a symlinked directory at the **drive level only**. `readdir` reports one as neither a
-  file nor a directory, so without that every disk is skipped and the scan returns an empty library rather
+  watcher's debounce path, with a crash window in every ordering ending in an unclaimed `.mp4`. Stranded
+  costs tidiness; ingested twice costs the curation.
+- Existing installs are moved by `POST /admin/jobs/relocate-conversions`, **not** a migration — SQL can't
+  move a file, and these can't be abandoned like `derived/thumbnails/` was. Not a boot hook either:
+  copying a library across filesystems with the bootstrap held open turns a slow start into a healthcheck
+  restart loop. `playbackRoot()` keeps both layouts playable until it's run, and should be deleted after.
+- **Every folder directly under `MEDIA_ROOT` is a drive** — a symlink to a physical disk in production. A
+  drive is where bytes live, never a collection. Convention: `media/<drive>/<item>/<season>/file`; what an
+  item folder *becomes* is decided by what's inside it (`ingest/structure.ts`) — season folders or two
+  videos make a collection, a lone video doesn't.
+- The scanner follows a symlinked directory at the **drive level only**. `readdir` reports one as neither
+  file nor directory, so without this every disk is skipped and the scan returns an empty library rather
   than an error. Deeper symlinks stay unfollowed, and `MAX_WALK_DEPTH` still bounds the walk.
-- A video **loose in a drive root** is not ingested. It raises a `LOOSE_DRIVE_FILE` issue: a drive holds
-  unrelated things, so there is no folder to take a suggestion from and nothing to say whether it stands
-  alone or belongs with its neighbours.
-- The folder layout is only an **initial suggestion**. A proposal is applied when a video is first
-  discovered and never again — a move on disk follows the file and changes nothing else. Re-deriving would
-  undo whatever an admin has arranged, on the strength of someone tidying up a disk.
+- A video **loose in a drive root** isn't ingested — it raises `LOOSE_DRIVE_FILE`. A drive holds unrelated
+  things, so there's no folder to take a suggestion from and nothing to say whether it stands alone.
+- The folder layout is only an **initial suggestion**. A proposal applies when a video is first discovered
+  and never again — a move on disk follows the file and changes nothing else. Re-deriving would undo
+  whatever an admin has arranged.
 - `storageKey` = archival source. `playbackKey` = converted MP4, **also under `MEDIA_ROOT`**, beside the
   source. Streaming serves `playbackKey ?? storageKey`. Both are unique columns: two rows sharing one
   converted file is silent corruption rather than an error.
 - Videos with `sourceDeletedAt` set and a valid `playbackKey` are **exempt** from the missing-file sweep,
   or reclaiming disk space marks the library `MISSING`.
 - Every storage key is `path.resolve`d and confirmed inside its root before use (path traversal). Only
-  `StorageService` joins paths — nothing else should build one. Containment is tested with `path.relative`,
-  **never** `startsWith`: `/srv/media-backup` starts with `/srv/media` and is a different directory.
-  The check is lexical and does not follow symlinks; the roots are operator-controlled, and the threat is a
-  crafted key rather than a hostile filesystem.
+  `StorageService` joins paths. Containment is tested with `path.relative`, **never** `startsWith`:
+  `/srv/media-backup` starts with `/srv/media` and is a different directory. Lexical, doesn't follow
+  symlinks — roots are operator-controlled and the threat is a crafted key, not a hostile filesystem.
 - `StorageService` refuses to start when `DERIVED_ROOT` resolves inside `MEDIA_ROOT` — that is the watcher
   feedback loop, checked at boot because it is configuration and configuration drifts.
 - Writes go to a `.incoming` neighbour and are renamed into place, so a failed write cannot leave a
   truncated file for the watcher to ingest.
 - Deleting a collection or season keeps its files unless `?deleteFiles=true`. Without the files gone,
   reconcile rebuilds the rows on the next scan — the default is the recoverable mistake, not the other one.
-- **Creating a season creates a folder in `MEDIA_ROOT`**, and that folder is what reconcile rebuilds the row
-  from. Deleting a season therefore removes its directory when it is **empty** (`storage.deleteIfEmpty`,
-  which is `rmdir` — the check and the action in one syscall, so there is no race between looking and
-  removing). An empty directory holds nothing anyone can lose, and leaving it was what made a deleted season
-  reappear on the next scan: the screen and the disk disagreed, and the disk won a few minutes later.
-  A directory that still holds something is left alone, so nobody destroys a film with the same button that
-  tidies up an empty folder — that still needs `deleteFiles`, and the admin UI confirms it by naming how many
-  files go rather than asking "are you sure?".
+- **Creating a season creates a folder in `MEDIA_ROOT`**, which is what reconcile rebuilds the row from.
+  Deleting a season removes its directory only when **empty** (`storage.deleteIfEmpty`, i.e. `rmdir` —
+  check and action in one syscall, no race). An empty directory holds nothing to lose, and leaving it was
+  what made a deleted season reappear on the next scan. A directory still holding something is left alone,
+  so nobody destroys a film with the button that tidies an empty folder — that still needs `deleteFiles`,
+  and the admin UI confirms by naming how many files go rather than asking "are you sure?".
 - **Deleting a video always takes its generated output**, `deleteFiles` or not: poster, banner, subtitle
-  tracks and the per-video `subtitles/<id>/` directory that nothing else has ever cleaned up. It
-  belongs to a row that has stopped existing, nothing sweeps it, and it is regenerated from the source — so
-  keeping it only leaks files nobody can reach again. The **source** under `MEDIA_ROOT` still needs
-  `deleteFiles`, because reconcile can rebuild the row from it. Every key is collected **before**
-  `video.delete`: all of them live on the row or on a `Subtitle` row, and the cascade takes both, so
-  afterwards there is nothing left to say what to remove.
-- The **converted file** goes on that same unconditional path (`playbackKeysToDelete`, its own list
-  because it is generated output living in `MEDIA_ROOT`), and here it is load-bearing rather than tidy:
-  ingest skips it only because a row claims it, so leaving it behind means the next scan finds an
-  unclaimed `.mp4` in a watched folder and rebuilds the entry that was just deleted, under a new id and
-  with none of its history.
-- The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming a
-  source is allowed precisely *because* the converted file replaces it. Sweeping that up as derived output
-  would destroy a film through the button labelled as the recoverable one, so the recoverable one **refuses**
-  and the caller has to ask for the files. The admin UI offers only the destructive button there, rather than
-  one that returns an error.
-- A video's parent folder is deliberately **not** tidied, unlike a season's. A season row is rebuilt from a
-  *directory*, so an empty one has to go or the season returns; a video row is rebuilt from a *file*, which
-  is already gone, so an empty folder is inert. And a video's parent is very often a season folder with a
-  live `Season` row pointing at it — `rmdir`ing that would be the same bug the other way round.
+  tracks and the per-video `subtitles/<id>/` directory nothing else has ever cleaned up. It belongs to a
+  row that no longer exists and is regenerated from the source, so keeping it only leaks unreachable
+  files. The **source** under `MEDIA_ROOT` still needs `deleteFiles`, since reconcile can rebuild the row
+  from it. Every key is collected **before** `video.delete`, since the cascade takes the row and its
+  `Subtitle` rows together, leaving nothing to say what to remove afterwards.
+- The **converted file** goes on that same unconditional path (`playbackKeysToDelete`, its own list since
+  it lives in `MEDIA_ROOT`), and here it's load-bearing, not tidy: ingest skips it only because a row
+  claims it, so leaving it behind means the next scan finds an unclaimed `.mp4` and rebuilds the deleted
+  entry under a new id with none of its history.
+- The exception is a **reclaimed** video, whose converted file is its only remaining copy — reclaiming is
+  allowed precisely *because* the converted file replaces it. Sweeping it up as derived output would
+  destroy a film through the "recoverable" button, so that one **refuses** and the caller must ask for the
+  files. The admin UI offers only the destructive button there.
+- A video's parent folder is deliberately **not** tidied, unlike a season's: a season row rebuilds from a
+  *directory*, so an empty one must go; a video row rebuilds from a *file*, already gone, so an empty
+  folder is inert — and a video's parent is often a season folder with a live `Season` row pointing at it,
+  which `rmdir` would break the same way.
 - Deleting a video **refuses while a job is `QUEUED` or `RUNNING`**. `MediaJob` is `onDelete: Cascade` and
-  `JobsService` holds its running job in memory, so the delete leaves ffmpeg writing to a path whose row is
-  gone and the job's bookkeeping then fails against a row that no longer exists — including inside its own
-  `catch`, where the rejection escapes unhandled. `QUEUED` counts too, or the window between the queue
-  picking a job up and marking it started is open.
+  `JobsService` holds its running job in memory, so the delete leaves ffmpeg writing to a path whose row
+  is gone, and the job's bookkeeping then fails against a row that no longer exists — including inside its
+  own `catch`, where the rejection escapes unhandled. `QUEUED` counts too.
 
 **Media**
 - Streaming must return **HTTP 206** with `Content-Range` for `Range` requests. `StreamableFile` alone does
@@ -164,80 +155,67 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   portrait one by asking for a crop wider than the source. Both dimensions must be capped by what the
   frame can supply. The `\,` are escaped for ffmpeg's filter parser, never for a shell.
 - A **trailer** is stored as the 11-character YouTube **id**, never the pasted URL, parsed by
-  `parseYoutubeId` in `packages/shared` so the form and the endpoint cannot disagree about what is
-  acceptable. Admins paste what is in their address bar — a watch URL with a playlist and a timestamp,
-  a `youtu.be` link, an embed URL — and interpolating whichever arrived into an iframe `src` gives a
-  player that silently shows nothing. Keeping the id also keeps the embed URL a *rendering* decision:
-  privacy host, autoplay, mute. The id pattern is **anchored**; a playlist id is 34 characters of the
-  same alphabet, so an unanchored match finds something id-shaped inside one and plays a video that
-  does not exist.
-- The hero's trailer starts **muted**, which is not a preference: a browser refuses to start an unmuted
-  video nobody asked for, and it fails *silently* — the iframe loads and sits there. It is suppressed
-  entirely under `prefers-reduced-motion`, and nothing is requested from YouTube until it starts. The
-  iframe must be `pointer-events-none`: an iframe swallows every click that lands on it, so without
-  that the Play button underneath stops working the moment the trailer fades in, and the page looks
-  perfectly fine while doing it.
+  `parseYoutubeId` in `packages/shared` so the form and the endpoint can't disagree on what's acceptable.
+  Admins paste whatever's in the address bar — a watch URL with a playlist/timestamp, a `youtu.be` link,
+  an embed URL — and interpolating that straight into an iframe `src` gives a player that silently shows
+  nothing. Keeping the id keeps the embed URL a *rendering* decision (privacy host, autoplay, mute). The
+  id pattern is **anchored**: a playlist id is 34 characters of the same alphabet, so an unanchored match
+  finds something id-shaped inside one and plays a video that doesn't exist.
+- The hero's trailer starts **muted** — not a preference: a browser refuses to start an unmuted video
+  nobody asked for, and fails *silently*, iframe loaded and sitting there. Suppressed entirely under
+  `prefers-reduced-motion`; nothing is requested from YouTube until it starts. The iframe must be
+  `pointer-events-none`, or it swallows every click and the Play button underneath stops working the
+  moment the trailer fades in — while the page looks perfectly fine.
 - **The reveal is never gated on the player confirming anything.** `HeroBackdrop` mounts the iframe
-  hidden and crossfades it in ~900ms after the iframe's `load`; it reveals *earlier* if the embed
-  volunteers `onStateChange / info: 1`, and it retreats to the banner **only** on `onError`. It was
-  built the other way round once — hidden until the player confirmed, unmounted after four seconds of
-  silence — and real YouTube does not reliably answer that handshake, so every viewer got the banner
-  and nothing else, on every title. It shipped green because the browser suite's only stub answered
-  every time. **Silence means carry on; only an error means stop**, and `hero.spec.ts` now stubs all
-  three behaviours (answers, silent, failing) for exactly that reason.
+  hidden and crossfades it in ~900ms after the iframe's `load`; it reveals *earlier* on
+  `onStateChange / info: 1`, and retreats to the banner **only** on `onError`. Built the other way round
+  once — hidden until confirmed, unmounted after four seconds of silence — real YouTube doesn't reliably
+  answer that handshake, so every viewer got the banner and nothing else, on every title, and it shipped
+  green because the browser suite's only stub always answered. **Silence means carry on; only an error
+  means stop**, and `hero.spec.ts` now stubs all three (answers, silent, failing) for that reason.
 - The "can't be loaded" fallback needs no timer: an embed that never fires `load` never reveals, so a
-  blocked host or a dead network leaves the banner where it is by construction.
+  blocked host or dead network leaves the banner where it is by construction.
 - **`subscribeToPlayer` posts `listening` repeatedly**, not once. An iframe's `load` fires when its
-  *document* arrives, which is before the player has attached its own `message` listener — a single
-  message sent then lands on nothing and the embed never asks again, which is the likeliest reason the
-  handshake was never heard at all. It is bounded (~4s) and cancelled when the trailer is torn down.
-- **The home hero rotates**, and does so on a **fixed interval** rather than when a trailer ends.
-  There is no ended signal worth relying on: the page hears the embed only when it chooses to speak,
-  which it may never do, so "play the next one when this finishes" would rest on the same silence that
-  already cost the feature once. The interval is ~10s, which is very nearly ten seconds of trailer now
-  that it starts at once. Much shorter and the entry changes before its trailer has said anything,
-  while opening a YouTube iframe every few seconds.
-- The rotation stops for all three of: `prefers-reduced-motion` (it never starts — the same rule the
-  trailer follows), a pointer resting on the hero or focus inside it, and an explicit pause button.
-  Auto-updating content needs a way to stop it. An **open `TrailerModal` holds it too**: the hero
-  cannot turn over while somebody is watching this title's trailer in a dialog on top of it. There was
-  a ✕ on the hero and a `dismiss` emit behind it; both are gone with the rest of the hero's trailer
-  controls, which steered something nobody was watching.
-- The rotation's dots are dimmed with a **colour**, never `opacity`. `visible.spec.ts` reports an
+  *document* arrives, before the player attaches its own `message` listener — a single message then
+  lands on nothing and the embed never asks again, the likeliest reason the handshake was never heard.
+  Bounded (~4s) and cancelled when the trailer is torn down.
+- **The home hero rotates on a fixed interval**, not when a trailer ends — there's no ended signal
+  worth relying on, so "play next when this finishes" would rest on the same silence that already cost
+  the feature once. The interval is ~10s: nearly ten seconds of trailer now that it starts at once;
+  shorter and the entry changes before its trailer has said anything, while opening a YouTube iframe
+  every few seconds.
+- The rotation stops for: `prefers-reduced-motion` (never starts — same rule as the trailer), a pointer
+  resting on the hero or focus inside it, and an explicit pause button. An **open `TrailerModal` holds it
+  too** — the hero can't turn over while somebody's watching this title's trailer in a dialog on top of
+  it. A ✕ and `dismiss` emit on the hero are gone with the rest of its trailer controls.
+- The rotation's dots are dimmed with a **colour**, never `opacity` — `visible.spec.ts` reports an
   interactive element under 0.35 effective opacity as invisible, and opacity multiplies down the
-  whole ancestor chain. Inactive is `--ui-border-accented` (3:1, the non-text floor for something
-  that bounds rather than sets type); active is `--ui-primary`.
-- They live in the hero's **text column**, under the call to action — not on the floor of the hero,
-  where they were first put. The home page is pulled up over its hero by `-mt-16` so the artwork
-  runs behind the cards, which means the bottom 4rem of the hero is underneath a row heading:
-  "Recently added" landed exactly on top of the pause button. Anything the *page* owns inside the
-  hero has to sit above that band, and the text column is the one place clear of it at every width.
-  The hero's own trailer controls used to sit bottom-**right** and escaped this only because a shelf
-  heading is short; they are gone now, so there is no precedent there for anything on the left.
-- The browser suite therefore runs with `reducedMotion: 'reduce'` set in `playwright.config.ts`.
-  Without it the auto-playing trailer puts a third-party iframe on `/` — a page a dozen tests visit
-  only to get a base URL for a `fetch` — where the response watchdog fails any 4xx in any frame,
-  `visit`'s `networkidle` races the 2s mount, and the run needs outbound internet. `e2e/hero.spec.ts`
-  opts back out for exactly the tests that are about the motion, and stubs YouTube rather than
-  reaching it. A setting that switches a feature off everywhere needs the one place it stays on.
+  ancestor chain. Inactive is `--ui-border-accented` (3:1); active is `--ui-primary`.
+- They live in the hero's **text column**, under the call to action, not on the hero floor where they
+  were first put: the home page is pulled up over its hero by `-mt-16`, so the bottom 4rem sits under a
+  row heading — "Recently added" landed exactly on the pause button. The text column is the one place
+  clear of that band at every width; the hero's old trailer controls sat bottom-right and are gone now.
+- The browser suite runs with `reducedMotion: 'reduce'` in `playwright.config.ts`. Without it the
+  auto-playing trailer puts a third-party iframe on `/` — visited by a dozen tests only for a base
+  URL — where the response watchdog fails any 4xx in any frame and the run needs outbound internet.
+  `e2e/hero.spec.ts` opts back out for the motion tests and stubs YouTube rather than reaching it.
 - **A collection's artwork is derived, not stored.** Its own `posterKey`/`bannerKey` are the *admin
   override*; null means "not overridden", and it then shows its **first video's** picture by
-  `MEMBERSHIP_ORDER`, falling back to a stock image only when it holds nothing. Deriving on read is what
-  makes it follow the episodes instead of snapshotting something that rots. The inherited candidate goes
-  through `whereVisible(role)` like every other nested read — a published collection may hold draft
-  episodes, and a draft's poster is not published art.
-- **The artwork routes never 404 for a missing picture.** Absent artwork is an ordinary state, and every
-  card used to pay a round trip to be told so; the browser suite fails any 4xx, so one collection nobody
-  had postered turned whole pages red. A row the caller may not see is still a 404 — the fallback must
-  not turn an invisible video into a 200 that confirms it exists.
-- The stock image is an **SVG built in code**, not a file. `nest build` copies TypeScript and nothing
-  else, so a `.jpg` needs an `assets` entry in `nest-cli.json` *and* a Dockerfile `COPY`, and missing
-  either fails as a 500 in production and nowhere else.
-- `qualityLabel()` compares by **edge, not axis**: long edge against the tier's width threshold, short edge
-  against its height threshold. Height alone hides the badge on most films (a 1080p film in 2.39:1 is
-  `1920×800`); either raw dimension against either threshold over-promotes portrait video (a 1080×1920 phone
-  clip is HD, but its 1920 height clears QHD's 1440). The plan's table says the latter and also claims it
-  handles portrait correctly — those conflict, and the edge comparison is what satisfies both intents.
+  `MEMBERSHIP_ORDER`, falling back to a stock image only when empty. Deriving on read makes it follow the
+  episodes instead of snapshotting something that rots. The inherited candidate goes through
+  `whereVisible(role)` like every nested read — a published collection may hold draft episodes, and a
+  draft's poster isn't published art.
+- **The artwork routes never 404 for a missing picture.** Absent artwork is ordinary, and every card used
+  to pay a round trip to be told so; the browser suite fails any 4xx, so one un-postered collection turned
+  whole pages red. A row the caller may not see is still a 404 — the fallback must not turn an invisible
+  video into a 200 that confirms it exists.
+- The stock image is an **SVG built in code**, not a file. `nest build` copies TypeScript only, so a
+  `.jpg` needs an `assets` entry in `nest-cli.json` *and* a Dockerfile `COPY`, and missing either fails as
+  a 500 in production and nowhere else.
+- `qualityLabel()` compares by **edge, not axis**: long edge against the tier's width threshold, short
+  edge against its height threshold. Height alone hides the badge on most films (a 1080p film in 2.39:1
+  is `1920×800`); either raw dimension against either threshold over-promotes portrait video (a 1080×1920
+  phone clip clears QHD's 1440 on height alone). The edge comparison is what satisfies both intents.
 - Badges render only at 1080p and above; below that, render nothing.
 - `PATCH /videos/:id/markers` merges the patch onto the **stored** markers before validating. The editor
   saves one marker per click, so validating the patch alone would accept an end before a start it cannot
@@ -247,30 +225,29 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `qualityLabel` lives in `packages/shared` — the API probes the dimensions, the web app renders the badge.
 - ffmpeg and ffprobe are invoked with `execFile`, never `exec`. Every path reaching them came off a disk
   scan or a database row, so a filename containing `;` or `$(…)` must stay a filename.
-- **There is no ffmpeg wrapper worth adopting** — checked, and worth not re-checking. `fluent-ffmpeg` (2M
-  downloads/week) is formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is
-  abandoned; `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets the Bare runtime, not Node.
-  `execa` would improve process handling but is ESM-only and **fails under ts-jest's CommonJS loader**,
-  which is where every API test runs — 730 unit, 19 e2e and 605 db. The thin wrapper in
-  `media/ffmpeg.service.ts` stays.
+- **There is no ffmpeg wrapper worth adopting** — checked, not worth re-checking. `fluent-ffmpeg` is
+  formally **deprecated** and still depends on `async@0.2.9` from 2013; `fessonia` is abandoned;
+  `@ffmpeg/ffmpeg` is WASM (wrong target); `bare-ffmpeg` targets Bare, not Node; `execa` is ESM-only and
+  **fails under ts-jest's CommonJS loader**, where every API test runs (730 unit, 19 e2e, 605 db). The
+  thin wrapper in `media/ffmpeg.service.ts` stays.
 - **ffprobe reports failures as JSON**: `-show_error -of json` puts `{ "error": { "string": … } }` on
   **stdout**, even on a non-zero exit, and `promisify(execFile)` attaches that stdout to the rejection.
   It adds nothing to a successful probe, so it is always passed. Prefer it to reading stderr.
 - The **encoder** has no equivalent — ffmpeg offers only text loglevels — so stderr summarising stays the
   fallback there. For progress, `-progress pipe:1` emits `key=value` lines, which is why step 12 must use it
   rather than scraping the status line.
-- Failures go through `FfmpegError`, which keeps ffmpeg's diagnosis and drops the command line. `execFile`'s
-  own message leads with the whole invocation, which pushes the real cause past where `probeError` is
-  truncated and shows absolute server paths to an admin. Absolute paths in ffmpeg's output are reduced to
-  the filename for the same reason. stderr and the structured message **overlap without containing each
-  other** — stderr adds the specific cause (`moov atom not found`) that the structured message lacks — so
-  the shared part is dropped and both halves are kept.
-- Thumbnails are written to `DERIVED_ROOT`, never the watched media tree, and they are **renamed into place**
-  from `derived/tmp/` like a transcode. ffmpeg truncates its output the moment it opens it, so capturing
-  straight to `thumbnails/<id>.jpg` left the live poster missing for as long as the capture took — every card
-  in the app requests that URL, so a routine re-probe made artwork flicker to a **404**, not a stale picture.
-  Testing this needs a failure that happens *after* the output is opened: pointing ffmpeg at an unreadable
-  source fails during input parsing, never touches the destination, and passes against the broken code too.
+- Failures go through `FfmpegError`, which keeps ffmpeg's diagnosis and drops the command line —
+  `execFile`'s own message leads with the whole invocation, pushing the real cause past where
+  `probeError` is truncated and showing absolute server paths to an admin. Absolute paths in ffmpeg's
+  output are reduced to filenames for the same reason. stderr and the structured message **overlap
+  without containing each other** — stderr adds the specific cause (`moov atom not found`) the
+  structured message lacks — so the shared part is dropped and both halves kept.
+- Thumbnails are written to `DERIVED_ROOT`, never the watched tree, and are **renamed into place** from
+  `derived/tmp/` like a transcode. ffmpeg truncates its output on open, so capturing straight to
+  `thumbnails/<id>.jpg` left the live poster missing for as long as the capture took — every card
+  requests that URL, so a routine re-probe flickered artwork to a **404**, not a stale picture. Testing
+  this needs a failure *after* the output is opened: pointing ffmpeg at an unreadable source fails during
+  input parsing and never touches the destination, passing against the broken code too.
 - A probe failure writes `probeError` on the row and moves on. One unreadable file must not stop a scan of
   two hundred, and the admin needs to see which file and why.
 - **A poster failure is not a probe failure.** Thumbnail generation runs outside the probe's `catch` and is
@@ -280,11 +257,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   the end — it says "Output file is empty, nothing was encoded" on stderr and writes nothing — so trusting
   the exit code left the *rename* to fail with an `ENOENT` naming neither the timestamp nor the file. A
   `NoFrameError` becomes a **400** on the capture endpoint, because the admin chose the moment.
-- **A scan has no `awaitWriteFinish`; the watcher does.** A scan will therefore read a file that is still
-  being copied, and ffprobe reports the whole duration from an MP4's leading moov atom while the bytes are
-  still arriving — a 994 MB film was recorded at 8 MB, and its poster sought 813 seconds into it. Reconcile
-  cannot tell mid-copy from finished while it looks, so it notices **next time**: a row whose file has a
-  different size or mtime is updated and re-probed. Without that, nothing ever looked at the row again.
+- **A scan has no `awaitWriteFinish`; the watcher does.** A scan can read a file still being copied, and
+  ffprobe reports the whole duration from an MP4's leading moov atom while bytes are still arriving — a
+  994 MB film recorded at 8 MB had its poster sought 813 seconds in. Reconcile can't tell mid-copy from
+  finished while it looks, so it notices **next time**: a row whose file has a different size or mtime is
+  updated and re-probed.
 - `needsConversion` does **not** fire on nulls from a failed probe — that would queue CPU-saturating work on
   a guess. The container check still applies, since it needs no probe.
 - Probe/thumbnail run at concurrency 2 (cheap, IO-bound). Transcoding is separate and runs one at a time —
@@ -317,28 +294,25 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   first is unambiguous when a container mixes text and bitmap tracks.
 - chokidar needs `awaitWriteFinish`, or half-copied large files get ingested mid-write.
 - The watcher's `ignored` predicate (`ingest/watch-ignore.ts`) judges a path **relative to `MEDIA_ROOT`**,
-  never the absolute one. Matching a dot segment anywhere in the absolute path makes the verdict depend on
-  where the library lives rather than what is in it: a root under any dot directory ignores **itself**, so
-  chokidar watches nothing. Nothing is logged and no error is raised — a tree that never reacts looks
-  exactly like a tree nobody has touched, and the only thing that still worked was the startup scan, so
-  restarting the API "fixed" it every time. Every worktree checkout (`.claude/worktrees/<name>/media`) ran
-  that way, which is how it was found: a symlinked drive that every scan ingested correctly appeared not to
-  work. Segments split on the platform separator only, so a backslash stays a legal filename character.
+  never the absolute one. Matching a dot segment anywhere in the absolute path makes the verdict depend
+  on where the library lives, not what's in it: a root under any dot directory ignores **itself**, so
+  chokidar watches nothing — silently, with only the startup scan still working, so restarting the API
+  "fixed" it every time. Every worktree checkout (`.claude/worktrees/<name>/media`) ran that way, which is
+  how it was found. Segments split on the platform separator only, so a backslash stays a legal filename
+  character.
 - Only the **drive level** — a folder directly under `MEDIA_ROOT` — may be a symlink. `readdir` reports a
-  symlinked directory as neither `isDirectory()` nor `isFile()`, so following it is explicit and deliberate.
-  Deeper links are not followed and symlinked files are not ingested; `MAX_WALK_DEPTH` bounds the drive case
-  in case a link points back up its own tree.
-- A symlinked drive is resolved in the **container's** mount namespace, so a deployment has to mount the
+  symlinked directory as neither `isDirectory()` nor `isFile()`, so following it is explicit. Deeper links
+  aren't followed and symlinked files aren't ingested; `MAX_WALK_DEPTH` bounds the drive case in case a
+  link points back up its own tree.
+- A symlinked drive resolves in the **container's** mount namespace, so a deployment must mount the
   target at the same absolute path the link names (`DISKS_PATH` in `deploy/compose.yml`). Bind-mounting
-  `MEDIA_PATH` alone leaves `media/disk1 -> /mnt/hdd1/videos` dangling, and the scan reports `ENOENT`
-  against a disk that is plainly there on the host — which reads as broken symlink support and is the
-  opposite: the link was followed correctly and there was nothing behind it. Mounting a disk *onto*
-  `/media/disk1` instead does not work, because Docker resolves that mount point through the very symlink
-  that is broken.
-- A dangling drive is reported with the **target it could not reach**, not a bare errno. `ENOENT` alone
-  sends an admin looking for a bug in the library rather than at their mounts. That message prints an
-  absolute server path deliberately — the rule about reducing those to filenames is about ffmpeg output,
-  where the path is incidental; here it is the entire diagnosis, and the ingest list is ADMIN-only.
+  `MEDIA_PATH` alone leaves `media/disk1 -> /mnt/hdd1/videos` dangling and the scan reports `ENOENT`
+  against a disk plainly there on the host — the link was followed correctly, there was just nothing
+  behind it. Mounting a disk *onto* `/media/disk1` instead doesn't work, since Docker resolves that mount
+  point through the very symlink that's broken.
+- A dangling drive is reported with the **target it couldn't reach**, not a bare errno — `ENOENT` alone
+  sends an admin looking for a bug in the library rather than their mounts. That message prints an
+  absolute server path deliberately: here it's the entire diagnosis, and the ingest list is ADMIN-only.
 - Reconcile is keyed on `storageKey` and must stay idempotent — that is what stops uploads double-creating.
 - Uploads stage in `MEDIA_ROOT/.uploads/` and are **renamed** into place, dot-prefixed so both the scanner
   and the watcher skip it — a partial or abandoned transfer is never a candidate for ingestion. The rename
@@ -346,20 +320,20 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   copies to a **dot-prefixed neighbour** in the target directory before renaming, so a file still appears
   under its final name only once it is complete.
 - **Upload places files and creates no rows.** It writes them into the shape the convention expects on a
-  drive the uploader picks — a single file gets a folder named after it, a folder tree lands as given — and
-  reconcile makes of them exactly what it would make of the same folders copied there by hand. One rule for
+  drive the uploader picks — a single file gets a folder named after it, a folder tree lands as given —
+  and reconcile makes of them exactly what it would of the same folders copied there by hand. One rule for
   what the library is, not two. Attribution (`uploadedById`, `origin: UPLOAD`) is stamped afterwards on
   `storageKey`, or an upload would be indistinguishable from a copy.
-- A directory upload's relative paths travel in a **parallel `paths` field**, one per file in order, because
-  multer strips separators from `originalname`. Traversal segments are dropped **before** `sanitizeFilename`
-  runs: it gives an unusable segment a fallback rather than an empty string, so filtering afterwards turned
-  `../../escaped` into real folders called `upload`. (Caught by `uploads.db-spec.ts`.)
+- A directory upload's relative paths travel in a **parallel `paths` field**, one per file, since multer
+  strips separators from `originalname`. Traversal segments are dropped **before** `sanitizeFilename`
+  runs — it gives an unusable segment a fallback rather than an empty string, so filtering afterwards
+  turned `../../escaped` into real folders called `upload`. (Caught by `uploads.db-spec.ts`.)
 - multer uses `diskStorage`, never memory: a 2 GB file buffered in the heap takes the process with it.
 - An upload is accepted on its **extension alone**. The `mimetype` a browser attaches comes from the OS
-  registry, not the file — Windows reports `.mkv` as `video/x-matroska`, `video/mkv`, or nothing depending
-  on what claimed the extension — so ANDing it with the extension check refused real MKVs with a message
-  nobody could act on. ffprobe is the only thing that can say whether a file is playable, and it records
-  `probeError` on the next pass; a mislabelled upload becomes a draft with a diagnosis. (Shipped as a bug.)
+  registry, not the file — Windows reports `.mkv` as `video/x-matroska`, `video/mkv`, or nothing, so
+  ANDing it with the extension check refused real MKVs. ffprobe alone can say whether a file is playable,
+  and records `probeError` on the next pass; a mislabelled upload becomes a draft with a diagnosis.
+  (Shipped as a bug.)
 - multer 2.2 strips **both** slash and backslash paths from `originalname`, but **not** a leading dot.
   `.hidden.mp4` arrives intact and would become a file the scanner skips, so `sanitizeFilename` doing that
   is load-bearing rather than belt-and-braces. Verified by mutation, not assumed.
@@ -371,15 +345,14 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - `contentTag` is `sha256(first 1MB + last 1MB + size)` — a *move detector*, not a content hash. Files with
   identical ends and the same size collide by design. Never use it for deduplication or integrity.
 - **A stored `contentTag` must be refreshed wherever `sizeBytes` is.** The size is *in* the hash, so a row
-  whose file changed holds a tag those bytes can never produce again, and move detection for that one row is
-  then broken permanently. It fails silently and late: nothing looks wrong until the file is renamed months
-  later, and then it is not recognised as itself — a second video is created and the original is swept to
-  `MISSING`, stranding its title, artwork, markers, credits and watch history while the file sits in plain
-  sight under a new name. The re-read branch is where this bit, and the trigger is ordinary: a scan has no
-  `awaitWriteFinish`, so every file whose copy outlives one scan interval is tagged half-written and then
-  re-read. Recompute on *any* change, not just a change of size — the tag samples the first and last
-  megabyte, and those can be rewritten without the size moving. (Shipped as a bug; `ingest.db-spec.ts` now
-  pins both the symptom and the mechanism.)
+  whose file changed holds a tag those bytes can never produce again, and move detection for that row is
+  broken permanently — silently and late: the file is renamed months later and isn't recognised as
+  itself, so a second video is created and the original is swept to `MISSING`, stranding its title,
+  artwork, markers, credits and watch history while the file sits in plain sight under a new name. The
+  re-read branch is where this bit: a scan has no `awaitWriteFinish`, so any copy outliving one scan
+  interval gets tagged half-written and re-read. Recompute on *any* change, not just size — the tag
+  samples the first and last megabyte, which can be rewritten without the size moving. (Shipped as a bug;
+  `ingest.db-spec.ts` pins both symptom and mechanism.)
 - A row is never deleted because its file vanished. `stateBeforeMissing` remembers what it was, so a file
   that comes back is restored rather than silently demoted to `DRAFT`.
 - `reconcile.run()` joins an in-flight pass rather than starting a second. A folder drop fires an event per
@@ -400,11 +373,11 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   seeks past the end of the file.
 - `completed` needs a duration that is known **and above zero**. A failed probe writes 0, and `x >= 0 * 0.9`
   marks every unprobed video complete.
-- `deltaSec` is **capped** at 30s per beat, not rejected — the plan says "reject > 30", but a rejected beat
-  throws away the viewer's resume position along with the excess seconds, and missing two beats is a normal
-  network hiccup. The cap stops one bad number from rewriting a total; it is **not** a rate limit, since a
-  client beating in a loop still accumulates. That is what the heartbeat limit in
-  `common/throttling.ts` is for.
+- `deltaSec` is **capped** at 30s per beat, not rejected — the plan says "reject > 30", but a rejected
+  beat throws away the resume position along with the excess seconds, and missing two beats is a normal
+  network hiccup. The cap stops one bad number rewriting a total; it is **not** a rate limit, since a
+  client beating in a loop still accumulates — that's what the heartbeat limit in `common/throttling.ts`
+  is for.
 - The `WatchEvent` row stores the **credited** delta, not the claimed one, so summing the log still
   reproduces the rollup. Both are written in one transaction for the same reason.
 - `viewCount` increments only on the first beat carrying a given `playSessionId` — that lookup is why
@@ -423,11 +396,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **People, credits, comments and lists**
 - A video's credits panel is its own credits **merged with its collection's** (`credits/merge.ts`, pure).
-  On a `(personId, role)` clash the **episode's** credit wins outright — it is the more specific one and can
-  carry an episode-specific character name. Role display order comes from `Object.values(CreditRole)`, never
-  a hand-written array. The sort must be **total** (role, position, collection-before-video, name, id): the
-  two parents number positions independently so ties are normal, and a panel that reshuffles between
-  requests reads as a rendering bug for weeks.
+  On a `(personId, role)` clash the **episode's** credit wins outright — more specific, and can carry an
+  episode-specific character name. Role display order comes from `Object.values(CreditRole)`, never a
+  hand-written array. The sort must be **total** (role, position, collection-before-video, name, id): the
+  two parents number positions independently, so ties are normal.
 - Credit duplicate prevention (same person + role + parent) lives in the **service**. The parent columns are
   nullable and Postgres compares NULLs as distinct, so a composite unique index would let every video credit
   duplicate freely.
@@ -452,23 +424,21 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   they had done it themselves. Deleting is the author's or any admin's, and is idempotent.
 - A comment is reached **through its video's visibility** — 404, not 403 — so a comment id is not a way to
   act on, or confirm the existence of, a video the caller cannot see.
-- **My List** (explicit, per-user) and **curated rows** (admin-made, the same for everyone) are deliberately
+- **My List** (explicit, per-user) and **curated rows** (admin-made, same for everyone) are deliberately
   different things, and Continue Watching is neither — it falls out of `WatchProgress`. All three land on
-  the home page, and all three are now **rows** (`CuratedList.source`) rather than two of them being
-  hardcoded above the third: the shelves every viewer sees first were the two an admin could not move.
-- Both list adds are idempotent by **catching the unique violation**, not by checking first: check-then-write
-  is not atomic and a double-click lands inside the gap. The partial uniques are what enforce it.
+  the home page and are now **rows** (`CuratedList.source`) rather than two hardcoded above the third.
+- Both list adds are idempotent by **catching the unique violation**, not checking first: check-then-write
+  isn't atomic and a double-click lands inside the gap. The partial uniques enforce it.
 - Whether something is *on* the list rides on the **per-caller** read a screen already makes —
-  `inMyList` on `/videos/:id/stats` and `/collections/:slug/progress` (`common/watchlist.ts`), never on the
-  detail read that describes the record. The button is then right on the first paint with no extra request,
-  and a payload describing a video stays the same for everyone who asks. `GET /me/watchlist` is the list
-  itself and deliberately takes no id filter: asking it about one record would mean paging the lot.
-  `AddToListButton`'s `saved` prop went unpassed by every caller for months, so the button offered to add
-  things already saved — an optional prop nobody passes is dead code, exactly like `MediaCard`'s `shape`.
-- `nextEpisode` (pure) picks the first **unfinished** episode — which also covers resuming a half-watched
-  one, and does not skip an episode because a later one was finished — and returns to the first once the
-  whole thing is done. A null `orderIndex` sorts **last**: it means "ingest could not tell", and treating it
-  as episode zero offers an unnumbered extra ahead of a real episode one.
+  `inMyList` on `/videos/:id/stats` and `/collections/:slug/progress` (`common/watchlist.ts`), never the
+  detail read describing the record. The button is right on the first paint with no extra request, and a
+  payload describing a video stays the same for everyone. `GET /me/watchlist` deliberately takes no id
+  filter: asking about one record would mean paging the lot. `AddToListButton`'s `saved` prop went
+  unpassed by every caller for months, so the button offered to add things already saved.
+- `nextEpisode` (pure) picks the first **unfinished** episode — covering resuming a half-watched one, not
+  skipping one because a later episode finished — and returns to the first once the whole thing is done.
+  A null `orderIndex` sorts **last**: it means "ingest couldn't tell", and treating it as episode zero
+  offers an unnumbered extra ahead of a real episode one.
 - Curated row items are visibility-filtered **per item**. A row is admin-made and can hold anything, so that
   filter is the only thing stopping a home-page shelf from advertising a draft. `includeHidden` does nothing
   at all for a non-admin.
@@ -477,26 +447,23 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **Home-page rows** (`lists/sources/rank.ts` is pure; `computed.ts` is the IO around it)
 - **The home hero features what was recently added** (`app/utils/hero.ts`, pure). It reads the
-  `RECENTLY_ADDED` row out of the same `/lists` response the shelves come from, the way it used to read
-  Continue Watching — so moving, renaming or hiding that row moves the hero with it. It reads
-  **`shelves`**, not the raw rows: a `RECENTLY_ADDED` row that resolved to nothing must not shadow the
-  fallback, or a new row over an empty filter renders an empty hero on a full library.
-- **No migration seeds such a row** — only the two personal ones are seeded — so the hero falls back to
-  `GET /library?sort=added`, the catalogue's own recency answer and the one `/browse` already sorts by.
-  Without that fallback the feature does nothing at all on a fresh install, which is the install where
-  it matters most. It replaced the old `/collections?limit=1` "Featured" fetch, so the page still makes
-  two requests. The consequence for tests: a browser run against a fresh database only ever exercises
-  the fallback, and `hero.spec.ts` is the only thing covering the row branch.
+  `RECENTLY_ADDED` row out of the same `/lists` response the shelves come from — so moving, renaming or
+  hiding that row moves the hero with it. It reads **`shelves`**, not the raw rows: a `RECENTLY_ADDED`
+  row resolving to nothing must not shadow the fallback, or an empty filter renders an empty hero.
+- **No migration seeds such a row** — only the two personal ones are — so the hero falls back to
+  `GET /library?sort=added`, the same recency answer `/browse` already sorts by. Without that fallback the
+  feature does nothing on a fresh install, the install where it matters most. A browser run against a
+  fresh database only ever exercises the fallback, and `hero.spec.ts` is the only thing covering the row
+  branch.
 - The hero carries **no description**. Neither card select has one and neither should gain one — a
   synopsis on the shared card shape is paid for by every card on every shelf, to serve three lines in
   one place. `trailerYoutubeId` is eleven characters and is on both, which is the distinction.
-- A row is a **source, a kind, a limit and filters**. `MANUAL` reads its `ListItem`s; the computed sources
-  rank the library; `CONTINUE_WATCHING` and `MY_LIST` delegate to `WatchService.history` and
-  `WatchlistService.list` rather than restating either — both already resolve visibility on the nested video
-  and which episode a saved show would play.
+- A row is a **source, a kind, a limit and filters**. `MANUAL` reads its `ListItem`s; computed sources rank
+  the library; `CONTINUE_WATCHING` and `MY_LIST` delegate to `WatchService.history` and
+  `WatchlistService.list` rather than restating either.
 - A computed row applies `whereVisible(role)` **while scoring, before the limit**. A manual row can filter
-  afterwards because its pool is small and admin-chosen; a computed one cannot, or asking for ten returns
-  three because the other seven were drafts — which reads as an empty library rather than as a filter.
+  afterwards since its pool is small and admin-chosen; a computed one can't, or asking for ten returns
+  three because the other seven were drafts — reading as an empty library rather than a filter.
 - A video whose every collection is hidden from the caller is **dropped**, not shown. It is not a film, it
   is an instalment of something they cannot see, and offering it as though it stood alone is the leak the
   visibility rule exists to prevent. A video with **no** memberships is the different, ordinary case and is
@@ -545,15 +512,13 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `offset + limit` from each side, which is exactly enough: the first `offset + limit` rows of a merged
   order can only have come from the first that many of each source. That is also what `MAX_LIBRARY_OFFSET`
   bounds — the work scales with the offset, so an unbounded one reads the library several times over.
-- **The sort key is `normalisedTitle`, not `title`**, and that is load-bearing. A page boundary is decided
+- **The sort key is `normalisedTitle`, not `title`**, and that's load-bearing. A page boundary is decided
   by the SQL order and the JS comparator *together* — the database picks the candidates, the merge picks
-  the cut — so the two must agree, and `localeCompare` applies ICU rules no Postgres collation shares.
-  A normalised title is lowercase ASCII alphanumerics, where they coincide. Checked rather than assumed,
-  because the database is `en_US.utf8` rather than `C`: real-shaped titles (`10things`, `a1`, `ab`,
-  `se7en`, `seven`) sort identically in both, as does `normaliseTitle`'s fallback for a name with no Latin
-  alphanumerics, since glibc drops to code-point order there. The one live divergence is **astral-plane**
-  characters — Postgres orders by code point, JS by UTF-16 code unit — which could show an emoji-titled
-  film on the wrong side of a boundary. Not worth teaching this file a collation for.
+  the cut — so the two must agree, and `localeCompare` applies ICU rules no Postgres collation shares. A
+  normalised title is lowercase ASCII alphanumerics, where they coincide. Checked, not assumed: real-shaped
+  titles (`10things`, `a1`, `ab`, `se7en`, `seven`) sort identically in both. The one live divergence is
+  **astral-plane** characters — Postgres orders by code point, JS by UTF-16 code unit — which could show
+  an emoji-titled film on the wrong side of a boundary. Not worth teaching this file a collation for.
 - `LIBRARY_SORTS` declares the Prisma `orderBy` and the comparator **in one table**, so a sort cannot be
   changed in one place and not the other. Every order ends in the entry's kind and id: the two tables
   number themselves independently, so ties are the norm rather than the exception.
@@ -572,44 +537,39 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - On the film side the search `OR` goes **inside** `whereFilm`'s `AND` array, never beside it. Two `OR`
   keys spread into one object leave only the last — the same trap `films.ts` documents from the other side.
 - **Search is recall then precision.** `candidates.ts` asks Postgres which rows *resemble* the text;
-  `relevance.ts` (pure) decides what each is worth. This is the one place the catalogue writes raw SQL, and
-  what makes it safe is that **it never crosses a relation**: each query asks one table about its own text
-  and answers with ids. It does not know what a film is or who may see a draft. Every rule stays in Prisma
-  in the shape it already had, with candidate ids standing exactly where the `contains` clauses stood.
-  The version that resolved "this shelf matches, because a video on it does" in SQL would have restated
-  `whereFilm` — the thing `genres` refuses raw SQL over — and would have **leaked**: the shelf's own state
-  passes the visibility filter while the draft video's is never asked.
-- The scores Postgres computes are **thrown away**. They decide only which rows survive `CANDIDATE_LIMIT`,
-  never the order. Making SQL's similarity and the scorer agree would recreate the seam `merge.ts` guards,
-  for nothing — here a disagreement costs a near-zero row its place in the pool, not a page boundary.
-- `pg_trgm` indexes **both** `title` and `normalisedTitle`, and neither is redundant. Measured: "star wa"
-  scores 0.875 by `word_similarity` on `title` and 0.222 by `similarity` on `normalisedTitle`; "amelie"
-  against "Amélie" scores 0.400 and 1.000. `title` keeps its spaces, so it answers word order and partial
-  words; `normalisedTitle` is already accent- and case-folded, so it answers misspellings and accents — and
-  it is the only folded form that *can* be indexed, since `unaccent()` is STABLE rather than IMMUTABLE.
-- The threshold is **0.3**, which is also Postgres's own default — so pinning it with `set_config` is belt
-  and braces and a failure to pin degrades to identical behaviour. Measured, not guessed: the weakest true
-  positive scored 0.4 and the worst false positive 0.259.
-- Fuzz never touches a **description**, and never a token of three characters or fewer. A synopsis is long
-  prose where edit distance finds a near-match for almost anything, and three letters is two edits from most
-  of the dictionary — `the` would find `she`. A fuzzy search returning junk is worse than one returning
-  nothing, and these two rules are what stop it.
+  `relevance.ts` (pure) decides what each is worth. This is the one place the catalogue writes raw SQL,
+  made safe by **never crossing a relation**: each query asks one table about its own text and answers
+  with ids — it doesn't know what a film is or who may see a draft. Every rule stays in Prisma in its
+  existing shape, candidate ids standing where `contains` clauses stood. Resolving "this shelf matches
+  because a video on it does" in SQL would restate `whereFilm` and **leak**: the shelf's own state passes
+  visibility while the draft video's is never asked.
+- The scores Postgres computes are **thrown away** — they decide only which rows survive
+  `CANDIDATE_LIMIT`, never the order. Making SQL's similarity and the scorer agree would recreate the
+  seam `merge.ts` guards, for nothing.
+- `pg_trgm` indexes **both** `title` and `normalisedTitle`, neither redundant. Measured: "star wa" scores
+  0.875 by `word_similarity` on `title` vs 0.222 by `similarity` on `normalisedTitle`. `title` keeps its
+  spaces, answering word order and partial words; `normalisedTitle` is accent/case-folded, answering
+  misspellings and accents — and is the only folded form that *can* be indexed, since `unaccent()` is
+  STABLE rather than IMMUTABLE.
+- The threshold is **0.3**, also Postgres's own default — pinning it with `set_config` is belt and braces.
+  Measured, not guessed: the weakest true positive scored 0.4, the worst false positive 0.259.
+- Fuzz never touches a **description**, and never a token of three characters or fewer. A synopsis is
+  long prose where edit distance finds a near-match for almost anything, and three letters is two edits
+  from most of the dictionary — `the` would find `she`. Junk results are worse than none.
 - **A search reads a bounded pool whole; it cannot window.** `perSideWindow`'s argument assumes the per-side
   SQL order *is* the merged order, and a score Postgres never computed is not a column.
-- **Every bound on a search falls in the order of the thing it is bounding, or it changes the answer.** This
-  is the rule the first version stated and did not keep: it capped the read at `RELEVANCE_POOL` with a
-  Prisma `take`, and a Prisma `take` falls in the order of a *column*, which for a search is the alphabet.
-  A film called `Winter` sitting behind five hundred rows whose only claim was that word in a synopsis was
-  found by Postgres, discarded before scoring, and never shown. Searching a title and not being shown it is
-  the feature failing outright, and it failed on where the title fell in the alphabet — so it looked
-  intermittent, which is how it was reported. Now `CANDIDATE_LIMIT` is the only cut on the text route and it
-  falls by similarity, `LibraryService.searched` reads the direct and indirect routes **apart**, and only the
-  indirect one — cast, and a shelf reached through a video on it, both weighted below one — still carries a
-  cap. Nothing that matched the text itself is ever cut by anything but how well it matched.
+- **Every bound on a search falls in the order of the thing it is bounding, or it changes the answer.**
+  The first version didn't keep this: it capped the read at `RELEVANCE_POOL` with a Prisma `take`, which
+  falls in order of a *column* — for a search, the alphabet. A film called `Winter` sitting behind five
+  hundred rows whose only claim was that word in a synopsis was found by Postgres, discarded before
+  scoring, never shown — the feature failing outright, on where the title fell in the alphabet, so it
+  looked intermittent. Now `CANDIDATE_LIMIT` is the only cut on the text route and falls by similarity;
+  `LibraryService.searched` reads direct and indirect routes **apart**, and only the indirect one (cast,
+  and a shelf reached through a video, both weighted below one) still carries a cap.
 - Lowering `CANDIDATE_LIMIT` from 2 000 to `RELEVANCE_POOL` trades away recall on a **heavily filtered**
-  library — `?q=drama&genre=Horror` now considers the 500 best resemblances rather than 2 000 — and that is
-  the right way round. The filters run after this, so a generous limit buys tail results for a narrowed
-  view; what it cost was the top of the list on every ordinary search.
+  library — `?q=drama&genre=Horror` now considers the 500 best resemblances rather than 2 000 — the right
+  way round, since filters run after: a generous limit buys tail results for a narrowed view, at the cost
+  of the top of the list on every ordinary search.
 - Searching is keyed on whether there is a `q`, not on `sort === 'relevance'`: a search scores and
   drops unmatched rows whatever order it is then shown in, and a `q` meaning one thing under Best match and
   another under Title would be indefensible.
@@ -619,68 +579,58 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   opts in. The engine answers the **recall** half only: `relevance.ts` still ranks and Prisma still
   decides who sees what.
 - **An engine is asked about one table's own text and answers with ids.** No collection document holds
-  the titles of the videos on it, and no title document holds the names of its cast. That is the leak
-  the Prisma re-read *cannot* catch: a shelf found because a draft episode on it matched is a shelf
-  that passes every downstream filter on its own state. So the shelf-via-video route stays in Prisma
-  with `whereVisible(role)` on the episode, and `documents.spec.ts` asserts the shape rather than
-  trusting it. What a stale index can do is bounded to losing recall — `search.db-spec.ts` hands the
-  service a deleted, drafted and renamed id and pins the answer each time.
+  the titles of the videos on it, and no title document holds the names of its cast — the leak the
+  Prisma re-read *cannot* catch: a shelf found because a draft episode matched would pass every
+  downstream filter on its own state. So the shelf-via-video route stays in Prisma with
+  `whereVisible(role)` on the episode, and `documents.spec.ts` asserts the shape rather than trusting it.
+  A stale index can only lose recall — `search.db-spec.ts` hands the service a deleted, drafted and
+  renamed id and pins the answer each time.
 - Index only what `relevance.ts` scores — title, description, genres. Recall the scorer throws away is
-  worse than useless: it spends the candidate budget and then drops the row. `originalTitle`, `tags`
-  and `tagline` are populated and unindexed for exactly that reason, and indexing them is a change to
-  what a search *means*, not a setting.
-- **The index is rebuilt in full, never patched.** After every reconcile pass, at boot, and on
-  `POST /admin/search/reindex`. At this library's size that is seconds, which buys out of tracking ~40
-  write sites across unbounded reconcile loops, TMDB applies, and three cascade deletes that
-  invalidate documents they never name. Rebuilds go through a **shadow index and an atomic swap**:
-  delete-then-add leaves a window where the index is empty, and because Meilisearch writes are
-  background tasks that window is real — a query answered 138 rows one moment and 25 the next, mid-
-  rebuild, which is how it was found.
-- **People are bounded by `PEOPLE_LIMIT` (100), not by `CANDIDATE_LIMIT`.** They shared one constant by
-  sitting in the same call, and it cost: those ids spread into `creditedTo(…)` in four places, and it is
-  their *selectivity* rather than the size of the `IN` that hurts — five hundred people scattered across a
-  catalogue make `credits: { some: { personId: { in } } }` match a large share of every table, filling both
-  indirect reads and running the nested evidence selects five hundred times over. **This is also why moving
-  to an engine did not make search quicker on a real library**: Postgres reached people through a
-  similarity *threshold*, which most queries had few people above, while a `limit` is not a gate — prefix
-  matching on the last word plus typo tolerance fills it on every keystroke. Same constant, twenty times
-  the list, same code downstream. Measured on 3 800 titles / 30 000 people / 60 000 credits: `Jan` went
-  64ms → 20ms and `Bakker` 35ms → 21ms. The number is a swept knee, not a taste — 25 was tried and costs
-  real recall on an ordinary surname; past 100 the curve turns.
+  worse than useless: it spends the candidate budget then drops the row. `originalTitle`, `tags` and
+  `tagline` are populated and unindexed for that reason; indexing them changes what a search *means*.
+- **The index is rebuilt in full, never patched** — after every reconcile pass, at boot, and on
+  `POST /admin/search/reindex`. At this library's size that's seconds, which buys out of tracking ~40
+  write sites across unbounded reconcile loops, TMDB applies, and cascade deletes that invalidate
+  documents they never name. Rebuilds go through a **shadow index and an atomic swap**: delete-then-add
+  leaves a real window where the index is empty (Meilisearch writes are background tasks) — a query
+  answered 138 rows one moment and 25 the next, mid-rebuild, which is how it was found.
+- **People are bounded by `PEOPLE_LIMIT` (100), not `CANDIDATE_LIMIT`.** They shared one constant by
+  sitting in the same call, and it cost: those ids spread into `creditedTo(…)` in four places, and it's
+  their *selectivity*, not the `IN` size, that hurts — five hundred people scattered across a catalogue
+  make `credits: { some: { personId: { in } } }` match a large share of every table. **This is also why
+  moving to an engine didn't make search quicker on a real library**: Postgres reached people through a
+  similarity *threshold*, most queries clearing few, while a `limit` is not a gate — prefix matching plus
+  typo tolerance fills it on every keystroke. Measured on 3 800 titles / 30 000 people / 60 000 credits:
+  `Jan` went 64ms → 20ms, `Bakker` 35ms → 21ms. 25 was tried and cost real recall on an ordinary surname;
+  past 100 the curve turns.
 - Candidate people are filtered through `scoreText` before their ids reach any query. A name the scorer
   credits nothing for can only add rows that are then scored zero and dropped — after their evidence has
   been read. It is the same function that decides the final answer, so it can only remove work.
-- **`GET /library` reports `Server-Timing`, and only to an ADMIN.** The counts come from the candidate
-  step, which runs *before* Prisma applies visibility — and the Postgres path is not even told the role,
-  by design — so a candidate count is a number about the library rather than about the caller. The same
-  numbers are logged as a warning past `SLOW_MS` for anybody, because the person who notices a slow search
-  is rarely the person who would go looking at a header. Neither ever carries text: no query, no title, no
-  name, no id.
-- The interceptor **subscribes inside** its `AsyncLocalStorage` store. An interceptor returns an Observable
-  and the handler runs on *subscription*, so opening a store around the construction captures nothing —
-  written that way first, and the symptom was a header that never appeared and no error anywhere.
-- Search cost is dominated by the **reads**, not by recall or scoring: measured 15ms of a 20ms request on a
-  title query. The engine answers in 2–3ms and scoring in 1–2ms. Anything that makes search quicker has to
-  make the four evidence reads smaller, which is what bounding people does.
-- **The engine client uses `node:http`, not `fetch`, and that is worth 48ms a search.** Measured
-  container-to-container on one 113-id answer: `fetch` (undici) on a keep-alive connection **50.5ms**,
-  `fetch` with `Connection: close` 4.5ms, `node:http` keep-alive **1.6ms** — against Meilisearch's own
-  reported 0–1ms. The cost appears as a step between a 20-hit answer and a 60-hit one, which is where
-  the response outgrows one TCP segment: a delayed-ACK stall, not parsing. Until this was found,
-  searching *through Meilisearch was slower than searching through Postgres*, which is the only reason
-  it was looked for. `fetchUpstream` stays right for TMDB and OpenSubtitles, where a request crosses
-  the internet once and 50ms is noise.
-- End to end on a 3 800-title library, p50 of 15: Postgres 34–84ms, Meilisearch **15–36ms**. With the
-  engine stopped mid-flight the answers are identical and the timings return to the Postgres numbers —
-  the breaker stops it dialling a dead host, so a failed engine costs nothing per request.
-- **The five recall clauses are a `UNION`, never one `OR`.** Postgres answers a disjunction from indexes only
-  when *every* branch has one, so a single un-indexed clause makes all five GIN indexes unreachable and the
-  search scans the table computing a trigram similarity per row. That is what it did: measured over 20 000
-  videos, 173 ms as an `OR` against 8 ms as a `UNION` of the three title branches, and 151 ms → 43 ms for the
-  whole video query. `description` is indexed for the same reason (`gin_trgm_ops` answers `ILIKE '%x%'`,
-  49 ms → 0.5 ms). `genres` cannot be: the expression that would need indexing is over `array_to_string`,
-  which is STABLE rather than IMMUTABLE — the same refusal `unaccent()` earns — so that branch scans one
-  narrow column, which is the cost `LibraryService.genres` already weighed and took.
+- **`GET /library` reports `Server-Timing`, only to an ADMIN.** The counts come from the candidate step,
+  which runs *before* Prisma applies visibility (the Postgres path isn't even told the role) — so a
+  candidate count describes the library, not the caller. The same numbers are logged as a warning past
+  `SLOW_MS` for anybody. Neither ever carries text: no query, title, name, or id.
+- The interceptor **subscribes inside** its `AsyncLocalStorage` store. An interceptor returns an
+  Observable and the handler runs on *subscription*, so opening a store around the construction captures
+  nothing — written that way first, symptom being a header that never appeared with no error anywhere.
+- Search cost is dominated by the **reads**, not recall or scoring: measured 15ms of a 20ms request on a
+  title query, engine 2–3ms, scoring 1–2ms. Making search quicker means shrinking the four evidence reads.
+- **The engine client uses `node:http`, not `fetch`, worth 48ms a search.** Measured container-to-container
+  on one 113-id answer: `fetch` (undici) keep-alive **50.5ms**, `fetch` with `Connection: close` 4.5ms,
+  `node:http` keep-alive **1.6ms** — against Meilisearch's own 0–1ms. The cost shows as a step where the
+  response outgrows one TCP segment (a delayed-ACK stall, not parsing). Until found, searching *through
+  Meilisearch was slower than through Postgres*. `fetchUpstream` stays right for TMDB/OpenSubtitles, where
+  a request crosses the internet once and 50ms is noise.
+- End to end on a 3 800-title library, p50: Postgres 34–84ms, Meilisearch **15–36ms**. With the engine
+  stopped mid-flight the answers are identical and timings return to Postgres numbers — the breaker stops
+  it dialling a dead host, so a failed engine costs nothing per request.
+- **The five recall clauses are a `UNION`, never one `OR`.** Postgres answers a disjunction from indexes
+  only when *every* branch has one, so a single un-indexed clause makes all five GIN indexes unreachable
+  and the search scans computing trigram similarity per row: measured over 20 000 videos, 173ms as an
+  `OR` vs 8ms as a `UNION` of the title branches, 151ms → 43ms for the whole query. `description` is
+  indexed for the same reason (`gin_trgm_ops` on `ILIKE '%x%'`, 49ms → 0.5ms). `genres` can't be — the
+  expression needing indexing is over `array_to_string`, STABLE rather than IMMUTABLE — so that branch
+  scans one narrow column, a cost already weighed and taken.
 - A trigram index cannot serve a pattern under three characters, so a one- or two-letter search still scans.
   Unchanged by any of the above, and no search anybody types is two letters long.
 - `total` for a search comes from the **scored pool**, never a `count()`. Postgres was asked a generous
@@ -705,63 +655,63 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **Imported metadata** (`metadata/tmdb.mapper.ts`, `crew-role.ts`, `diff.ts` are pure; the client is the seam)
 - **The source is TMDB, not IMDb.** IMDb has no public API and its terms forbid scraping. TMDB returns the
-  IMDb id for titles and people, so the deep-links still work and are sourced legitimately.
-- **Search, preview, apply, with a person in between.** That gate is the whole provenance story: there is
+  IMDb id for titles and people, so deep-links still work, sourced legitimately.
+- **Search, preview, apply, with a person in between.** That gate is the whole provenance story: there's
   deliberately *no* per-field source column anywhere, because somebody looked at a diff and ticked boxes.
-  An importer that wrote on its own would need one on every column it touches.
-- The descriptive columns live on **both** `Collection` and `Video`. A film here is a video belonging to no
-  collection, so putting them only on the collection leaves half the library unable to carry any of them.
-  `Video.year` exists for the same reason and is editable by hand, not only by an import.
-- **A proposal with nothing to say about a field never empties it** (`diff.ts`). TMDB not knowing a tagline
-  is not a reason to delete the one somebody wrote, and without the rule, ticking everything on a
-  well-curated title empties half of it. The rule is enforced twice — in the diff and again at the write —
-  because the second is what a stale preview would otherwise get past.
+  An importer writing on its own would need one on every column it touches.
+- The descriptive columns live on **both** `Collection` and `Video`. A film here is a video belonging to
+  no collection, so putting them only on the collection leaves half the library unable to carry any.
+  `Video.year` exists for the same reason and is editable by hand, not only by import.
+- **A proposal with nothing to say about a field never empties it** (`diff.ts`). TMDB not knowing a
+  tagline isn't a reason to delete one somebody wrote — without the rule, ticking everything on a
+  well-curated title empties half of it. Enforced twice, in the diff and again at the write, since the
+  second is what a stale preview would otherwise get past.
 - The **title** is the one field never ticked by default. It is usually the first thing an admin fixes, and
   a slug does not follow a rename, so an accepted rename leaves the shared link and the name disagreeing.
 - Any title an import writes goes through `titleUpdate()`, or `normalisedTitle` rots and the "already in the
   library?" matching behind `/requests` silently stops seeing the row.
-- TMDB writes **`""`, not null**, for everything it does not know. `new Date('')` is an Invalid Date that
-  survives all the way into a column, and an empty tagline is a blank line under the title. Television also
-  renames the same ideas — `name`, `original_name`, `first_air_date` — so reading only the film spelling
-  gives a show with no title and no year and **no error**.
-- `vote_average` is `0` for anything nobody has rated. Stored, that is a confident "0.0 ★" on every obscure
+- TMDB writes **`""`, not null**, for everything it doesn't know. `new Date('')` is an Invalid Date that
+  survives into a column, and an empty tagline is a blank line under the title. Television renames the
+  same ideas — `name`, `original_name`, `first_air_date` — so reading only the film spelling gives a show
+  with no title, no year, and **no error**.
+- `vote_average` is `0` for anything nobody has rated. Stored, that's a confident "0.0 ★" on every obscure
   title, so a rating with no votes behind it is dropped.
 - `crew-role.ts` matches **whole job strings, never substrings** — the same trap as release-tag stripping.
-  TMDB's crew is full of jobs *containing* a key one ("Assistant Director", "Second Unit Director", "Music
-  Editor", "Casting Director"), and a loose match puts the first assistant director's name at the top of
-  the panel. Everything unmapped becomes `OTHER` **and keeps its `jobTitle`**.
-- **Every cast and crew member is stored; the panel trims.** A person row that was never created can never
-  be searched for, and `GET /people/:slug` already returns a filmography. `MAX_CREDITS` is 500 and the whole
-  list arrives in one response, so collapsing is purely a rendering decision.
+  TMDB's crew is full of jobs *containing* a key one ("Assistant Director", "Second Unit Director"), and a
+  loose match puts the first assistant director's name at the top of the panel. Unmapped becomes `OTHER`
+  **and keeps its `jobTitle`**.
+- **Every cast and crew member is stored; the panel trims.** A person row never created can never be
+  searched for, and `GET /people/:slug` already returns a filmography. `MAX_CREDITS` is 500, the whole
+  list arriving in one response, so collapsing is purely a rendering decision.
 - Because all but six jobs collapse to `OTHER`, a credit's identity is `(personId, role, jobTitle)`. On
   `(personId, role)` alone somebody credited as Costume Designer on a show and Stunt Coordinator on an
   episode **collides with themselves** and the show's credit vanishes from that episode — `mergeCredits`
-  keys on the job title for exactly this. Acting credits have none and key as they always did.
-- A re-import is **additive**: it never rewrites `Credit.position`, which is dragged into place by hand, and
-  never deletes a credit an admin added.
-- `PeopleService.resolveMany` exists because the per-row path cannot do this — `create` loads *every*
-  person's slug and probes for a duplicate name separately, so a 250-credit film is 500 queries and 250
-  full-table scans. It also adds each new slug to its own snapshot, or two people named the same in one
-  cast both take the same slug.
-- **A person's IMDb id is not returned with credits.** It is `/person/{id}/external_ids`, one request each,
-  so resolving eagerly costs 250 requests per film for links most people never click. They fill in behind
-  the read on the same in-memory queue `MediaService` uses for probes, and `imdbCheckedAt` records the ask
-  so somebody who genuinely has no id is not asked about on every page view.
-- `TmdbError` is an **`HttpException` (502), not a plain `Error`**. As a plain Error it became a 500
-  "Internal server error" and the one message an admin could act on never left the process. 502 because the
-  failure is upstream. (Shipped that way; caught the first time the page was opened in a browser.)
-- The **token never reaches a message or a log line**. A fetch failure can carry the request and the request
-  carries the token, so failures are described rather than interpolated — same reason `FfmpegError` drops
-  the command line.
-- Artwork goes in as `MANUAL`, reusing `ArtworkSource`, so the next reprobe cannot replace a real poster
+  keys on job title for this. Acting credits have none and key as they always did.
+- A re-import is **additive**: it never rewrites `Credit.position` (dragged into place by hand), and never
+  deletes a credit an admin added.
+- `PeopleService.resolveMany` exists because the per-row path can't: `create` loads *every* person's slug
+  and probes for a duplicate name separately, so a 250-credit film is 500 queries and 250 full-table
+  scans. It also adds each new slug to its own snapshot, or two same-named people in one cast take the
+  same slug.
+- **A person's IMDb id is not returned with credits** — it's `/person/{id}/external_ids`, one request
+  each, so resolving eagerly costs 250 requests per film for links most never click. They fill in behind
+  the read on `MediaService`'s probe queue, and `imdbCheckedAt` stops someone with no id being re-asked
+  every page view.
+- `TmdbError` is an **`HttpException` (502), not a plain `Error`**. As a plain Error it became a 500 and
+  the one message an admin could act on never left the process. 502 because the failure is upstream.
+  (Shipped that way; caught the first time the page was opened in a browser.)
+- The **token never reaches a message or a log line**. A fetch failure can carry the request, and the
+  request carries the token, so failures are described rather than interpolated — same reason
+  `FfmpegError` drops the command line.
+- Artwork goes in as `MANUAL`, reusing `ArtworkSource`, so the next reprobe can't replace a real poster
   with a frame grabbed 10% into the file. The preview *says* it would replace hand-chosen artwork rather
   than skipping quietly.
 - Everything that talks to TMDB happens **before** any write. Holding a transaction open across a network
   call ties a database connection to somebody else's latency.
-- Episodes are matched on `orderIndex` within a season. An episode with none is one ingest could not number,
-  and guessing would put the wrong synopsis on the wrong episode — it is left alone.
-- Genres are their own column, never `tags`. `tags` is curator-authored, and sharing one column means a
-  re-import cannot tell which entries it owns and may replace.
+- Episodes are matched on `orderIndex` within a season. One with none is one ingest couldn't number, and
+  guessing would put the wrong synopsis on the wrong episode — it's left alone.
+- Genres are their own column, never `tags` — curator-authored, and sharing one column means a re-import
+  can't tell which entries it owns and may replace.
 - The imported fields are **editable by hand**, which means each one appears in the zod schema *and*
   in `update()`'s `data` block. A field added to only the first is silently dropped and the PATCH still
   answers 200 — `library.db-spec.ts` asserts the round trip for every one of them, not the status.
@@ -774,40 +724,39 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   exists because the 409 already told people to unmatch and there was no way to.
 - The credits panel collapses to the **cast plus one line of crew** (`headlineCrew` in
   `app/utils/credits.ts`, pure). Capping only the cast left seven role headings each holding one chip,
-  which took more room than the cast did. The line **deduplicates names within a role**: Story and
-  Screenplay both map to WRITER, so a writer credited for both was named twice in one breath.
-- `CreditsEditor`'s person picker **searches the server**. It filtered `/people?limit=100` in the
-  browser on the reasoning that a private library's cast list is small; one import made it 111, and 100
-  is `MAX_PAGE_LIMIT`, so the people the import had just created were exactly the ones that could not be
-  picked. Still a plain input with results underneath, never a `USelectMenu` — see the note above.
-- Its reorder arrows are **hidden while a filter is active**. `move()` works on positions in the whole
-  list, so "down" in a filtered view means a place the reader cannot see.
+  taking more room than the cast did. The line **deduplicates names within a role**: Story and Screenplay
+  both map to WRITER, so a writer credited for both was named twice in one breath.
+- `CreditsEditor`'s person picker **searches the server**. It filtered `/people?limit=100` in the browser
+  on the reasoning that a private library's cast list is small; one import made it 111 — past
+  `MAX_PAGE_LIMIT` — so the people the import had just created were exactly the ones unpickable. Still a
+  plain input with results underneath, never a `USelectMenu` — see the note above.
+- Its reorder arrows are **hidden while a filter is active**: `move()` works on positions in the whole
+  list, so "down" in a filtered view means a place the reader can't see.
 - Both admin forms re-seed from the record when **`updatedAt`** changes, not on every refresh and not
-  once at setup. The collection's seed-once meant an import refreshed the page while the form still held
-  the old values, so Save wrote them back over the import; the video's `watchEffect` threw away whatever
-  was being typed. One rule fixes both, and imports made refreshes frequent enough to matter.
+  once at setup. The collection's seed-once meant an import refreshed the page while the form held old
+  values, so Save wrote them back over the import; the video's `watchEffect` threw away whatever was
+  being typed. One rule fixes both, and imports made refreshes frequent enough to matter.
 
 **Requests** (`requests/serialize.ts` is pure; `packages/shared/src/title.ts` is the comparison key)
 - `toRequestView` is the **only** thing between a request row and the name of whoever wrote it. Non-admins
-  get the title, year, comment, status and admin note — hiding those would leave a page listing nothing —
-  and never `requestedBy` or `statusChangedBy`. It is built field by field rather than spread from the row,
-  so a column added to `VideoRequest` later cannot ride along into a viewer's response; `serialize.spec.ts`
-  pins the exact key set for that reason. `mine` is the deliberate exception: it tells you which entry is
-  yours, which you already knew, and without it a page that has hidden every name has also hidden yours.
+  get title, year, comment, status and admin note — hiding those would leave a page listing nothing — and
+  never `requestedBy`/`statusChangedBy`. Built field by field rather than spread from the row, so a column
+  added to `VideoRequest` later can't ride along; `serialize.spec.ts` pins the exact key set. `mine` is the
+  deliberate exception: it tells you which entry is yours, which you already knew.
 - The existence check is scoped to **`whereVisible(role)`**. Refusing a USER because a DRAFT matches would
-  tell them the draft exists — the leak the whole visibility rule exists to prevent. Their request is
-  created instead, and the admin (who can see both) gets a `libraryMatch` hint putting the two side by side.
-  That hint is computed over the *whole* library, so handing it to a non-admin undoes the same protection.
+  tell them the draft exists — the leak visibility exists to prevent. Their request is created instead,
+  and the admin (who sees both) gets a `libraryMatch` hint putting the two side by side, computed over the
+  *whole* library — handing it to a non-admin would undo the same protection.
 - `normalisedTitle` on `Video` and `Collection` is derived from `normaliseTitle()` and written **only**
   through `titleData()`/`titleUpdate()` in `common/title.ts`. A derived column is worth nothing while it
-  disagrees with its source, and the way that rots is a new write site setting `title` alone.
-- It is deliberately **not** the slug. A slug is stable once created and drifts away from the title it came
-  from, so matching on one would miss every record that was ever renamed.
+  disagrees with its source, and it rots via a new write site setting `title` alone.
+- It's deliberately **not** the slug: a slug is stable once created and drifts from the title it came
+  from, so matching on one would miss every record ever renamed.
 - `normaliseTitle` drops a **trailing bracketed** year (`The Matrix (1999)`), never a bare one — `Blade
   Runner 2049` and `2001: A Space Odyssey` *are* their numbers. It keeps leading articles: dropping them
-  matches `The Thing` to `Thing`, which is usually right, and `The Others` to `Others`, which is not, and a
-  false match refuses a legitimate request. It never returns `''` for a title with any content, because `''`
-  is the "not comparable" sentinel that an unbackfilled row holds and that must match nothing.
+  matches `The Thing` to `Thing` (usually right) and `The Others` to `Others` (not), a false match
+  refusing a legitimate request. Never returns `''` for a title with content — `''` is the "not
+  comparable" sentinel an unbackfilled row holds, matching nothing.
 - One **open** request per normalised title, enforced by a hand-written partial unique index
   (`WHERE status IN ('NEW','SEEN','PROCESSING')`) that Prisma cannot express — re-append it if the migration
   is regenerated, like the polymorphic CHECK constraints. The service **catches** the violation rather than
@@ -827,24 +776,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - Only `/` separates path segments. A backslash is a legal character in a Linux filename and must never be
   treated as a separator.
 - Release-tag stripping matches **whole tokens** — a substring match eats real titles (`aac` inside
-  "Aachen"). `cleanTitle` also never returns empty, falling back to the raw name. That fallback masks
-  substring bugs in single-token titles, so test tag stripping with **multi-word** titles or the test proves
-  nothing.
+  "Aachen"). `cleanTitle` never returns empty, falling back to the raw name — which masks substring bugs
+  in single-token titles, so test tag stripping with **multi-word** titles or the test proves nothing.
 - The sidecar regex's stem must stay **greedy**. Lazy would split `The_Big_Sky_en_English` at the first
   short word, reading `Big` as the language.
-- Subtitle binding is exact-stem first, then title. Ambiguity is **reported, never guessed** — the wrong
+- Subtitle binding is exact-stem first, then title. Ambiguity is **reported, never guessed** — wrong
   language on the wrong episode is worse than an issue in the admin list.
-- Sidecars are matched **per folder**, never library-wide. Every show has a `Pilot`, so a wider scope makes
-  all of them ambiguous.
-- Everything served lives in `DERIVED_ROOT`, including sidecars that were already `.vtt` — copying a few
-  kilobytes beats carrying a "which root?" question through every read, and it survives the source moving.
-  `sourceKey` holds the media path the sidecar came from; without it, reconcile cannot notice a deletion.
+- Sidecars are matched **per folder**, never library-wide — every show has a `Pilot`, so a wider scope
+  makes all of them ambiguous.
+- Everything served lives in `DERIVED_ROOT`, including sidecars already `.vtt` — copying a few kilobytes
+  beats carrying a "which root?" question through every read, and it survives the source moving.
+  `sourceKey` holds the media path the sidecar came from; without it reconcile can't notice a deletion.
 - Decide a subtitle's charset **before** converting, not after. Legacy `.srt` is often Windows-1252, and
-  ffmpeg either fails or emits mojibake — a conversion that already threw cannot be rescued by a retry.
-- A subtitle that claims to be WebVTT is sniffed for the `WEBVTT` signature — on upload, and on a download a
-  provider labelled `.vtt`. An SRT accepted as a `.vtt` loads as an empty track: the viewer sees the language
-  listed and nothing ever appears. (Upload refuses anything else outright; a download converts instead,
-  because nobody chose its format.)
+  ffmpeg either fails or emits mojibake — a conversion that already threw can't be rescued by a retry.
+- A subtitle claiming to be WebVTT is sniffed for the `WEBVTT` signature — on upload, and on download when
+  a provider labelled `.vtt`. An SRT accepted as `.vtt` loads as an empty track: language listed, nothing
+  ever appears. (Upload refuses anything else outright; download converts, since nobody chose its format.)
 - **At most** one `isDefault` per video. `<track default>` on two tracks is undefined behaviour, and *none*
   is a legitimate answer — see below.
 - The default track is a property of the **video**, not of a track: `PUT /videos/:id/subtitles/default`,
@@ -942,29 +889,26 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   Regeneration is an explicit `regenerateSlug: true`. Collections and **videos** are unique library-wide —
   a video is addressed at `/v/<slug>` on its own, so there is no collection for a scope to mean — and
   seasons only within their collection.
-- A video belongs to any number of collections through **`CollectionVideo`**, which carries `seasonId` and
-  `orderIndex`: those say where it sits *in one collection*, and the same episode can be episode 3 of a show
-  and item 1 of a best-of row. `seasonId` must belong to `collectionId`; Prisma cannot say that across a
-  relation, so the service does. Deleting a collection takes its seasons and memberships and **leaves the
-  videos standing** — a shelf is not the books.
-- Every "which collection" filter on `GET /videos` is built as **one** clause (`membershipFilter`). They all
-  constrain the same relation, so spread separately they overwrite each other rather than combining —
-  `?collectionId=X&seasonId=Y` silently dropped the collection and answered about the season alone.
-  `?film=true` is the odd one: it is a fact about the *seasons behind* the join, so it is `none`/`some`
-  across two relations and cannot be folded into that membership object at all. There is no column saying a
-  video is a film, and there must not be — it is a fact about the join, and a column would be a second
-  answer to drift. It is returned under **`AND`**, not as bare keys: the clause contains an `OR`, `?q=`
-  builds another, and two `OR` keys spread into one object leave only the last.
+- A video belongs to any number of collections through **`CollectionVideo`**, carrying `seasonId` and
+  `orderIndex`: those say where it sits *in one collection*, so the same episode can be episode 3 of a
+  show and item 1 of a best-of row. `seasonId` must belong to `collectionId`; Prisma can't say that
+  across a relation, so the service does. Deleting a collection takes its seasons and memberships and
+  **leaves the videos standing** — a shelf is not the books.
+- Every "which collection" filter on `GET /videos` is built as **one** clause (`membershipFilter`). They
+  all constrain the same relation, so spread separately they overwrite each other — `?collectionId=X&seasonId=Y`
+  silently dropped the collection and answered about the season alone. `?film=true` is the odd one: a
+  fact about the *seasons behind* the join, so it's `none`/`some` across two relations and can't fold
+  into that object at all. There's no column saying a video is a film — a column would be a second answer
+  to drift. Returned under **`AND`**, not bare keys, since two `OR` keys spread into one object leave only
+  the last.
 - **A film is a video that no season-holding collection claims** (`common/films.ts`). Seasons are the only
   thing in the model that says "instalment of something": ingest turns season folders into a collection
-  *with* seasons and a folder of eight films into a collection with none. It used to mean "a video in no
-  collection at all", which made every film on a shelf unfindable — the shelf was one card and the films
-  were on it, so they were nowhere. Deliberately **not** "the membership has no `seasonId`": a special filed
-  straight under a show is an extra of that show, and a null season says only that nobody filed it. The
-  season half is **role-blind** — a video that is an episode of a show one caller cannot see and an item on
-  a shelf they can is not a film for anybody, and narrowing that half per role could only ever leak.
-  `?film=false` is the rule's opposite (the episodes), **not** `whereFilm`'s complement, which would make it
-  a way to enumerate the episodes of shows the caller cannot see.
+  *with* seasons and a folder of eight films into one with none. It used to mean "a video in no collection
+  at all", making every film on a shelf unfindable — the shelf was one card and the films were on it, so
+  nowhere. Deliberately **not** "the membership has no `seasonId`": a special filed straight under a show
+  is an extra of that show. The season half is **role-blind** — narrowing it per role could only leak.
+  `?film=false` is the rule's opposite (the episodes), **not** `whereFilm`'s complement, which would let
+  it enumerate episodes of shows the caller can't see.
 - The word `standalone` survives in `ingest/structure.ts`, `uploads.service.ts` and `admin/media.vue`, where
   it still means the true, different thing: a folder holding one video becomes no collection. Leave it.
 - `Collection.seasonCount` is **TMDB's** count of the whole show; `seasonsHere`/`videosHere` on the API
@@ -974,13 +918,12 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   route is declared before `:slug` or Express matches `resolve` as a collection slug.
 - Postgres treats NULLs as distinct, so composite uniques containing nullable columns do not prevent
   duplicates. Enforce those in the service layer.
-- `ListItem.position` is deliberately not unique — a unique index collides during drag-reordering. `Video.orderIndex`
-  is not unique for the same reason, which is why `PATCH /collections/:id/videos/order` rewrites a season's
-  whole sequence in one transaction rather than swapping pairs. It sets `seasonId` **and** `orderIndex`
-  together, because dragging an episode into a season changes both at once; `seasonId: null` is a real value
-  meaning "directly in the collection", which is where films live. Like `credits/reorder` it names both
-  parents — the collection in the URL, the season in the body — and refuses ids belonging to anything else,
-  or a reorder becomes a way to pull episodes out of a show nobody mentioned.
+- `ListItem.position` is deliberately not unique — a unique index collides during drag-reordering.
+  `Video.orderIndex` is not unique for the same reason, which is why `PATCH /collections/:id/videos/order`
+  rewrites a season's whole sequence in one transaction rather than swapping pairs. It sets `seasonId`
+  **and** `orderIndex` together, since dragging an episode into a season changes both at once;
+  `seasonId: null` means "directly in the collection", where films live. Like `credits/reorder` it names
+  both parents and refuses ids belonging to anything else.
 
 **Frontend**
 - During SSR, `useFetch`/`$fetch` run in Nitro and do **not** forward the browser cookie. Pass
@@ -990,70 +933,59 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - A video is shown at **`/v/<slug>`**, its own page. `videoPath` therefore cannot return null any more — it
   used to, for a video that arrived without a collection, which is now simply what a standalone film is.
   `/c/<collection>/…` still resolves so shared links do not rot, and redirects a video to its canonical URL.
-- `videoPath` (`/v/<slug>`, describes) and `playPath` (`/watch/<slug>`, plays) are picked between on a rule,
-  not by feel: **inside a collection it plays** — an episode row, a collection's grid, the "more from"
-  shelf — as do Continue Watching and History, because the choice was already made. **Browse, My List and
-  curated rows describe**, because there the question is still what to watch. The **home hero** is on that
-  side of the rule now rather than being the exception to it: it features a new arrival, which is
-  precisely something nobody has decided about yet, and a collection has nothing single to play in any
-  case. `videoPath` was called
-  `watchPath`, which named the one route it does *not* build while `playPath` sat beside it building exactly
-  that; every bug here is "which of the two did I call", so the names have to point at their own routes.
+- `videoPath` (`/v/<slug>`, describes) and `playPath` (`/watch/<slug>`, plays) are picked between on a
+  rule, not by feel: **inside a collection it plays** — an episode row, a collection's grid, the "more
+  from" shelf — as do Continue Watching and History, since the choice was already made. **Browse, My List
+  and curated rows describe**, since there the question is still what to watch. The **home hero** is on
+  that side of the rule too: it features a new arrival, precisely something nobody has decided about yet,
+  and a collection has nothing single to play anyway. `videoPath` was called `watchPath`, naming the one
+  route it does *not* build while `playPath` sat beside it building exactly that — so the names now point
+  at their own routes.
 - **The player's Previous/Next are scoped by `?from=<collection-slug>`, which `playPath` takes as an
-  optional second argument.** It has to travel in the URL: a video belongs to any number of collections and
-  `seasonId`/`orderIndex` sit on the *membership*, so the same episode is episode 3 of a show and item 1 of
-  a best-of row, and the player cannot derive one running order from the video alone. Reaching for
-  `collections[0]` is the tempting fix and is wrong for anything in two collections. Every surface on the
-  "plays" side of the rule above passes it; Continue Watching and History do not, because they hold a video
-  and a position with no collection in hand, and no stepper is the honest answer there.
-- **`GET /videos?collectionId=…` is sorted by `title, id` and is not an episode order.** That is deliberate
-  — a library-wide listing has no single running order to offer — and reading a sequence off it is how the
-  outro's "Next episode" spent months going to the alphabetically next title, capped at 100. The order comes
-  from `GET /collections/:slug`, through `episodeSequence` in `app/utils/episode-sequence.ts`.
-- **`MEMBERSHIP_ORDER` is not cross-season order either.** It opens `{ seasonId: 'asc' }` and `seasonId` is
-  a **cuid**, so the videos arrive grouped by season with the seasons in an order nobody chose. It is a
-  *total* order for paging, which is a different job. Season numbers are on the response's separate
-  `seasons` list, which is why `episodeSequence` takes both halves. Invisible on the collection page, which
-  renders one season at a time and never compares two.
+  optional second argument.** Must travel in the URL: a video belongs to any number of collections and
+  `seasonId`/`orderIndex` sit on the *membership*, so the same episode is episode 3 of a show and item 1
+  of a best-of row — the player can't derive one running order from the video alone. `collections[0]` is
+  the tempting fix and is wrong for anything in two collections. Every "plays" surface passes it; Continue
+  Watching and History don't, since they hold a video and position with no collection in hand.
+- **`GET /videos?collectionId=…` is sorted by `title, id` and is not an episode order.** Deliberate — a
+  library-wide listing has no single running order — and reading a sequence off it is how the outro's
+  "Next episode" spent months going to the alphabetically next title. The order comes from
+  `GET /collections/:slug`, through `episodeSequence` in `app/utils/episode-sequence.ts`.
+- **`MEMBERSHIP_ORDER` is not cross-season order either.** It opens `{ seasonId: 'asc' }` and `seasonId`
+  is a **cuid**, so videos arrive grouped by season with the seasons in an order nobody chose — a *total*
+  order for paging, a different job. Season numbers are on the response's separate `seasons` list, which
+  is why `episodeSequence` takes both halves.
 - **`episodeSequence`/`neighbours` are not a second `nextEpisode`, and must not become one.** `nextEpisode`
-  (the API's, and the only definition of it) answers *where to resume* — the first unfinished episode — and
-  has no mirror. This answers *what physically follows*, which is the only thing a Previous and a Next
-  button can mean, because pressing one then the other has to return you where you were. A surface wanting
-  "carry on watching this show" wants the API's answer, not this one.
-- A video that is not in the sequence gets **no stepper**, which is one answer covering a `?from=` naming a
-  collection it is not in (the URL is writable by anyone), one the caller cannot see, and a response
-  truncated past its embedded-video cap. Offering nothing beats offering a wrong neighbour.
+  answers *where to resume* — the first unfinished episode. This answers *what physically follows*, the
+  only thing Previous/Next can mean, since pressing one then the other must return you where you were. A
+  surface wanting "carry on watching this show" wants the API's answer, not this one.
+- A video not in the sequence gets **no stepper** — covering a `?from=` naming a collection it's not in
+  (writable by anyone), one the caller can't see, and a response truncated past the embedded-video cap.
+  Offering nothing beats a wrong neighbour.
 - **`browse.vue` lists collections *and* films**, merged into one grid. It listed only collections, so a
-  film could never appear there however often it was published — a folder of eight films is one shelf, and
-  the films are *on* it rather than on none. Reported twice: "I published it and browse does not show it",
-  then "browse does not return individual movies when they are part of a collection". Episodes stay out
-  deliberately: they are reachable through their show, and listing them would bury four films under forty
-  episodes of one of them. It asks **`GET /library`** for both halves at once; it used to fetch
-  `/collections` and `/videos?film=true` separately and stitch them together here, which is why the merge
-  moved to the API — see **The catalogue** above.
+  film could never appear however often it was published — a folder of eight films is one shelf, films
+  *on* it rather than on none. Episodes stay out: reachable through their show, and listing them would
+  bury four films under forty episodes of one. It asks **`GET /library`** for both halves at once; it used
+  to fetch `/collections` and `/videos?film=true` separately and stitch them together here, which is why
+  the merge moved to the API — see **The catalogue** above.
 - Every filter **reaches** the URL, mapped by `app/utils/browse-filters.ts` (pure, specced). A narrowed
   library is something you share and come back to, and none of that survives state held only in a `ref`.
   Changing any filter resets `offset`, or narrowing while on page seven lands on an empty page that looks
   exactly like an empty library.
-- **The URL is no longer where the question lives, and that is the whole of the search box feeling quick.**
-  `browse.vue` holds the filters in a `ref` and writes them out on a slower clock (`SETTLE_MS`, 600ms)
-  than it asks the API on (`INSTANT_MS`, 150ms), because the two are wanted for different things: the grid
-  should follow the box as closely as the server can answer, while the address bar only has to agree
-  eventually. It used to be one 250ms debounce doing both, so nothing could move until a `router.replace`
-  had landed — measured on a 3 800-title library, the wait between the last keystroke and the answer went
-  **245ms → 133ms**, and the server was only 45ms of either. `INSTANT_MS` is deliberately not lower: near
-  90ms is where a search stops being noticeable, and asking that often is only kind to a server that
-  answers in single digits.
-- The cost is a **second copy of the state**, so one watcher keeps them honest when the URL is the copy
-  that moved — a link into `/browse` from a page already on it, or a back navigation. It follows the
-  **box** as well as the filters: the box is a third copy of the same text and the only one anybody can
-  see. A hard load re-runs setup and seeds all three for free, which is why a test that arrives with
-  `page.goto` proves nothing here — the first version of that test passed with the sync deleted.
+- **The URL is no longer where the question lives, and that's the whole of the search box feeling quick.**
+  `browse.vue` holds filters in a `ref` and writes them out on a slower clock (`SETTLE_MS`, 600ms) than it
+  asks the API on (`INSTANT_MS`, 150ms): the grid follows the box as closely as the server can answer,
+  while the address bar only has to agree eventually. It used to be one 250ms debounce doing both, so
+  nothing could move until a `router.replace` landed — measured on a 3 800-title library, the wait between
+  keystroke and answer went **245ms → 133ms**. `INSTANT_MS` is deliberately not lower: near 90ms is where
+  a search stops being noticeable.
+- The cost is a **second copy of the state**, kept honest by one watcher when the URL is the copy that
+  moved — a link into `/browse` already there, or a back navigation. It follows the **box** too: a third
+  copy of the same text, the only one anybody sees. A hard load re-runs setup and seeds all three for
+  free, which is why a test arriving via `page.goto` proves nothing here.
 - **`fill()` is gated on the box having settled and the first page having landed.** `loadMore` can drop a
-  stale *answer* but cannot un-ask: scrolling while a new question's first page is in flight reaches it
-  with a `total` describing the previous list, and the window that comes back is appended to the new one.
-  Measured, so the comment does not overclaim: at 1280×720 and at 1600×2200 one search costs exactly one
-  request with or without the gate, because fifty cards are taller than both viewports.
+  stale *answer* but can't un-ask: scrolling while a new question's first page is in flight reaches it
+  with a `total` describing the previous list, and the returned window gets appended to the new one.
 - The genre control is filled from **`GET /library/genres`**, never a hardcoded list: `genres` is free text
   as far as Postgres is concerned, so a control offering a vocabulary the library does not use is a control
   that mostly returns nothing.
@@ -1065,29 +997,25 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   off that list, and not worth displacing for a chip.
 - Upload progress needs `XMLHttpRequest`; `fetch` still gives no upload progress events.
 - **The player starts itself from `onLoadedMetadata`, after the resume seek — never with the `autoplay`
-  attribute.** The `<video>` and its `<source>` are server-rendered, so the attribute has the browser open
-  at 0:00 while Vue is still hydrating and only then be seeked to the resume point: a second of the wrong
-  scene, out loud, on every resume. `play()` is attempted once per load, and a browser that refuses an
-  unmuted play it saw no click for rejects it — which is left alone, because the poster and the controls
-  are already on screen and muting instead would start a film silently. Playwright does **not** pass
-  `--autoplay-policy=no-user-gesture-required`, so `playwright.config.ts` does; without it a fresh headless
-  profile refuses, and the test asserting playback fails against working code. Tests about *where a seek
-  lands* call `freeze()` (`e2e/viewer.spec.ts`), which pauses **and** re-pauses on `play`, since the
-  autoplay attempt can settle after a bare `pause()`.
+  attribute.** The `<video>` and its `<source>` are server-rendered, so the attribute opens the browser at
+  0:00 while Vue is still hydrating, only then seeking to the resume point: a second of the wrong scene,
+  out loud, on every resume. `play()` is attempted once per load; a browser refusing an unmuted play it
+  saw no click for is left alone, since the poster and controls are already on screen and muting instead
+  would start a film silently. Playwright doesn't pass `--autoplay-policy=no-user-gesture-required`, so
+  `playwright.config.ts` does. Tests about *where a seek lands* call `freeze()` (`e2e/viewer.spec.ts`),
+  which pauses **and** re-pauses on `play`, since the autoplay attempt can settle after a bare `pause()`.
 - **The stored volume is applied at the top of `onMounted`, before anything can call `play()`.** That
-  handler's `readyState >= 1` branch calls `onLoadedMetadata` synchronously, which starts playback — so
-  restoring afterwards sounds the opening seconds at the old volume and only then turns it down, the
-  audible twin of the resume-seek bug above. `parseVolume` (`app/utils/volume.ts`) returns `null` for
-  anything unusable rather than a number: `el.volume` **throws** on `NaN` or a value outside 0–1, and a
-  throw in `onMounted` takes the whole player down. `muted` is stored beside the level, never folded into
-  it — a zero would lose the level to come back to — and only a literal `true` mutes, since coercing reads
-  the string `"false"` as a reason to start something silently. Both `localStorage` calls are wrapped:
-  Safari in private mode throws on the API itself, and losing a preference must not stop playback.
-- **`/watch/:slug` never reaches `networkidle`, so `visit()` cannot open it.** A playing video keeps issuing
-  range requests, so the wait inside `visit` runs until the *test* times out — a hang with no failing
-  assertion to point at the cause. `visitPlayer()` (`e2e/fixtures.ts`) waits for `readyState >= 1` instead,
-  which is what the `networkidle` was standing in for. Any reload of the player page needs the same
-  treatment. (Found by running the suite: the arrival test passed and the hard-load test hung.)
+  handler's `readyState >= 1` branch calls `onLoadedMetadata` synchronously, starting playback — so
+  restoring afterwards sounds the opening seconds at the old volume, the audible twin of the resume-seek
+  bug above. `parseVolume` (`app/utils/volume.ts`) returns `null` for anything unusable rather than a
+  number: `el.volume` **throws** on `NaN` or a value outside 0–1, and a throw in `onMounted` takes the
+  whole player down. `muted` is stored beside the level, never folded into it — a zero would lose the
+  level to come back to. Both `localStorage` calls are wrapped: Safari in private mode throws on the API
+  itself, and losing a preference must not stop playback.
+- **`/watch/:slug` never reaches `networkidle`, so `visit()` cannot open it.** A playing video keeps
+  issuing range requests, so the wait inside `visit` runs until the *test* times out — a hang with no
+  failing assertion. `visitPlayer()` (`e2e/fixtures.ts`) waits for `readyState >= 1` instead. Any reload
+  of the player page needs the same treatment.
 
 **Frontend** (`apps/web`, in addition to the notes above)
 - **Nothing talks to the API except `useApi` / `useApiData`** (`app/composables/useApi.ts`). During SSR a
@@ -1106,215 +1034,184 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `private, no-cache`) rather than carrying a lifetime. The storage key is stable across replacements, so
   any `max-age` above zero serves the poster an admin has just replaced.
 - **Posters go on cards, banners go in wide slots.** `MediaCard` shows 2:3 everywhere — home shelves,
-  browse, My List, a collection's grid — and the exceptions are `EpisodeRow` (inside a show you are
-  choosing a moment, not a title) and every `HeroBackdrop`. `MediaCard`'s `shape` prop existed for months
-  with **no caller ever passing it**, so every card rendered 16:9 and half the design was dead code; a
-  wrong shape fills its box and merely looks badly framed, which is why `viewer.spec.ts` asserts the
-  *request* rather than the rendered element.
+  browse, My List, a collection's grid — except `EpisodeRow` (choosing a moment, not a title) and every
+  `HeroBackdrop`. `MediaCard`'s `shape` prop existed for months with **no caller ever passing it**, so
+  every card rendered 16:9; `viewer.spec.ts` asserts the *request* rather than the rendered element.
 - Card hover is a **border**, never an overlay. A centred play/info glyph covered the one thing a card
-  exists to show, on the card being pointed at. Removing it has to delete the element, not hide it —
-  `visible.spec.ts` fails a control that is `opacity: 0` and still focusable.
-- **Anything laid over a `.card-lift` needs a `z-index` above 1.** That hover rule scales the card *and*
-  raises it, and a control on top of it at `z-index: auto` is then covered by the one gesture that
-  reaches for it: nobody presses a button on a card without crossing the card. My List's remove button —
-  the only way to take something off that list — was plainly there at rest and gone the instant you went
-  for it, with the click landing on the card's link. Visible at rest is not the same as reachable.
-- A nav link to a route with no page is a broken app, not a placeholder — links land with their pages. The
-  reverse is just as bad: `/admin/collections/[slug]` and `/admin/comments` are unreachable without their
-  sidebar entries, and a page nobody can navigate to gets no use and no bug reports.
+  exists to show. Removing it has to delete the element, not hide it — `visible.spec.ts` fails a control
+  that's `opacity: 0` and still focusable.
+- **Anything laid over a `.card-lift` needs a `z-index` above 1.** That hover rule scales and raises the
+  card, so a control at `z-index: auto` is covered by the gesture that reaches for it. My List's remove
+  button was plainly there at rest and gone the instant you went for it, click landing on the card's
+  link. Visible at rest isn't the same as reachable.
+- A nav link to a route with no page is a broken app, not a placeholder. The reverse is just as bad:
+  `/admin/collections/[slug]` and `/admin/comments` are unreachable without their sidebar entries.
 - The admin layout has a real `<main>`. It had none — only `<aside>` and a bare `<div>` — so there was no
-  landmark to skip the nav to, and `main a[…]` (which every viewer-side test uses) matched nothing there.
-- `refDebounced` is VueUse and **not a dependency**. Debounce with a `setTimeout` cleared in `watch`, the way
-  `browse.vue` does; without one, every keystroke is a request and the answers can land out of order, so the
-  list settles on whatever the *slowest* one returned. VueUse *resolves* — it is a transitive of `@nuxt/ui` —
-  so `useInfiniteScroll` and friends import cleanly and are still a phantom dependency.
-- `/browse` loads on scroll, and the loop that fills the viewport measures `getBoundingClientRect()` rather
-  than reading the `IntersectionObserver`'s own flag. An observer reports *changes*, delivered at the end of
-  a frame, so after appending cards it has not necessarily fired again and a loop waiting on it stalls with
-  the sentinel still on screen. That is the ordinary case on a wide monitor, not a corner: one page of fifty
-  is under three rows at 4K, so the first load never reaches the fold and the observer, having already said
-  "visible", has nothing to add. The observer is the cheap trigger; the rectangle is the answer.
+  landmark to skip the nav to, and `main a[…]` (every viewer-side test) matched nothing there.
+- `refDebounced` is VueUse and **not a dependency**. Debounce with a `setTimeout` cleared in `watch`, the
+  way `browse.vue` does; without one, every keystroke is a request and answers can land out of order, so
+  the list settles on whatever the *slowest* one returned. VueUse *resolves* as a transitive of
+  `@nuxt/ui`, so `useInfiniteScroll` imports cleanly and is still a phantom dependency.
+- `/browse` loads on scroll, and the loop that fills the viewport measures `getBoundingClientRect()`
+  rather than the `IntersectionObserver`'s own flag. An observer reports *changes* at end of frame, so
+  after appending cards it hasn't necessarily fired again and a loop waiting on it stalls with the
+  sentinel still on screen — the ordinary case on a wide monitor: one page of fifty is under three rows
+  at 4K, so the first load never reaches the fold. The observer is the cheap trigger; the rectangle is
+  the answer.
 - The scroll loader **must** stop at `MAX_LIBRARY_OFFSET` (10 000). `listLibrarySchema` refuses a deeper
   offset with a **400 rather than clamping**, and `e2e/fixtures.ts` fails every test on the page for any
-  response ≥ 400 — so a loader that keeps going does not degrade, it takes the whole suite down with it.
-  `nextBrowsePage` in `browse-paging.ts` is the one place that decides, and it is specced.
+  response ≥ 400 — a loader that keeps going takes the whole suite down with it. `nextBrowsePage` in
+  `browse-paging.ts` is the one place that decides, and it's specced.
 - Appending offset pages is only sound because `apps/api/src/library/merge.ts` sorts on a **total** order
   ending in `id`. Break that and the same card arrives twice under one `:key`.
 - **A screen asking for `MAX_PAGE_LIMIT` and printing `total` is claiming a number it cannot show.** Every
   `Page<T>` carries `total` and `hasMore`, and the recurring bug is reading the first into a heading while
   ignoring the second: `/admin/people` and `/admin/library` both shipped as "one window of a hundred, and
-  stop", the library with *two* of them, so "Videos (1284)" sat over a hundred rows and the only records an
-  admin could open were the ones whose titles they already knew — on the screens whose whole job is finding
-  a record. `loadMoreLabel` and `appendWindow` in `app/utils/paging.ts` are the shared answer; the offer is
-  counted against **`total`**, never `hasMore`, which stops being the question the moment a second window is
-  appended. The label names *what is left* ("Load 12 more (of 412)") because promising a whole window for the
-  twelve that remain reads, when twelve arrive, as eighty-eight records having gone missing.
-- `appendWindow` dedupes by id rather than concatenating. Offset paging over a list that moves hands back a
-  row already on screen — a delete in an earlier window shifts every later one up by exactly one — and two
-  rows under one `:key` is a rendering bug, not a duplicate.
-- **A filter change must drop the appended windows**, which is why both pages funnel every change through one
-  `ask()` that resets them: window seven of the old question left underneath window one of the new one is a
-  list whose rows never matched what the box says, with nothing on screen admitting it. The search box is
-  debounced into `ask()` for the same reason — a mid-word refetch replaces window one while the windows
-  behind it were fetched for a different question. On the library the URL is written from what was *asked*
-  rather than from the controls, so the shareable link is the question the lists are answering.
-- Both load-more tests assert **both directions** — past one window the button fetches the next, within one
-  window it is not offered at all — rather than skipping on a small library. A skip that never runs reports
-  green, and the dev library is under a hundred titles, so the skip would have been the only branch anyone
-  ever saw.
-- The poster wall is `.poster-grid` in `main.css`, used by browse, my-list and the collection page — it was
+  stop", so "Videos (1284)" sat over a hundred rows and the only records openable were ones whose titles
+  were already known. `loadMoreLabel`/`appendWindow` in `app/utils/paging.ts` are the shared answer; the
+  offer is counted against **`total`**, never `hasMore`. The label names *what is left* ("Load 12 more (of
+  412)") since promising a whole window for the twelve that remain reads as records gone missing.
+- `appendWindow` dedupes by id rather than concatenating. Offset paging over a list that moves hands back
+  a row already on screen — a delete in an earlier window shifts every later one up by one — and two rows
+  under one `:key` is a rendering bug, not a duplicate.
+- **A filter change must drop the appended windows**, which is why both pages funnel every change through
+  one `ask()` that resets them: window seven of the old question left underneath window one of the new
+  one is a list whose rows never matched the box, with nothing on screen admitting it. The URL is written
+  from what was *asked*, not the controls, so the shareable link is the question the list answers.
+- Both load-more tests assert **both directions** — past one window the button fetches the next, within
+  one window it's not offered — rather than skipping on a small library. A skip that never runs reports
+  green, and the dev library is under a hundred titles.
+- The poster wall is `.poster-grid` in `main.css`, used by browse, my-list and the collection page — was
   three copies of one arbitrary-value class. `auto-fill`, never `auto-fit`: with `1fr` tracks the two are
-  identical whenever a row is full, which makes the swap look free, but `auto-fit` collapses empty tracks and
-  stretches a three-result search into three enormous posters.
-- **A poster tile's floor is `11rem` at every viewport width above 400px.** Letting it grow on large screens
-  was tried — a `clamp` reaching 14rem past ~2930px, on the theory that 4K wants a bigger picture as well as
-  more of them — and rejected on sight on a real 4K screen: the wall is made of the same cards the rest of the
-  app draws, so enlarging them only there makes the page look zoomed. Extra width buys columns and margin,
-  never size.
-  **Below 400px the floor drops and the wall is two explicit columns**, because 11rem cannot fit two tracks
-  there: `.page-shell` leaves 343px at 375px, and two 176px tiles with a 1rem gap need 368px, so `auto-fill`
-  found room for exactly one and every phone got a single poster filling the screen. The exception is a
-  `@media (max-width: 25rem)` override of `grid-template-columns` alone, and it is **continuous** with the
-  rule it bends — at exactly 400px it produces a 176px tile, identical to what `auto-fill` produces one pixel
-  wider, shrinking to 163.5px at 375px. Seven per cent under the floor, against ninety-five per cent over it.
-  Stated as `repeat(2, minmax(0, 1fr))` rather than a `min()` expression inside the `auto-repeat`, so the
-  exception stays bounded and greppable instead of becoming a formula that changes the tile at every width —
-  which is what the `clamp` was removed for. `minmax(0, 1fr)`, never `1fr`: `1fr` is `minmax(auto, 1fr)` and
-  one unbroken title collapses the grid back to a single column.
-- **Every page is `.page-shell` and nothing else.** One width, one gutter scale, the header included — so
-  moving between two routes never shifts the content sideways. `/browse` and `/my-list` were briefly given a
-  wider variant, on the reasoning that a wall of posters wants width in a way a synopsis does not: at 4K it
-  put sixteen columns 310px from the edge where every other page starts at 1115px. It was **removed on
-  sight** — the one page that does not line up does not read as using the space, it reads as broken, and
-  `/browse` is a click away from `/`. A wide treatment, if it ever returns, belongs to every full-width
-  surface at once rather than to one route. The cap does cost a 4K screen real estate (nine columns in the
-  middle of ~1000px of background either side) and that was accepted deliberately; do not "fix" it for one
-  page.
-- **An admin table that does not fit scrolls sideways; it does not restack.** `.table-scroll` *replaces*
-  the wrapper's `overflow-hidden` rather than nesting inside it — that one keyword was the whole defect,
-  since any non-`visible` overflow still clips the rounded corners, and the border then stays put while the
-  content moves under it. The `<table>` needs `min-w-max` alongside `w-full`: `w-full` alone re-clips,
-  `min-w-max` alone lets a short table shrink. Sideways rather than a card view below `sm` because the
-  invite table on `/admin/users` has always done this deliberately, and two table idioms in one admin area
-  is worse than one imperfect one — a `display: block` card view also drops the table's implicit ARIA roles
-  and doubles the markup `visible.spec.ts` walks, half of it markup nobody looks at on a desktop. The
-  identifying column is first in all of them, so the useful half is on screen before anyone scrolls.
+  identical whenever a row is full, but `auto-fit` collapses empty tracks and stretches a three-result
+  search into three enormous posters.
+- **A poster tile's floor is `11rem` at every viewport width above 400px.** Letting it grow on large
+  screens was tried — a `clamp` reaching 14rem past ~2930px — and rejected on sight on a real 4K screen:
+  enlarging the wall's cards there alone makes the page look zoomed. Extra width buys columns and margin,
+  never size. **Below 400px the floor drops and the wall is two explicit columns**, since 11rem can't fit
+  two tracks there: `.page-shell` leaves 343px at 375px, and two 176px tiles with a 1rem gap need 368px,
+  so `auto-fill` found room for exactly one and every phone got a single poster filling the screen. The
+  `@media (max-width: 25rem)` override is **continuous** with the rule it bends — at exactly 400px it
+  produces a 176px tile identical to `auto-fill`'s, shrinking to 163.5px at 375px, 7% under the floor
+  against 95% over it. Stated as `repeat(2, minmax(0, 1fr))` rather than a `min()` inside the auto-repeat,
+  so the exception stays bounded and greppable. `minmax(0, 1fr)`, never `1fr`: `1fr` is
+  `minmax(auto, 1fr)` and one unbroken title collapses the grid to a single column.
+- **Every page is `.page-shell` and nothing else.** One width, one gutter scale, header included — so
+  moving between routes never shifts content sideways. `/browse` and `/my-list` briefly had a wider
+  variant, reasoning a wall of posters wants width a synopsis doesn't: at 4K it put sixteen columns 310px
+  from the edge where every other page starts at 1115px. **Removed on sight** — the one page not lining up
+  reads as broken, not as using the space. A wide treatment, if it returns, belongs to every full-width
+  surface at once, not one route.
+- **An admin table that doesn't fit scrolls sideways; it doesn't restack.** `.table-scroll` *replaces* the
+  wrapper's `overflow-hidden` rather than nesting inside it — any non-`visible` overflow still clips the
+  rounded corners, so the border stays put while content moves under it. The `<table>` needs `min-w-max`
+  alongside `w-full`: `w-full` alone re-clips, `min-w-max` alone lets a short table shrink. Sideways
+  rather than a card view below `sm` because the invite table on `/admin/users` always did this, and two
+  table idioms in one admin area is worse than one imperfect one. The identifying column is first in all
+  of them, so the useful half is on screen before anyone scrolls.
 - **A secure-context API cannot be called directly — the dev server is reached over plain HTTP.**
-  `crypto.randomUUID` and `navigator.clipboard` exist only on HTTPS or `localhost`, and are `undefined`
-  on `http://192.168.x.x:3100`, which is exactly how the app is opened from a phone on the LAN. The
-  player called `crypto.randomUUID()` at setup, so hydration threw and **Nuxt replaced the page with its
-  own 500** — reported as "the video page 500s", though nothing server-side had failed. `newPlaySessionId`
-  in `app/utils/` falls back to `crypto.getRandomValues`, which carries no such restriction, and still
-  produces a **real UUID** because `heartbeatSchema` declares `playSessionId: z.uuid()` — anything merely
-  unique would be refused on every beat and lose the view count silently. The clipboard copy on
-  `/admin/users` is the same trap on the one value shown exactly once, and now says so rather than
-  throwing into a void. The browser suite cannot catch this class: it runs on `localhost`, which *is* a
-  secure context.
+  `crypto.randomUUID` and `navigator.clipboard` exist only on HTTPS or `localhost`, and are `undefined` on
+  `http://192.168.x.x:3100` — exactly how the app is opened from a phone on the LAN. The player called
+  `crypto.randomUUID()` at setup, so hydration threw and **Nuxt replaced the page with its own 500** —
+  reported as "the video page 500s", though nothing server-side had failed. `newPlaySessionId` in
+  `app/utils/` falls back to `crypto.getRandomValues`, carrying no such restriction, and still produces a
+  **real UUID** since `heartbeatSchema` declares `playSessionId: z.uuid()`. The clipboard copy on
+  `/admin/users` is the same trap on a value shown exactly once, and now says so rather than throwing into
+  a void. The browser suite can't catch this class: it runs on `localhost`, which *is* a secure context.
 - **No media query reaches JavaScript.** Every responsive decision is CSS — a `sm:` prefix,
   `@media (pointer: coarse)`, `@media (hover: hover)`. A `matchMedia` branch deciding *what to render*
   disagrees with the server, and a hydration mismatch is a `pageerror`, which the suite's
-  `failOnConsoleError` fixture turns into a failure of **every test in the file** rather than of the one
-  that caused it. VueUse's `useMediaQuery` is out for the same reason `refDebounced` is.
+  `failOnConsoleError` fixture turns into a failure of **every test in the file**. VueUse's
+  `useMediaQuery` is out for the same reason `refDebounced` is.
 - **`.tap` is for icon-only, destructive, and press-while-moving controls — not for everything.** WCAG
   2.5.8's 24px floor is already cleared by a text-labelled `size="xs"` button at ~30px with its spacing;
   what fails is the icon-only set, where a bare `size-5` anchor is 20px. A blanket 44px turns `/browse`'s
-  one row of filter chips into three for no gain. It grows the box with `min-block-size`/`min-inline-size`
-  rather than a `::after` hit-area expander — an expander costs no layout and silently covers its
-  neighbour, stealing the taps of the control next to it in exactly the dense toolbars it gets used in.
+  one row of filter chips into three for no gain. Grows the box with `min-block-size`/`min-inline-size`
+  rather than a `::after` hit-area expander, which would silently cover and steal taps from the
+  neighbouring control in the dense toolbars it's used in.
 - **`.card-lift:hover` lives inside `@media (hover: hover) and (pointer: fine)`.** Chromium latches
   `:hover` onto the last element tapped, so unguarded it leaves a card scaled 1.06 and raised long after
-  you have navigated away and come back, until you happen to tap somewhere else.
-- **The start-over sweep cannot be paused on a touchscreen**, since there is no hover and nothing to focus.
+  you've navigated away and back, until you tap somewhere else.
+- **The start-over sweep cannot be paused on a touchscreen**, since there's no hover and nothing to focus.
   It runs for 8s instead of 5 (`--offer-seconds` under `@media (pointer: coarse)`), rather than gaining a
   "keep this" control — a third button inside a two-control overlay on a 343px screen, over video, beside
-  the native control bar. The override goes through the custom property because the reduced-motion
-  exemption restates `animation-duration` from it.
-- **`AUDIT` also measures horizontal overflow**, and it lives in `e2e/audit.ts` rather than in
-  `visible.spec.ts`: importing it *from a spec file* registers that file's tests too, which quietly ran the
-  whole legibility suite under the phone project. `document.documentElement.scrollWidth` against
-  `clientWidth` is the assertion; per-element rectangles are diagnosis, reported only when that fires. A
-  candidate is dropped when any ancestor's computed `overflow-x` is anything but `visible`, which exempts
-  the media rails, the `.no-scrollbar` shelves and the admin tables by **behaviour** rather than by a class
-  allowlist that would drift — and a clipped element is not overflowing anything either. Candidates
-  containing other candidates are dropped, so one bad chip reports once rather than seven times. Use
-  `getAttribute('class')`, never `className`: on an SVG that is an `SVGAnimatedString`, and slicing it
-  throws inside `page.evaluate` as an opaque evaluation failure.
+  the native control bar.
+- **`AUDIT` also measures horizontal overflow**, and lives in `e2e/audit.ts` rather than `visible.spec.ts`:
+  importing it *from a spec file* registers that file's tests too, quietly running the whole legibility
+  suite under the phone project. `document.documentElement.scrollWidth` against `clientWidth` is the
+  assertion; per-element rectangles are diagnosis, reported only when that fires. A candidate is dropped
+  when any ancestor's computed `overflow-x` isn't `visible`, exempting media rails, `.no-scrollbar`
+  shelves and admin tables by **behaviour** rather than a drifting class allowlist. Candidates containing
+  other candidates are dropped, so one bad chip reports once. Use `getAttribute('class')`, never
+  `className`: on an SVG that's an `SVGAnimatedString`, and slicing it throws inside `page.evaluate`.
 - **The hero's scrim runs bottom-up below `sm` and left-to-right above it** (`.hero-side-scrim`). The
   horizontal version is tuned for text in the left third and fades to `transparent 72%`; on a phone the
   text column spans the full width, so its right quarter sat on unscrimmed artwork. `visible.spec.ts`
-  **cannot** see this — `backdrop()` returns `null` at the first `background-image` and exempts that
-  element *and every descendant* from the contrast checks — so it is judged by eye. It is a class rather
-  than the inline style it replaced because a media query cannot live in a `style` attribute.
-- **Every hero proportion is `svh`, not `vh`.** `vh` is the *large* viewport height, so it ignores a mobile
-  browser's collapsing address bar and the hero opens taller than the screen. `full` always said this;
+  **cannot** see this — `backdrop()` returns `null` at the first `background-image`, exempting that
+  element *and every descendant* from contrast checks — so it's judged by eye. A class rather than the
+  inline style it replaced, since a media query can't live in a `style` attribute.
+- **Every hero proportion is `svh`, not `vh`.** `vh` is the *large* viewport height, ignoring a mobile
+  browser's collapsing address bar, so the hero opens taller than the screen. `full` always said this;
   `wide` was missed and read `58vh`.
-- **The player's three overlays are one flex column, not three absolute siblings.** All of them sat at
-  `bottom-20` — 80px up a video that is 193px tall on a phone, so they floated at 41% of its height over
-  the picture — and Skip intro and Start over shared that offset with nothing keeping them apart, so
-  resuming into an intro put one on top of the other. A column makes the overlap impossible rather than
-  unlikely; the container is `pointer-events-none` because it spans the video and would otherwise swallow
-  every tap meant for the picture. They stay siblings of `<video>`, so **native fullscreen leaves them
-  behind** — accepted, since the alternative is the Fullscreen API and a control surface of our own, and
-  this player is deliberately the browser's.
+- **The player's three overlays are one flex column, not three absolute siblings.** All sat at
+  `bottom-20` — 80px up a video 193px tall on a phone, floating at 41% of its height — and Skip intro and
+  Start over shared that offset with nothing keeping them apart, so resuming into an intro put one on top
+  of the other. A column makes the overlap impossible; the container is `pointer-events-none` since it
+  spans the video and would otherwise swallow every tap. They stay siblings of `<video>`, so **native
+  fullscreen leaves them behind** — accepted, since the alternative is the Fullscreen API and a control
+  surface of our own, and this player is deliberately the browser's.
 - **Episodes reorder with `@dnd-kit/vue`, and with arrows beside it.** HTML5 `draggable` fires *nothing*
-  from a finger, so `/admin/collections/:slug` — a page whose whole job is arranging episodes — had no
-  working reorder on a phone and said nothing about it. dnd-kit's `PointerSensor` reads Pointer Events,
-  which are mouse, touch and pen through one path, so the gesture a test drives with a mouse is the one a
-  thumb performs; its `KeyboardSensor` covers cross-season moves without a pointer at all. Checked, and
-  worth not re-checking: **`vuedraggable@next`** is UMD-only with no `exports` field (the recurring "does
-  not provide an export named 'default'" under Vite) and its open #286 is `RefImpl is not a constructor`
-  against Vue 3.5, which is this project's version; **`@vueuse/integrations`' `useSortable`** would promote
-  two phantom dependencies at once — the `refDebounced` mistake again — and cannot do cross-list at all;
-  **`sortablejs`** direct mutates the DOM behind Vue's back, so every wrapper has to undo the mutation
-  before splicing the array; **pragmatic-drag-and-drop** is built on HTML5 DnD and has no touch support.
-  The rows are their own component because `useSortable` is a composable and cannot be called in a `v-for`.
+  from a finger, so `/admin/collections/:slug` had no working reorder on a phone. dnd-kit's
+  `PointerSensor` reads Pointer Events (mouse, touch and pen through one path), so a mouse-driven test
+  gesture is what a thumb performs; its `KeyboardSensor` covers cross-season moves without a pointer at
+  all. Checked and worth not re-checking: **`vuedraggable@next`** is UMD-only with no `exports` field and
+  its open #286 is `RefImpl is not a constructor` against this project's Vue 3.5; **`useSortable`** (from
+  `@vueuse/integrations`) would promote two phantom dependencies at once and can't do cross-list;
+  **`sortablejs`** mutates the DOM behind Vue's back, needing every wrapper to undo it before splicing;
+  **pragmatic-drag-and-drop** is built on HTML5 DnD with no touch support. The rows are their own
+  component because `useSortable` can't be called in a `v-for`.
   **Playwright cannot script a touch drag** (microsoft/playwright#39043 is open), so `dragOnto` in
-  `fixtures.ts` performs a *pointer* drag — and it scrolls both ends into view first, because `page.mouse`
-  works in viewport coordinates while `boundingBox()` will happily report a point below the fold, and a
-  gesture performed in empty space looks exactly like a drag implementation that does not work.
+  `fixtures.ts` performs a *pointer* drag, scrolling both ends into view first — `page.mouse` works in
+  viewport coordinates while `boundingBox()` will happily report a point below the fold.
 - **`hasTouch: true` on the `phone` Playwright project is load-bearing.** Without it Chromium reports
   `pointer: fine` and every `@media (pointer: coarse)` rule in `main.css` goes unexercised while the run
   stays green. No device preset: `devices['iPhone 14']` implies WebKit — the wrong browser, carrying
-  neither the storage state nor `--autoplay-policy`. `mobile.spec.ts` plants a box that cannot fit and
-  checks the audit names it, because an audit reporting nothing looks exactly like an app with nothing
-  wrong with it.
+  neither storage state nor `--autoplay-policy`. `mobile.spec.ts` plants a box that can't fit and checks
+  the audit names it, since an audit reporting nothing looks exactly like an app with nothing wrong.
 - Helpers shared by two screens move to `app/utils/` (Nuxt auto-imports them) rather than being copied.
-  `apiMessage` was private to the video editor until a second page needed it — two divergent copies of "what
-  did the server actually say" is how one screen ends up silently swallowing errors.
-- `packages/shared` emits **both** CJS and ESM, and needs to. NestJS and ts-jest `require()` the CJS half;
-  Vite serves the package to the *browser* as a native ES module, where a CJS file exposes **no named
-  exports at all** and `import { loginSchema }` fails at parse time. SSR hides this completely — Nitro can
-  require CJS — so it only appears when a page is opened in a browser. Relative imports in `src` carry
-  explicit `.js` extensions so one source tree emits both, and `dist/esm/package.json` marks that half as
-  `type: module`.
-- Nuxt Icon's runtime endpoint defaults to **`/api/_nuxt_icon`**, which the `/api/**` proxy swallows whole
-  and forwards to NestJS. Moved to `/_icons` via `icon.localApiEndpoint`; otherwise any icon resolved at
-  runtime silently fails to draw.
-- The `/api/**` proxy owns that prefix entirely, so anything else wanting a server route has to move off
-  it — Nuxt Icon's default `/api/_nuxt_icon` was the first casualty and will not be the last.
+  `apiMessage` was private to the video editor until a second page needed it — two divergent copies of
+  "what did the server actually say" is how one screen ends up silently swallowing errors.
+- `packages/shared` emits **both** CJS and ESM, and needs to. NestJS and ts-jest `require()` the CJS
+  half; Vite serves the package to the *browser* as a native ES module, where a CJS file exposes **no
+  named exports at all** and `import { loginSchema }` fails at parse time. SSR hides this completely —
+  Nitro can require CJS — so it only appears when a page is opened in a browser. Relative imports in
+  `src` carry explicit `.js` extensions so one source tree emits both.
+- Nuxt Icon's runtime endpoint defaults to **`/api/_nuxt_icon`**, which the `/api/**` proxy swallows
+  whole and forwards to NestJS. Moved to `/_icons` via `icon.localApiEndpoint`; otherwise any icon
+  resolved at runtime silently fails to draw. The `/api/**` proxy owns that prefix entirely, so anything
+  else wanting a server route has to move off it.
 - A poster's storage key never changes, so replacing one leaves the browser showing the old picture. The
-  admin screens append a cache-busting query after a capture or upload; the ETag alone cannot help an
-  `<img>` that was never re-requested.
+  admin screens append a cache-busting query after a capture or upload; the ETag alone can't help an
+  `<img>` never re-requested.
 - Browser tests live in `apps/web/e2e` (`npm run test:e2e -w @video/web`). They assert controls **do
   something** — `expectsRequest` waits for the API call — because a button with no handler renders
   perfectly. Needs both dev servers plus `npx playwright install --with-deps chromium`.
-- **`locator.count()` does not retry.** A guard written as `if (await x.count() === 0) test.skip(...)` runs
-  before a client-side route has rendered and is therefore always true: the sidebar-navigation test skipped
-  on every run since it was written, announcing "only one video in this collection" about a collection
-  holding five. A skip that never runs reports green, which is worse than no test. Decide a skip from the
-  **data** (fetch it) and wait for the DOM with `expect`, which retries.
-- `waitForLoadState('networkidle')` is not a substitute either — after a client-side navigation it can
-  resolve *before* the route's data request has even started.
+- **`locator.count()` does not retry.** A guard written as `if (await x.count() === 0) test.skip(...)`
+  runs before a client-side route has rendered and is therefore always true: the sidebar-navigation test
+  skipped on every run since it was written, announcing "only one video in this collection" about a
+  collection holding five. A skip that never runs reports green. Decide a skip from the **data** (fetch
+  it) and wait for the DOM with `expect`, which retries. `waitForLoadState('networkidle')` is not a
+  substitute either — after a client-side navigation it can resolve *before* the data request has started.
 - **A click cannot catch a control covered on hover.** Playwright jumps the mouse straight to its target,
-  so an element that a *neighbouring* `:hover` effect covers is uncovered again by the very act of
-  clicking it — the click passes while a person cannot press the thing at all. My List's remove button
-  shipped that way for months under a green test. Assert the **stacking** instead: hover the thing that
-  moves, then check `document.elementFromPoint` at the control's own centre still lands on the control.
-- `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control** (Playwright
-  clicks those happily and `toBeVisible()` does not check opacity, so a `group-hover` with no `group`
-  ancestor passes everything while being invisible to a person) and **text below WCAG AA**. Contrast is
-  measured by painting the colours on a canvas — Chromium returns `oklab()` for anything from the Tailwind
-  palette, and parsing that as `rgb()` silently reports every ratio as ~1.
+  so an element a *neighbouring* `:hover` effect covers is uncovered again by the click itself — passing
+  while a person cannot press the thing at all. My List's remove button shipped that way for months.
+  Assert the **stacking** instead: hover the thing that moves, then check `document.elementFromPoint` at
+  the control's own centre still lands on the control.
+- `visible.spec.ts` catches the two bugs every other test walks past: **an `opacity: 0` control**
+  (Playwright clicks those happily and `toBeVisible()` doesn't check opacity, so a `group-hover` with no
+  `group` ancestor passes while invisible to a person) and **text below WCAG AA**. Contrast is measured
+  by painting colours on a canvas — Chromium returns `oklab()` for the Tailwind palette, and parsing that
+  as `rgb()` silently reports every ratio as ~1.
 - **The audit skips the contrast of anything under `0.99` effective opacity**, so every *disabled* control
   in the app is invisible to it — `@nuxt/ui` dims those to `0.75`. That is the right call (a disabled
   control is deliberately quiet, and 0.75 still clears the `0.35` invisible-control floor), but it means a
@@ -1326,48 +1223,41 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   audit walks the page has not been judged by it, and the audit cannot tell you that.
 - Server-rendered markup accepts a click or a keystroke **before Vue hydrates**, and the interaction is then
   silently dropped. Tests go through `visit()`/`fillStable()` for this.
-- That is not only a test problem, and calling it "the first character" understated it. `v-model`'s mounted
-  hook writes the model's value into the element on hydration, throwing away **everything** typed up to that
-  moment: on `/browse` in dev, typing from the instant the grid paints turned `chernobyl` into a search for
-  `nobyl`, and 150 ms later into `ernobyl`; from about 300 ms it was right. A production build narrows that
-  window without closing it, which makes it *harder* to diagnose, not rarer to hit — it reads as the search
-  being unreliable, because whether it bites depends only on how fast you start typing.
-  `useTypedBeforeHydration` fixes it by adopting whatever is in the element in **`onBeforeMount`** — by
-  `onMounted` the directive has already overwritten it, so reading there returns `''` every time and looks
-  like proof nothing was lost. Found by `id` for the same reason: a template ref is populated at mount, one
-  step too late. `/browse` uses it; the other six debounced boxes (`admin/library`, `admin/people`,
-  `admin/comments`, `admin/requests`, `CreditsEditor`, `useRemoteSearch`) have the same hazard and not yet
-  the same fix.
-- A test that *retries* a field — `fillStable` — cannot catch this, and one that types a key at a time can.
-  `viewer.spec.ts` deliberately uses `pressSequentially` with no retry for exactly one test, and the comment
-  there says so, because the obvious tidy-up is to route it through the helper like every other.
-- **A media event can fire before hydration too, and nothing replays it.** On a hard load the `<video>` and
-  its `<source>` are in the server-rendered HTML, so the browser starts fetching before Vue attaches
+- That's not only a test problem, and calling it "the first character" understated it. `v-model`'s
+  mounted hook writes the model's value into the element on hydration, throwing away **everything** typed
+  up to that moment: on `/browse` in dev, typing from the instant the grid paints turned `chernobyl` into
+  a search for `nobyl`, then 150ms later `ernobyl`; from ~300ms it was right. A production build narrows
+  the window without closing it, making it *harder* to diagnose since whether it bites depends only on how
+  fast you start typing. `useTypedBeforeHydration` fixes it by adopting whatever's in the element in
+  **`onBeforeMount`** — by `onMounted` the directive has already overwritten it. `/browse` uses it; the
+  other six debounced boxes (`admin/library`, `admin/people`, `admin/comments`, `admin/requests`,
+  `CreditsEditor`, `useRemoteSearch`) share the hazard, not yet the fix.
+- A test that *retries* a field — `fillStable` — can't catch this; one typing a key at a time can.
+  `viewer.spec.ts` deliberately uses `pressSequentially` with no retry for exactly one test.
+- **A media event can fire before hydration too, and nothing replays it.** On a hard load the `<video>`
+  and its `<source>` are in the server-rendered HTML, so the browser starts fetching before Vue attaches
   `@loadedmetadata` — the event lands on nothing. `VideoPlayer` therefore *asks* in `onMounted`
-  (`readyState >= 1`) as well as listening, and `onLoadedMetadata` is idempotent because both can happen on
-  one load. Without the ask, a refresh of `/watch/:slug` opens at 0:00 while clicking through to the same
-  page resumes correctly — and every test that reached the player by clicking a link walked past it.
+  (`readyState >= 1`) as well as listening; `onLoadedMetadata` is idempotent since both can fire. Without
+  the ask, a refresh of `/watch/:slug` opens at 0:00 while clicking through to the same page resumes
+  correctly.
 - **The player resumes; it does not offer to.** `resumePoint` (`app/utils/resume.ts`) is the one rule for
-  where playback opens, shared with `/v/:slug` so the second named on "Resume from 12:34" is the second it
-  lands on. The seek must set `lastTick`, or `onTimeUpdate`'s first delta credits the whole resume offset as
-  time watched. What is offered instead is **"Start from the beginning"**. Nothing announces the position in
-  words — the player's own timeline sits directly under the button already saying it.
-- **The offer's timer is the `offer-wipe` animation in `main.css`, not a `setTimeout`.** Grey sweeps across
-  the button and `@animationend` is what removes it, so there is one clock rather than two to drift apart,
-  and hover/`focus-within` pausing the sweep pauses the disappearance exactly with it. It is drawn as an
-  animated **background image**: a positioned `::before` paints above in-flow content, so it would cover the
-  label instead of passing behind it, and the label is a bare text node that cannot be given a `position` to
-  lift it back out.
-- **That animation is exempt from the `prefers-reduced-motion` reset**, and the exemption is load-bearing.
-  The blanket `animation-duration: 0.01ms` would end the sweep on its first frame and take the control with
-  it, leaving those viewers no way to restart a video at all. Removing the exemption as tidy-up reintroduces
-  exactly that.
-- The sweep's grey is measured against the **button's** foreground (7.2:1), not against the page, so none of
-  the `:root` tiers describe it. `visible.spec.ts` cannot check it either — it reads an element's computed
-  background and never sees a background image — so that pairing is verified by hand. Paint it on a canvas
-  to measure it: that foreground computes to `oklch(...)`, and parsing those three numbers as r/g/b reports
-  a confident 2.97:1 for a pairing that is really 7.2:1. The palette trap in `visible.spec.ts` is the same
-  one, and it catches people writing *new* checks, not just the old one.
+  where playback opens, shared with `/v/:slug` so the position named on "Resume from 12:34" is the one it
+  lands on. The seek must set `lastTick`, or `onTimeUpdate`'s first delta credits the whole resume offset
+  as time watched. What's offered instead is **"Start from the beginning"** — nothing announces the
+  position in words, since the player's own timeline sits directly under the button already saying it.
+- **The offer's timer is the `offer-wipe` animation in `main.css`, not a `setTimeout`.** Grey sweeps
+  across the button and `@animationend` removes it — one clock rather than two to drift apart, and
+  hover/`focus-within` pausing the sweep pauses the disappearance with it. Drawn as an animated
+  **background image**: a positioned `::before` would paint above in-flow content and cover the label,
+  and the label is a bare text node that can't be given a `position` to lift it back out.
+- **That animation is exempt from the `prefers-reduced-motion` reset**, load-bearingly: the blanket
+  `animation-duration: 0.01ms` would end the sweep on its first frame and take the control with it,
+  leaving those viewers no way to restart a video at all.
+- The sweep's grey is measured against the **button's** foreground (7.2:1), not the page, so none of the
+  `:root` tiers describe it — verified by hand, since `visible.spec.ts` reads computed background and
+  never sees a background image. That foreground computes to `oklch(...)`, and parsing those numbers as
+  r/g/b reports a confident 2.97:1 for a pairing that's really 7.2:1 — the same palette trap
+  `visible.spec.ts` guards against elsewhere.
 - Playback opening past 0:00 is now normal, so a test about anything *positioned* — intro markers, outro
   markers — must anchor to where the player actually opened rather than assuming zero, and must assert
   against the marker rather than against `> 0`, which a resumed video satisfies before the button is pressed.
@@ -1381,88 +1271,78 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   arrives in one response rather than a paged window — a credits panel that arrives in pages is not a credits
   panel — but it is still wrapped in a `Page`, capped at `MAX_CREDITS`. **An endpoint nothing calls has not
   been proven to honour any convention.**
-- **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on hydration.
-  A frontend change is verified in a browser or it is not verified.
+- **curl proves SSR and nothing else.** Both faults above returned HTTP 200 to curl and broke on
+  hydration. A frontend change is verified in a browser or it is not verified.
 - **Never name a local binding after an auto-imported Vue API.** A parameter called `ref` in
-  `admin/lists.vue` made the **production** build emit that page's chunk with no `import { ref }` in it, so
+  `admin/lists.vue` made the **production** build emit that page's chunk with no `import { ref }`, so
   `ref('')` called a free global and setup threw `ReferenceError: ref is not defined`. A component whose
-  setup throws renders **nothing**, so the screen was a blank content area inside an intact admin sidebar —
-  no heading, no error, nothing to click, and an API and database that were both fine. Isolated by building
-  it each way round: the name of the *template's* arrow parameter makes no difference (it is minified away,
-  and both builds are byte-identical); the *script* binding is the whole of it. `auto-imports.spec.ts`
-  parses every SFC for this and is verified by mutation. It is parsed rather than grepped because the two
-  cases genuinely differ and a regex cannot separate them — `{ watch: [q, tag] }` in `browse.vue` is an
-  option key and is fine, `(row, ref: T)` is a binding and is not.
+  setup throws renders **nothing** — a blank content area inside an intact admin sidebar, API and
+  database both fine. Isolated by building both ways: the *template's* arrow parameter name makes no
+  difference (minified away); the *script* binding is the whole of it. `auto-imports.spec.ts` parses
+  every SFC for this and is verified by mutation — parsed rather than grepped, since `{ watch: [q, tag] }`
+  in `browse.vue` is an option key and fine, `(row, ref: T)` is a binding and isn't.
 - **`npm run dev` and the browser suite cannot see a production-only build fault.** The one above appeared
   solely in `nuxt build` output, and `apps/web/e2e` runs against the **dev servers** — so its `pageerror`
-  watchdog, which is exactly the right assertion, never ran against the code that was broken. Anything that
-  depends on how the bundle is *built* needs either a source-level check or a run against `.output`.
+  watchdog never ran against the broken code. Anything depending on how the bundle is *built* needs a
+  source-level check or a run against `.output`.
 - A blank screen and an empty library must not look alike. `useApiData` returns `null` for both a failed
-  request and no results, so a page that destructures only `{ data }` renders an outage as "No rows yet" or
-  "Nothing here yet" — which sends whoever reads it looking in entirely the wrong place. Take `error` too
-  and check it **before** the empty state.
-- The **same rule applies while a request is still out**, which is what the skeletons are for. Viewer pages
-  pass `{ lazy: true }` so a client-side navigation paints at once instead of leaving the previous screen
-  frozen — and the moment they do, "no data yet" and "no data" become the same `null` again. The branch order
-  is **error → content → skeleton → empty**: content before the skeleton so a refetch (browse's filters,
-  requests' status) keeps the rows already on screen rather than collapsing them to placeholders, and the
-  empty state last so it is only reached once the request has genuinely succeeded with nothing in it.
-- Test that with `status !== 'success'`, **never `status === 'pending'`**. `status` is initialised to `idle`
-  and only becomes `pending` when the fetch actually starts (`asyncData.js` lines 309, 330), and under `lazy`
-  the fetch is deferred to `onBeforeMount` — so on the one frame the placeholder exists to fill, `pending` is
-  false. `pendingWhenIdle` defaults to false in Nuxt 4, so the `pending` ref is merely that same comparison.
-- **`lazy: true` costs SSR nothing** — checked in `node_modules/nuxt/dist/app/composables/asyncData.js` and
-  worth not re-deriving. The server branch (lines 85–91) calls `initialFetch()` and registers
-  `onServerPrefetch` **without consulting `lazy`**; only `server: false` would skip it. So a hard load still
-  blocks and still ships the real content, hydration reads it from the payload with `status` already
-  `success` (line 108), and only a client-side navigation sees a placeholder. The `await` at each call site
-  can stay: `useAsyncData` always returns a thenable, but under `lazy` on the client the underlying promise
-  does not exist yet, so it settles on the next microtask rather than on the network.
-- A fetch that decides **what a URL is** stays blocking. `c/[collection]/[...path]`'s `resolve` answers 404
-  and 301s a shared collection link to the video's own page; painting an episode grid and then redirecting
-  out of it is worse than the pause. Its second request only fills a page that resolve has already committed
-  to, so that is the one that goes `lazy`.
-- Making a primary fetch `lazy` **breaks a `throw createError` in setup**, silently. `error` is null there
-  because the request has not been made, so the throw never fires and a missing record renders the page's own
-  fallback instead of Nuxt's error page. Move it to `watch(error, …, { immediate: true })` calling
-  `showError` — outside setup there is nothing left to throw to, and `immediate` covers the server, where the
-  fetch does block and the error is already present.
-- **Do not use `USkeleton`.** It hardcodes `role="alert"`, `aria-live="polite"` and `aria-label="loading"` on
-  every instance with no prop to disable them, so a grid of twenty placeholders is twenty live regions all
-  announcing themselves — the same trap as `USelectMenu`'s built-in `aria-label` shadowing its visible text.
-  Its theme resolves to exactly the three declarations `.skeleton` carries in `main.css`, so nothing is given
-  up; the skeleton components put **one** `role="status"` on the container instead.
+  request and no results, so a page destructuring only `{ data }` renders an outage as "No rows yet" —
+  sending whoever reads it looking in entirely the wrong place. Take `error` too and check it **before**
+  the empty state.
+- The **same rule applies while a request is still out**, which is what skeletons are for. Viewer pages
+  pass `{ lazy: true }` so a client-side navigation paints at once instead of freezing the previous
+  screen — and then "no data yet" and "no data" become the same `null` again. Branch order is **error →
+  content → skeleton → empty**: content before skeleton so a refetch keeps rows already on screen, empty
+  state last so it's only reached once the request has genuinely succeeded with nothing in it.
+- Test that with `status !== 'success'`, **never `status === 'pending'`**. `status` starts `idle` and
+  only becomes `pending` when the fetch actually starts, and under `lazy` the fetch is deferred to
+  `onBeforeMount` — so on the one frame the placeholder exists to fill, `pending` is false.
+- **`lazy: true` costs SSR nothing** — checked in Nuxt's `asyncData.js` and worth not re-deriving. The
+  server branch calls `initialFetch()` and registers `onServerPrefetch` **without consulting `lazy`**;
+  only `server: false` skips it. A hard load still blocks and ships real content; only a client-side
+  navigation sees a placeholder.
+- A fetch that decides **what a URL is** stays blocking. `c/[collection]/[...path]`'s `resolve` answers
+  404 and 301s a shared collection link to the video's own page; painting an episode grid then
+  redirecting out is worse than the pause. Its second request only fills a page `resolve` already
+  committed to, so that's the one that goes `lazy`.
+- Making a primary fetch `lazy` **breaks a `throw createError` in setup**, silently: `error` is null
+  there since the request hasn't been made, so the throw never fires and a missing record renders the
+  page's own fallback instead of Nuxt's error page. Move it to `watch(error, …, { immediate: true })`
+  calling `showError`.
+- **Do not use `USkeleton`.** It hardcodes `role="alert"`, `aria-live="polite"` and `aria-label="loading"`
+  on every instance with no prop to disable them, so a grid of twenty placeholders is twenty live regions
+  announcing themselves — same trap as `USelectMenu`'s built-in `aria-label` shadowing its visible text.
+  Its theme resolves to the three declarations `.skeleton` carries in `main.css`, so nothing is given up;
+  the skeleton components put **one** `role="status"` on the container instead.
 - A skeleton is a textless, non-interactive `<div>` with a solid `background-color`. Never a gradient
   shimmer: `visible.spec.ts` stops resolving a backdrop at the first `background-image` and returns null,
-  which silently exempts that element **and every descendant** from the border and text-contrast checks — a
-  shimmer buys a green audit by blinding it. Never an `<a>`/`<button>` either, which the audit *does* check
-  for an effective opacity below 0.35. And the pulse is decoration: the global reduced-motion reset stops it,
-  so the resting colour has to read as a placeholder on its own.
-- **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every control
-  on the page cleared AA — the worst was 5.78:1 and the `Edit` buttons measured 6.19:1. The formula weights
-  red at 0.2126, so saturated red text on near-black scores well and reads badly at 12–14px. The fix was to
-  stop using accent-coloured *text* for controls at all: `variant="subtle"` with no `color` renders the
-  primary colour as text, so it gets `color="neutral"` (white on a raised surface) and the one real call to
-  action on a screen gets `variant="solid"`. Accent colour marks things — a rule beside the active nav item,
-  a bar under the eyebrow — and never sets type.
+  silently exempting that element **and every descendant** from contrast checks — a shimmer buys a green
+  audit by blinding it. Never an `<a>`/`<button>` either. The pulse is decoration: the reduced-motion
+  reset stops it, so the resting colour must read as a placeholder on its own.
+- **A WCAG ratio is necessary, not sufficient.** "I still cannot read this" was reported while every
+  control cleared AA — worst 5.78:1, `Edit` buttons 6.19:1. The formula weights red at 0.2126, so
+  saturated red text on near-black scores well and reads badly at 12–14px. Fix: stop using accent-coloured
+  *text* for controls — `variant="subtle"` with no `color` gets `color="neutral"` (white on a raised
+  surface), and the one real call to action gets `variant="solid"`. Accent colour marks things and never
+  sets type.
 - Colour lives in five named tiers in `main.css` (`--ui-text` → `--ui-text-dimmed`, plus `--ui-border` and
-  `--ui-border-accented`), each annotated with its measured ratio. They replaced 96 ad-hoc `white/N`
-  utilities, two of which (`text-white/35` at 2.8:1 and `/40` at 3.5:1) were below AA. `--ui-border-accented`
-  is measured against `--ui-bg-elevated`, **not** the page: a bordered control almost always sits on a raised
-  surface, and measuring against the page flatters the value by half a point while the border still vanishes.
-- `bg-white/N` is deliberately *not* part of that sweep — those are scrims over artwork and progress-bar
-  tracks, where the alpha is the point.
-- Gradients over artwork interpolate to `var(--ui-bg)`, never a hardcoded hex. The hero faded to `#08080a`
-  after the page moved to `#0a0a0c`, so the scrim stopped landing on the colour behind it.
-- **Reka UI teleports popovers to `<body>`.** An audit scoped to `main *, header *, aside *` therefore never
-  sees a single dropdown, select or modal. `visible.spec.ts` walks the whole document for this reason.
-- A `mask-image` icon's colour **is** its `background-color`, so an audit that treats the element's own
-  background as the backdrop compares the colour against itself and reports a flat ~1:1 for every icon on
-  the page. Text and borders paint *on top of* their own background and must include it; icons must not.
-  Getting this wrong reported 56 fake problems out of 70.
-- **`@nuxt/ui` control triggers carry their own `aria-label`, which shadows the visible text.** `USelectMenu`
-  ships `aria-label="Show popup"` — so the accessible name of the control that picks a person was "Show
-  popup". Pass an explicit `aria-label` naming the *job*, not the mechanism. (Same bug as `AddToListButton`.)
+  `--ui-border-accented`), each annotated with its measured ratio — replacing 96 ad-hoc `white/N`
+  utilities, two below AA (`text-white/35` at 2.8:1, `/40` at 3.5:1). `--ui-border-accented` is measured
+  against `--ui-bg-elevated`, **not** the page: a bordered control sits on a raised surface, and measuring
+  against the page flatters the value while the border still vanishes.
+- `bg-white/N` is deliberately *not* part of that sweep — scrims over artwork and progress-bar tracks,
+  where the alpha is the point.
+- Gradients over artwork interpolate to `var(--ui-bg)`, never a hardcoded hex. The hero faded to
+  `#08080a` after the page moved to `#0a0a0c`, so the scrim stopped landing on the colour behind it.
+- **Reka UI teleports popovers to `<body>`.** An audit scoped to `main *, header *, aside *` never sees a
+  single dropdown, select or modal. `visible.spec.ts` walks the whole document for this.
+- A `mask-image` icon's colour **is** its `background-color`, so an audit treating the element's own
+  background as backdrop compares the colour against itself, reporting a flat ~1:1 for every icon. Text
+  and borders paint *on top of* their own background and must include it; icons must not. Getting this
+  wrong reported 56 fake problems out of 70.
+- **`@nuxt/ui` control triggers carry their own `aria-label`, which shadows the visible text.**
+  `USelectMenu` ships `aria-label="Show popup"`, so the accessible name of a person-picker was "Show
+  popup". Pass an explicit `aria-label` naming the *job*, not the mechanism.
 
 **Rate limiting** (`common/throttling.ts`)
 - There is exactly **one** throttler, named `default`, overridden per route with `@Throttle({ default: … })`.
@@ -1490,24 +1370,22 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   blocks every poster served from :4000 in development.
 
 **Access control**
-- **A description is never required to publish.** It was, and it made the library unpublishable: ingest
-  cannot write a synopsis, so every episode needed a person to type one before *any* could go out — and
-  because a collection needs at least one publishable video, the collection was blocked too, reporting
-  a missing `videos` while plainly holding five. What is required is what a probe produces on its own:
-  a title, a real duration, a banner. Reported as "why can't I publish collections".
+- **A description is never required to publish.** It was, and made the library unpublishable: ingest
+  can't write a synopsis, so every episode needed a person to type one before *any* could go out — and
+  since a collection needs one publishable video, the collection was blocked too, reporting a missing
+  `videos` while plainly holding five. Required instead: what a probe produces on its own — title, real
+  duration, banner.
 - **`publishableVideoCount` has exactly one definition.** There were two and they disagreed: `publish()`
-  counted the videos that were *ready* while the read that draws the admin's checklist passed the
-  total, so the screen reported a collection ready and the button refused it. Both call the one helper
-  in `common/publishing.ts`, which also feeds the count the publish confirmation names — so the dialog
-  cannot promise something different from what happens. Already-published videos count, or
-  re-publishing a collection whose episodes went out individually reports an empty shelf.
+  counted videos that were *ready* while the admin checklist read passed the total, so the screen
+  reported a collection ready and the button refused it. Both now call one helper in
+  `common/publishing.ts`, which also feeds the publish confirmation's count — the dialog can't promise
+  something different from what happens.
 - `POST /collections/:id/publish?cascade=true` takes the collection's **ready** videos with it in one
-  transaction. That is what makes a freshly ingested show publishable without editing every episode.
+  transaction — what makes a freshly ingested show publishable without editing every episode.
 - **`update()` builds its `data` field by field**, never by spreading the DTO — so a column added later
-  cannot be written by anyone who guesses its name. The cost is that a *new* field is silently dropped
-  until it is added there too, and the PATCH still answers 200 with a response that looks right. That
-  happened with `trailerYoutubeId`; `library.db-spec.ts` now asserts the round trip rather than the
-  status code.
+  can't be written by guessing its name. Cost: a *new* field is silently dropped until added there too,
+  and the PATCH still answers 200 looking right. Happened with `trailerYoutubeId`; `library.db-spec.ts`
+  now asserts the round trip rather than the status code.
 - `USER` sees only `PUBLISHED` records. Enforce with `whereVisible(role)` in services, never in the UI alone.
 - A caller-supplied `state` filter must **intersect** `whereVisible(role)`, never replace it. Use
   `narrowToVisibleStates(role, requested)` and spread it **last** in the `where`, so nothing can overwrite
@@ -1518,11 +1396,10 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 - The visibility filter applies to **nested** reads too. A published collection may contain draft videos,
   so the `videos` relation needs its own `where`, not just the collection query.
 - Refuse to demote, deactivate **or delete** the last active admin — all three strand the library equally.
-  The count of remaining admins is read `FOR UPDATE` inside the transaction: read-then-write is not atomic,
-  and without the lock two admins demoted at the same moment both see "one other remains" and both commit.
-  A *deactivated* admin does not count as cover. There is deliberately no self-exemption — this one rule
-  covers an admin demoting themselves and two admins stranding each other; "you can't edit yourself" would
-  only catch the first.
+  The remaining-admin count is read `FOR UPDATE` inside the transaction: read-then-write isn't atomic, and
+  without the lock two admins demoted at once both see "one other remains" and both commit. A
+  *deactivated* admin doesn't count as cover. No self-exemption — this one rule covers an admin demoting
+  themselves and two admins stranding each other; "you can't edit yourself" would only catch the first.
 - `SessionGuard` is registered globally, so access is fail-closed: a new route is protected the moment it
   exists. Opt out with `@Public()` — never by leaving a guard off.
 - The session stores **only** `userId`; the user is re-read on every request. Do not cache the role in the
@@ -1547,71 +1424,60 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
 
 **Deployment** (`Dockerfile`, `deploy/`, `.github/workflows/` — see [`deploy/README.md`](deploy/README.md))
 
-- `TRUST_PROXY` must be set behind a TLS-terminating proxy, and the failure without it is silent.
-  The session cookie is `secure` when `NODE_ENV=production`, and express-session refuses to *set* a
-  secure cookie unless it believes the connection is HTTPS — which it only does when `trust proxy`
-  lets it read `X-Forwarded-Proto`. `/auth/login` then answers **200 and sends no cookie**, which
-  reads as "my password stopped working". Verified both ways: with the header, `Set-Cookie … Secure`;
-  without it, a 200 and nothing. It also fixes throttling, which otherwise keys `/auth/login` on the
-  proxy's address for every visitor on earth.
+- `TRUST_PROXY` must be set behind a TLS-terminating proxy, and the failure without it is silent. The
+  session cookie is `secure` when `NODE_ENV=production`, and express-session refuses to *set* a secure
+  cookie unless it believes the connection is HTTPS — which it only does when `trust proxy` lets it read
+  `X-Forwarded-Proto`. `/auth/login` then answers **200 and sends no cookie**, reading as "my password
+  stopped working". Verified both ways: with the header, `Set-Cookie … Secure`; without, a 200 and
+  nothing. Also fixes throttling, which otherwise keys `/auth/login` on the proxy's address for everyone.
 - Traefik routes `/api` on the **web** hostname straight to the API, bypassing Nuxt. Not a
   micro-optimisation: **Nitro's proxy buffers the whole request body in memory**, and
-  `streamRequest: true` does not prevent it on the node-server preset — h3's `getRequestWebStream`
-  falls back to `readRawBody`. Measured: a 600 MB upload grew the web container ~575 MB and
-  OOM-killed it at a 256 MB limit; via Traefik the same upload peaked at 55 MB. Uploads are capped at
-  2 GB. The route rule stays for SSR, which is small JSON in-process.
-- **`NUXT_API_TARGET` is baked in at build time**, not read at runtime — Nuxt freezes it into the
-  Nitro bundle's route rules. Setting it on a running container does nothing, which is why the API
-  service is named `api` in every stack and the image is built with `http://api:4000`.
-- `prisma generate` runs **before** `nest build` in the image: the generated client is gitignored,
-  so it can never arrive in the build context. `prisma` and `dotenv` are *runtime* dependencies of
-  apps/api rather than dev ones, so `--omit=dev` leaves the entrypoint able to run
-  `prisma migrate deploy` and `prisma.config.ts` able to load.
+  `streamRequest: true` doesn't prevent it on the node-server preset. Measured: a 600 MB upload grew the
+  web container ~575 MB and OOM-killed it at a 256 MB limit; via Traefik the same upload peaked at 55 MB.
+  Uploads are capped at 2 GB. The route rule stays for SSR, small JSON in-process.
+- **`NUXT_API_TARGET` is baked in at build time**, not read at runtime — Nuxt freezes it into the Nitro
+  bundle's route rules. Setting it on a running container does nothing, which is why the API service is
+  named `api` in every stack and the image is built with `http://api:4000`.
+- `prisma generate` runs **before** `nest build` in the image: the generated client is gitignored, so it
+  can never arrive in the build context. `prisma` and `dotenv` are *runtime* dependencies of apps/api
+  rather than dev ones, so `--omit=dev` leaves the entrypoint able to run `prisma migrate deploy`.
 - The production install is `npm ci --omit=dev -w @video/api --include-workspace-root`. A bare
   `--omit=dev` at the root installs *every* workspace's production dependencies, dragging Nuxt and
   ~300 MB into the API image.
-- The entrypoint pins `PRISMA_SCHEMA_ENGINE_BINARY` by glob. Left to resolve the engine itself the
-  CLI probes `@prisma/engines` for write access, which a non-root container against a root-owned
-  `node_modules` fails — reporting *"please make sure you install prisma with the right permissions"*,
-  which describes a broken install rather than the unwritable directory it actually found.
+- The entrypoint pins `PRISMA_SCHEMA_ENGINE_BINARY` by glob. Left to resolve the engine itself, the CLI
+  probes `@prisma/engines` for write access, which a non-root container against root-owned `node_modules`
+  fails — reporting *"please make sure you install prisma with the right permissions"*, which describes a
+  broken install rather than the unwritable directory it found.
 - `/state` is created **in the image**, owned by `node`. Docker seeds a fresh named volume from the
-  image's directory including its ownership, but creates the mount point root-owned when it does not
-  exist — and the bootstrap token write then fails with `EACCES` on first boot. Bind mounts are never
-  chowned by Docker at all, so `MEDIA_PATH` and `DERIVED_PATH` must be `chown 1000:1000` on the host.
-- The API image is **Alpine**, and the reason is `ffmpeg`, not Node. It was bookworm-slim on the
-  belief that `@node-rs/argon2` needs glibc; it does not — `@node-rs/argon2-linux-x64-musl` is a
-  published prebuilt in the same `optionalDependencies` list as the gnu one, and Prisma resolves
-  `schema-engine-linux-musl-openssl-3.0.x` the same way. Verified in the image, and all 870 API unit
+  image's directory including ownership, but creates the mount point root-owned when it doesn't exist —
+  and the bootstrap token write fails with `EACCES` on first boot. Bind mounts are never chowned by
+  Docker, so `MEDIA_PATH`/`DERIVED_PATH` must be `chown 1000:1000` on the host.
+- The API image is **Alpine**, and the reason is `ffmpeg`, not Node. It was bookworm-slim on the belief
+  that `@node-rs/argon2` needs glibc; it doesn't — `@node-rs/argon2-linux-x64-musl` is a published
+  prebuilt, and Prisma resolves its musl engine the same way. Verified in the image; all 870 API unit
   tests pass on musl.
-- **Debian's `ffmpeg` package costs 457 MB to install two binaries under 600 KB**, because it has a
-  hard `Depends: libsdl2-2.0-0` for `ffplay`. SDL2 pulls Mesa, Mesa pulls libLLVM (112 MB) and libz3
-  (23 MB), and behind those come X11, Wayland, GTK/Cairo/Pango, PulseAudio and the
-  AMD/Intel/Nouveau/Radeon DRM drivers — 288 packages so a headless server can open a player window it
-  never opens. `--no-install-recommends` cannot decline them; they are Depends, not Recommends. Alpine
-  needs 123 packages and 184 MB, and ships no `ffplay`. Do not "simplify" the base back to Debian.
-- The **`prisma` CLI is a runtime dependency** (the entrypoint runs `migrate deploy`) and Prisma 7's
-  CLI bundles Prisma Studio — `@prisma/studio-core` drags in React, Radix UI, framer-motion, elkjs and
-  @visx, and `@prisma/config` drags in `effect`. That is ~290 MB of the image, and the API itself never
-  touches the CLI: it uses the generated client and `@prisma/adapter-pg`. Removing the subtree leaves
-  the API booting normally, so the saving is real, but it needs migrations to move to an init
-  container. The CLI eagerly requires both `@prisma/studio-core/data/bff` and
-  `@prisma/dev/internal/state`, so neither can simply be deleted.
-- **The pipeline stops at GHCR — nothing deploys.** `build-dev.yml` is a manual
-  `workflow_dispatch` (GitHub's "Use workflow from" dropdown is the branch picker) and pushes two tags
-  per image: the moving `<image_tag>` and an immutable `<image_tag>-<short sha>`, both derived from
-  the input so `prd` needs no second workflow. Putting a build on the server is Portainer → Update the
-  stack with **Re-pull image** ticked, which is *not* feature-gated.
+- **Debian's `ffmpeg` package costs 457 MB to install two binaries under 600 KB**, since it hard-depends
+  on `libsdl2-2.0-0` for `ffplay`. SDL2 pulls Mesa, Mesa pulls libLLVM and libz3, and behind those come
+  X11, Wayland, GTK, PulseAudio and the DRM drivers — 288 packages so a headless server can open a player
+  window it never opens. `--no-install-recommends` can't decline them; they're Depends. Alpine needs 123
+  packages and 184 MB, and ships no `ffplay`. Do not "simplify" the base back to Debian.
+- The **`prisma` CLI is a runtime dependency** (the entrypoint runs `migrate deploy`) and Prisma 7's CLI
+  bundles Prisma Studio — `@prisma/studio-core` drags in React, Radix UI, framer-motion, and
+  `@prisma/config` drags in `effect`. That's ~290 MB of the image; the API itself never touches the CLI,
+  using only the generated client and `@prisma/adapter-pg`. Removing the subtree leaves the API booting
+  normally, but needs migrations to move to an init container.
+- **The pipeline stops at GHCR — nothing deploys.** `build-dev.yml` is a manual `workflow_dispatch` and
+  pushes two tags per image: the moving `<image_tag>` and an immutable `<image_tag>-<short sha>`. Putting
+  a build on the server is Portainer → Update the stack with **Re-pull image** ticked.
 - **Do not add an automated deploy back without re-measuring.** A Portainer CE webhook redeploys a
-  Git-backed stack only when the tracked *git ref* has moved, and says nothing when it has not: `204`
-  in ~20ms, no pull, no recreate. This is easy to get backwards, because a call landing right after a
-  merge *does* replace the containers — the git change carried the pull with it. Confirmed by
-  Portainer's `ConfigHash` moving `b604e95f` → `1a28019c` across the one call that worked, and five
-  minutes of no change on every call after. `?pullimage=true` and `?IMAGE_TAG=…` are **non-git** stack
-  webhook features (`"repository" !== method` in the UI) and a Git stack ignores them; *Re-pull image*
-  under GitOps updates is Business Edition (`featureId: STACK_PULL_IMAGE`). Deploying a *branch* never
-  moves `main`, so a webhook would report success for work it never did — which is why the step was
-  deleted rather than worked around. The two real options, if it ever becomes worth it, are recorded
-  in `deploy/README.md` step 4.
+  Git-backed stack only when the tracked *git ref* has moved, and says nothing when it hasn't: `204` in
+  ~20ms, no pull, no recreate. Easy to get backwards, since a call right after a merge *does* replace
+  containers — the git change carried the pull with it. Confirmed by Portainer's `ConfigHash` moving
+  across the one call that worked, then no change on every call after. `?pullimage=true` and
+  `?IMAGE_TAG=…` are **non-git** stack webhook features and a Git stack ignores them; *Re-pull image*
+  under GitOps updates is Business Edition. Deploying a *branch* never moves `main`, so a webhook would
+  report success for work it never did — which is why the step was deleted rather than worked around.
+  The two real options are in `deploy/README.md` step 4.
 
 ## Conventions
 
@@ -1621,19 +1487,16 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   `*.db-spec.ts` (HTTP against a real `video_test` database). Anything whose correctness *is* a database
   guarantee — transactions, conditional updates, constraints — belongs in the third; a stub cannot lose a
   race. `test:db` fails loudly with no database rather than skipping, so it can never go green testing nothing.
-- **`test:db` is not safe to run twice at once.** The database name (`video_test`) and the bootstrap-token
+- **`test:db` is not safe to run twice at once.** The database name (`video_test`) and bootstrap-token
   paths (`/tmp/video-streaming-*-test.bootstrap-token`) are fixed, and every suite `TRUNCATE`s between
-  cases — so two runs from two worktrees delete each other's fixtures and each other's master token. The
-  failures look nothing like a collision: `/auth/redeem` starts answering **400 "That invite token is not
-  valid"** (the other run redeemed it, or truncated it away) or the token file simply vanishes, and a whole
-  green suite goes red on code that is fine. Give a parallel checkout its own database with
-  `TEST_DATABASE_URL=…/video_test_<name>` — `test/db/global-setup.ts` already reads it — **and set
-  `TMPDIR` to a private directory**, which fixes the token paths too: they are built from
-  `os.tmpdir()`, and Node resolves that from `TMPDIR` on Linux. The two together are full isolation.
-  Confirmed the hard way: a db tier run against a concurrent one from another worktree failed at
-  `transcode.db-spec.ts` (a cancelled job's temp file) and then, on retry, somewhere else entirely —
-  the same code passed 458/458 the moment both variables were set. **A db-tier failure that moves
-  between runs is this, not your change.**
+  cases — so two runs from two worktrees delete each other's fixtures and master token. Failures look
+  nothing like a collision: `/auth/redeem` starts answering **400 "That invite token is not valid"** or
+  the token file simply vanishes, and a whole green suite goes red on code that's fine. Give a parallel
+  checkout its own database with `TEST_DATABASE_URL=…/video_test_<name>` and **set `TMPDIR` to a private
+  directory**, which fixes the token paths too (built from `os.tmpdir()`). Confirmed the hard way: a db
+  tier run against a concurrent one from another worktree failed at `transcode.db-spec.ts` and then, on
+  retry, somewhere else entirely — the same code passed 458/458 once both variables were set. **A
+  db-tier failure that moves between runs is this, not your change.**
 - `NUXT_DEV_PORT` and `NUXT_API_TARGET` exist for the same reason: :3000 and :4000 are hardcoded defaults,
   and a second checkout cannot start either server without them. Both default to the old values.
 - Validation: **zod schemas in `packages/shared`** are the source of truth, so a form and the endpoint
