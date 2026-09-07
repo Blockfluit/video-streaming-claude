@@ -7,6 +7,7 @@
  * everything would need a source column per field to be safe, and this needs
  * none, because a person has looked at both values.
  */
+import { parseTmdbId } from '@video/shared'
 import type { MetadataField, Page } from '@video/shared'
 
 import type { ArtworkShape } from '~/composables/useArtworkBust'
@@ -38,8 +39,12 @@ const PAGE_SIZE = 20
 const open = ref(false)
 const query = ref(props.title)
 const kindFilter = ref<'both' | 'movie' | 'tv'>('both')
+/** Pre-filled from the record, but editable — see `search()`. */
+const year = ref<number | null>(props.year ?? null)
 const searching = ref(false)
 const applying = ref(false)
+const idInput = ref('')
+const lookingUp = ref(false)
 
 interface Candidate {
   id: string
@@ -127,6 +132,8 @@ const configured = computed(() => status.value?.configured === true)
 watch(open, (isOpen) => {
   if (!isOpen) return
   query.value = props.title
+  year.value = props.year ?? null
+  idInput.value = ''
   firstWindow.value = []
   total.value = 0
   resetMore()
@@ -140,7 +147,7 @@ async function search() {
   searching.value = true
   activeTitle.value = query.value.trim()
   activeKind.value = kindFilter.value
-  activeYear.value = props.year ?? null
+  activeYear.value = year.value
   resetMore()
   try {
     const page = await api<Page<Candidate>>(
@@ -169,10 +176,51 @@ async function choose(candidate: Candidate) {
     )
     preview.value = result
     picked.value = new Set(result.fields.filter(f => f.suggested).map(f => f.field))
+    // A manually-entered id has no title to show yet — TMDB's own answer is
+    // sitting right here in the diff, so borrow it for the heading above it.
+    const proposedTitle = result.fields.find(f => f.field === 'title')?.proposed
+    if (typeof proposedTitle === 'string' && proposedTitle.length > 0) {
+      chosen.value = { ...candidate, title: proposedTitle }
+    }
   }
   catch (error) {
     chosen.value = null
     toast.add({ title: apiMessage(error, 'Could not read that title'), color: 'error' })
+  }
+}
+
+/**
+ * Bypasses title search entirely: an admin pastes a TMDB id or a
+ * `themoviedb.org` link and this jumps straight to the same preview step a
+ * search result would have led to.
+ */
+async function lookUpById() {
+  const parsed = parseTmdbId(idInput.value)
+  if (!parsed) {
+    toast.add({ title: 'That is not a TMDB id or themoviedb.org link this can read', color: 'error' })
+    return
+  }
+  // A bare id doesn't say which catalogue it's from — refused rather than
+  // guessed, the same rule the sidecar subtitle matcher follows elsewhere.
+  const type = parsed.type ?? (kindFilter.value === 'both' ? null : kindFilter.value)
+  if (!type) {
+    toast.add({ title: 'Pick Film or Series first, or paste a full TMDB link', color: 'warning' })
+    return
+  }
+  lookingUp.value = true
+  try {
+    await choose({
+      id: `${type}-${parsed.tmdbId}`,
+      tmdbId: parsed.tmdbId,
+      tmdbType: type,
+      title: `TMDB ${type === 'tv' ? 'series' : 'film'} ${parsed.tmdbId}`,
+      year: null,
+      description: null,
+      posterPath: null,
+    })
+  }
+  finally {
+    lookingUp.value = false
   }
 }
 
@@ -269,8 +317,24 @@ function show(value: unknown): string {
                 ]"
               />
             </UFormField>
+            <UFormField label="Year">
+              <UInput v-model.number="year" type="number" class="w-24" />
+            </UFormField>
             <UButton type="submit" :loading="searching" color="neutral" variant="subtle">
               Search
+            </UButton>
+          </form>
+
+          <!--
+            An escape hatch from title search, which is a best-effort guess:
+            TMDB's own id, or a link copied straight from its address bar.
+          -->
+          <form class="flex flex-wrap items-end gap-2" @submit.prevent="lookUpById">
+            <UFormField label="Or match by TMDB id" class="min-w-56 flex-1" hint="An id, or a themoviedb.org link">
+              <UInput v-model="idInput" placeholder="27205 or a themoviedb.org link" class="w-full" />
+            </UFormField>
+            <UButton type="submit" :loading="lookingUp" color="neutral" variant="subtle">
+              Use this
             </UButton>
           </form>
 
