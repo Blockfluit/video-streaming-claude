@@ -11,13 +11,21 @@
  * stored and drawn in. `getRelativePointerPosition()` is the one that inverts
  * the stage's own transform on top of that, which is why `pointerPosition()`
  * below calls it instead — every shape then ends up stored in the same units
- * the exported image uses. `export()` asks for `pixelRatio: 1 / scale`, which
- * renders the export back up to the screenshot's original size regardless of
- * how small the editor displayed it.
+ * the exported image uses. `export()` asks for `pixelRatio: 1 / displayScale`
+ * (see below), which renders the export back up to the screenshot's original
+ * size regardless of how small or zoomed the editor displayed it.
  *
  * Shape ids are a plain counter, not `crypto.randomUUID()` — that API does
  * not exist on an insecure context (this app is opened from a phone on the
  * LAN over plain HTTP), and a disposable local id has no reason to risk it.
+ *
+ * `zoom` is a multiplier on top of that fit scale, not a replacement for it —
+ * `displayScale` (fit × zoom) is what actually goes everywhere `scale` used
+ * to: the stage's own `scaleX`/`scaleY`, the display box's pixel size, the
+ * text tool's screen-space input position, and `export()`'s `pixelRatio`.
+ * That last one is why zooming never touches export quality: `pixelRatio:
+ * 1 / displayScale` always divides back out to the screenshot's natural
+ * resolution, whatever the current zoom happens to be.
  */
 import type Konva from 'konva'
 import type { VueKonvaRef } from 'vue-konva'
@@ -36,13 +44,17 @@ type Shape = LineShape | RectShape | ArrowShape | TextShape
 
 const STROKE_COLOR = '#ef4444'
 const STROKE_WIDTH = 4
-const MAX_DISPLAY_WIDTH = 640
+const MAX_DISPLAY_WIDTH = 800
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 3
+const ZOOM_STEP = 0.25
 
 const tool = ref<Tool>('pen')
 const shapes = ref<Shape[]>([])
 const currentShape = ref<Shape | null>(null)
 const drawing = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
+const zoom = ref(1)
 
 let nextId = 0
 const newId = () => nextId++
@@ -74,15 +86,24 @@ const scale = computed(() => {
   if (naturalWidth.value === 0) return 1
   return Math.min(1, MAX_DISPLAY_WIDTH / naturalWidth.value)
 })
-const displayWidth = computed(() => naturalWidth.value * scale.value)
-const displayHeight = computed(() => naturalHeight.value * scale.value)
+/** The fit scale, adjusted by how far the zoom controls have moved it. */
+const displayScale = computed(() => scale.value * zoom.value)
+const displayWidth = computed(() => naturalWidth.value * displayScale.value)
+const displayHeight = computed(() => naturalHeight.value * displayScale.value)
 
 const stageConfig = computed(() => ({
   width: displayWidth.value,
   height: displayHeight.value,
-  scaleX: scale.value,
-  scaleY: scale.value,
+  scaleX: displayScale.value,
+  scaleY: displayScale.value,
 }))
+
+function zoomIn() {
+  zoom.value = Math.min(MAX_ZOOM, Math.round((zoom.value + ZOOM_STEP) * 100) / 100)
+}
+function zoomOut() {
+  zoom.value = Math.max(MIN_ZOOM, Math.round((zoom.value - ZOOM_STEP) * 100) / 100)
+}
 
 const imageConfig = computed(() => ({
   image: image.value,
@@ -135,7 +156,7 @@ function onPointerDown(event: KonvaPointerEvent) {
      * is not merely fragile, it cannot be used to enter text at all.
      */
     event.evt.preventDefault?.()
-    textInput.value = { x: pos.x, y: pos.y, displayX: pos.x * scale.value, displayY: pos.y * scale.value }
+    textInput.value = { x: pos.x, y: pos.y, displayX: pos.x * displayScale.value, displayY: pos.y * displayScale.value }
     textValue.value = ''
     return
   }
@@ -209,7 +230,7 @@ const stageRef = useTemplateRef<VueKonvaRef<Konva.Stage>>('stage')
 function exportImage(): string {
   const stage = stageRef.value?.getNode()
   if (!stage) return props.screenshot
-  return stage.toDataURL({ pixelRatio: scale.value > 0 ? 1 / scale.value : 1 })
+  return stage.toDataURL({ pixelRatio: displayScale.value > 0 ? 1 / displayScale.value : 1 })
 }
 
 defineExpose({ export: exportImage })
@@ -217,21 +238,28 @@ defineExpose({ export: exportImage })
 
 <template>
   <div class="space-y-2">
-    <div class="flex gap-1">
+    <div class="flex flex-wrap items-center gap-1">
       <UButton size="xs" :variant="tool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="tool = 'pen'" />
       <UButton size="xs" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
       <UButton size="xs" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
       <UButton size="xs" :variant="tool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="tool = 'text'" />
+
+      <div class="mx-1 flex items-center gap-1">
+        <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut" />
+        <span class="w-10 text-center text-xs text-(--ui-text-muted)">{{ Math.round(zoom * 100) }}%</span>
+        <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn" />
+      </div>
+
       <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
     </div>
 
     <!--
       Width-only scaling (see `scale` above) can leave a tall capture taller
-      than the dialog has room for. Scrolling this box rather than shrinking
-      the stage further keeps pen strokes and text at a size someone can
-      actually draw and read.
+      than the dialog has room for, and zooming in can make either dimension
+      bigger than the dialog — `overflow-auto` on both axes, not just `-y`,
+      lets the zoom controls actually earn their keep.
     -->
-    <div class="max-h-[70vh] overflow-y-auto">
+    <div class="max-h-[75vh] overflow-auto">
       <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
         <v-stage
           v-if="image"

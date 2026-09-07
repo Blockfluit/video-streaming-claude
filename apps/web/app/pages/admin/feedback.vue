@@ -160,13 +160,13 @@ useHead({ title: 'Feedback' })
       </UButton>
     </div>
 
-    <UModal :open="viewing !== null" title="Screenshot" @update:open="viewing = null">
+    <UModal :open="viewing !== null" title="Screenshot" :ui="{ content: 'max-w-4xl' }" @update:open="viewing = null">
       <template #body>
         <img
           v-if="viewing"
           :src="`/api/admin/feedback/${viewing.id}/screenshot`"
           alt="Submitted screenshot"
-          class="w-full rounded"
+          class="mx-auto max-h-[85vh] w-full rounded object-contain"
         >
       </template>
     </UModal>

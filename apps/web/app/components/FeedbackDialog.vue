@@ -68,7 +68,7 @@ async function submit() {
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Send feedback">
+  <UModal v-model:open="open" title="Send feedback" :ui="{ content: 'max-w-4xl' }">
     <template #body>
       <div class="space-y-4">
         <FeedbackAnnotator v-if="screenshot" ref="annotator" :screenshot="screenshot" />
