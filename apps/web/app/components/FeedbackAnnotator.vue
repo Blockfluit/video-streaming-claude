@@ -109,7 +109,7 @@ watch(textInput, (value) => {
   if (value) nextTick(() => textInputEl.value?.focus())
 })
 
-interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } } }
+interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } }, evt: Event }
 
 function pointerPosition(event: KonvaPointerEvent): { x: number, y: number } | null {
   return event.target.getStage().getRelativePointerPosition()
@@ -120,6 +120,21 @@ function onPointerDown(event: KonvaPointerEvent) {
   if (!pos) return
 
   if (tool.value === 'text') {
+    /*
+     * `preventDefault` on the native pointerdown, not tidiness. Without it,
+     * the browser's own default mousedown action — shifting focus toward the
+     * click target, since a bare `<canvas>` is not itself focusable — lands
+     * *after* Vue has patched the DOM and the `watch` above has already
+     * focused the freshly-mounted `<input>`. That later, browser-driven focus
+     * shift then blurs the input we just focused, which fires `commitText`
+     * via `@blur` before a single character can be typed — found by
+     * instrumenting a real browser session (`document.addEventListener`
+     * `focusin`/`focusout`), where the input reliably received focus and
+     * then lost it again within the same task, every time. Reproduced with
+     * Playwright and confirmed fixed by this line: without it the text tool
+     * is not merely fragile, it cannot be used to enter text at all.
+     */
+    event.evt.preventDefault?.()
     textInput.value = { x: pos.x, y: pos.y, displayX: pos.x * scale.value, displayY: pos.y * scale.value }
     textValue.value = ''
     return
