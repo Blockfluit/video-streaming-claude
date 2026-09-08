@@ -494,6 +494,56 @@ describe('Watch tracking (real database)', () => {
       expect(response.body.inMyList).toBe(false);
     });
 
+    /**
+     * The scoring math itself is `common/match/taste-profile.spec.ts`. What is
+     * worth a real database is the threshold gate and self-exclusion, both of
+     * which need real watch history to observe.
+     */
+    describe('the match score', () => {
+      it('hides the match score for a viewer with too little watch history', async () => {
+        const response = await viewer.get(`/videos/${videoId}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('shows a match score once the viewer clears the minimum watch history', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo({ genres: ['Drama'] });
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      it('never inflates a video’s score by counting its own evidence', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Action'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+
+        // Completed too, with a genre found nowhere else — if its own evidence
+        // leaked into its own profile, it would score itself a near-perfect
+        // match on that genre alone.
+        const target = await seedVideo({ genres: ['Zzzunique'] });
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, target).expect(
+          200,
+        );
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+        expect(response.body.matchScore).toBeLessThan(30);
+      });
+    });
+
     it('gives an admin the aggregate', async () => {
       await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }).expect(200);
       await beat(admin, { playSessionId: randomUUID(), positionSec: 300, deltaSec: 30 }).expect(200);

@@ -7,6 +7,7 @@ import {
   type WatchTotals,
 } from '@video/shared';
 
+import { matchScoreFor } from '../common/match/match';
 import { whereVisible } from '../common/publishing';
 import { savedToList } from '../common/watchlist';
 import type { Role } from '../prisma/generated/enums';
@@ -209,9 +210,20 @@ export class WatchService {
     // My List button has to learn its own state from.
     const inMyList = await savedToList(this.prisma, userId, { videoId });
 
-    if (role !== 'ADMIN') return { mine, inMyList };
+    // Always present, `null` meaning hidden — same convention as `mine` above.
+    // Hidden below `MIN_STRONG_SIGNALS`, and never inflated by the video
+    // matching itself: `matchScoreFor` excludes this video's own evidence
+    // before scoring it.
+    const matchScore = await matchScoreFor(this.prisma, userId, { videoId });
 
-    return { mine, inMyList, totals: await this.totals({ videoId }, video.durationSec) };
+    if (role !== 'ADMIN') return { mine, inMyList, matchScore };
+
+    return {
+      mine,
+      inMyList,
+      matchScore,
+      totals: await this.totals({ videoId }, video.durationSec),
+    };
   }
 
   /**

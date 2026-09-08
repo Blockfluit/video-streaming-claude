@@ -120,6 +120,8 @@ const { data: stats } = await useApiData<{
    * something already saved, every time.
    */
   inMyList: boolean
+  /** Hidden — `null` — for a viewer whose taste profile is still too new to score. */
+  matchScore: number | null
 }>(
   () => `summary-stats-${video.value?.id ?? 'none'}`,
   () => `/videos/${video.value!.id}/stats`,
@@ -225,6 +227,7 @@ useHead(() => ({ title: video.value?.title ?? 'Library' }))
           <span v-if="video.year">{{ video.year }}</span>
           <span v-if="metaLine">{{ metaLine }}</span>
           <QualityBadge :width="video.width" :height="video.height" />
+          <MatchBadge :score="stats?.matchScore" />
           <!--
             An age rating reads as a rating, so it is bordered rather than filled:
             a solid badge here competes with the quality badge beside it, and the

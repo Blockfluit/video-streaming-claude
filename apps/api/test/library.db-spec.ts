@@ -810,6 +810,56 @@ describe('Library (real database)', () => {
       expect(response.body.inMyList).toBe(false);
     });
 
+    /**
+     * The scoring math itself is `common/match/taste-profile.spec.ts`. What is
+     * worth a real database is the threshold gate and self-exclusion, which
+     * need real watch history to observe.
+     */
+    describe('the match score', () => {
+      /** A completed, standalone video with a duration heartbeats can complete. */
+      async function completedFiller(genres: string[]): Promise<void> {
+        const filler = await seedStandaloneVideo(`Filler ${Math.random()}`, {
+          durationSec: 120,
+          genres,
+        });
+        await beat(filler.id, 119);
+      }
+
+      it('hides the match score for a caller with too little watch history', async () => {
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('shows a match score once the caller clears the minimum watch history', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+        await prisma.collection.update({ where: { id: show.id }, data: { genres: ['Drama'] } });
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      it('never inflates a show’s score by counting its own episodes as evidence', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Action']);
+
+        // The show's own episodes carry a genre found nowhere else — if they
+        // leaked into the profile, the show would score itself a near-perfect
+        // match on that genre alone.
+        await prisma.video.updateMany({
+          where: { id: { in: [first.id, second.id] } },
+          data: { genres: ['Zzzunique'] },
+        });
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+        expect(response.body.matchScore).toBeLessThan(30);
+      });
+    });
+
     it('never offers a draft video to a USER', async () => {
       const draft = await seedVideo(show.id, 'Zero', publishable, { orderIndex: 0 });
       const user = await asUser();
@@ -853,7 +903,12 @@ describe('Library (real database)', () => {
 
       const response = await admin.get(`/collections/${empty.slug}/progress`).expect(200);
 
-      expect(response.body).toEqual({ next: null, items: [], inMyList: false });
+      expect(response.body).toEqual({
+        next: null,
+        items: [],
+        inMyList: false,
+        matchScore: null,
+      });
     });
   });
 

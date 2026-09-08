@@ -1,0 +1,12 @@
+-- A computed home-page row ranked by "% Match" against each viewer's own
+-- watch history and My List.
+--
+-- Admin opt-in, like TRENDING/MOST_VIEWED — not a third auto-seeded personal
+-- row alongside CONTINUE_WATCHING/MY_LIST. Those two are hardcoded-position
+-- backward compatibility for a page that showed them before this schema
+-- existed; RECOMMENDED has no prior hardcoded existence to preserve, and it
+-- is meaningfully more expensive to compute, which is exactly what an admin
+-- should turn on deliberately. So this migration touches neither the seed
+-- data nor the hand-appended partial unique index on CuratedList — both
+-- still name only CONTINUE_WATCHING and MY_LIST, on purpose.
+ALTER TYPE "RowSource" ADD VALUE 'RECOMMENDED';

@@ -35,7 +35,9 @@ export type ListWatchlistQuery = z.infer<typeof listWatchlistSchema>;
 
 /**
  * Where a row's contents come from. Ordered as an admin meets them: the one they
- * build by hand, the computed ones, then the two that resolve per viewer. The
+ * build by hand, the computed ones, then the three that resolve per viewer.
+ * RECOMMENDED sits at the bridge — it goes through the same computed codepath
+ * as TRENDING/MOST_VIEWED, but personalises like the two after it. The
  * admin UI renders its options from this, so a source added later appears
  * without anyone having to remember a second list.
  */
@@ -44,6 +46,7 @@ export const ROW_SOURCES = [
   'RECENTLY_ADDED',
   'TRENDING',
   'MOST_VIEWED',
+  'RECOMMENDED',
   'CONTINUE_WATCHING',
   'MY_LIST',
 ] as const;
@@ -93,6 +96,11 @@ export const ROW_SOURCE_SPECS: Record<RowSource, RowSourceSpec> = {
   MOST_VIEWED: {
     label: 'Most viewed',
     hint: 'Most views since the library started. Steadier than trending, and slower to change.',
+    fields: ['kind', 'maxItems', 'tags'],
+  },
+  RECOMMENDED: {
+    label: 'Recommended for you',
+    hint: 'Personalised to each viewer’s watch history and My List. Hidden entirely for a viewer whose profile is still too new to score.',
     fields: ['kind', 'maxItems', 'tags'],
   },
   CONTINUE_WATCHING: {

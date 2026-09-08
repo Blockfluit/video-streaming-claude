@@ -668,6 +668,7 @@ enum RowSource {
   RECENTLY_ADDED
   TRENDING // watched most inside a rolling window
   MOST_VIEWED // all-time view count
+  RECOMMENDED // personalised match score, admin opt-in like TRENDING/MOST_VIEWED
   CONTINUE_WATCHING
   MY_LIST
 }
