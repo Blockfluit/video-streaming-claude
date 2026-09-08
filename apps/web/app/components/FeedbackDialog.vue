@@ -69,9 +69,16 @@ async function submit() {
 
 <template>
   <!--
-    Fixed at 80% of the viewport in both directions, not just a max-width —
-    a bigger modal was asked for explicitly, and a screenshot benefits from
-    the height too, not only the width.
+    Fixed as a share of the viewport in both directions, not just a
+    max-width — a bigger modal was asked for explicitly. Width and height
+    are deliberately different shares (70/85, not 80/80): the annotator
+    fits its image by *width* alone (see its own scale comment), so a
+    dialog shaped too wide relative to its height produces a display size
+    taller than the space available for it, forcing a vertical scroll on
+    the very first paint — before anyone has touched the zoom controls,
+    which reads as "already zoomed in." Less width and more height brings
+    the width-driven fit size back within the vertical room actually on
+    offer, checked against a 1920×1080 screen specifically.
 
     `body` drops Nuxt UI's default `overflow-y-auto` in favour of
     `overflow-hidden`: without that, scrolling a tall annotated image would
@@ -86,7 +93,7 @@ async function submit() {
     v-model:open="open"
     title="Send feedback"
     :ui="{
-      content: 'w-[80vw] max-w-[80vw] h-[80vh] max-h-[80vh]',
+      content: 'w-[58vw] max-w-[58vw] h-[90vh] max-h-[90vh]',
       body: 'flex-1 min-h-0 overflow-hidden flex flex-col',
     }"
   >
