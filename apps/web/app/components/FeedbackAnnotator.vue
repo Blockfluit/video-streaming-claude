@@ -42,6 +42,23 @@
  * when the modifier is held — an unmodified wheel still scrolls the wrapper
  * normally. Konva itself is never asked to zoom; `zoom` driving `displayScale`
  * is the only zoom mechanism, shared with the toolbar buttons.
+ *
+ * Zooming keeps a point fixed rather than always growing from the top-left —
+ * `zoomTo()` records which *content* pixel currently sits under the anchor
+ * (the cursor, for a wheel zoom; the wrapper's own centre, for a toolbar
+ * button, which has no cursor-over-the-image position to anchor to), applies
+ * the new zoom, then — after `nextTick`, once the resized content has
+ * actually been painted, since setting `scrollLeft`/`scrollTop` against the
+ * *old* size gets silently clamped to it — sets `scrollLeft`/`scrollTop` so
+ * that same content pixel ends up back under the anchor. "Content pixels"
+ * here means natural-resolution units divided out of the current
+ * `displayScale`, the same space `pointerPosition()` already works in.
+ *
+ * The hand tool pans by writing `scrollLeft`/`scrollTop` directly from raw
+ * pointer deltas — it is the one tool that does not go through
+ * `pointerPosition()`/Konva coordinates at all, because panning is a fact
+ * about the scroll wrapper (a plain element), not about where anything
+ * would be drawn.
  */
 import type Konva from 'konva'
 import type { VueKonvaRef } from 'vue-konva'
@@ -50,7 +67,7 @@ const props = defineProps<{
   screenshot: string
 }>()
 
-type Tool = 'pen' | 'rectangle' | 'arrow' | 'text'
+type Tool = 'pen' | 'rectangle' | 'arrow' | 'text' | 'hand'
 
 interface LineShape { id: number, type: 'line', config: { points: number[], stroke: string, strokeWidth: number, lineCap: 'round', lineJoin: 'round' } }
 interface RectShape { id: number, type: 'rect', config: { x: number, y: number, width: number, height: number, stroke: string, strokeWidth: number } }
@@ -72,6 +89,8 @@ const currentShape = ref<Shape | null>(null)
 const drawing = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const zoom = ref(1)
+const panning = ref(false)
+const panStart = ref({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 })
 
 let nextId = 0
 const newId = () => nextId++
@@ -130,19 +149,58 @@ const stageConfig = computed(() => ({
   scaleY: displayScale.value,
 }))
 
-function zoomIn() {
-  zoom.value = Math.min(MAX_ZOOM, Math.round((zoom.value + ZOOM_STEP) * 100) / 100)
-}
-function zoomOut() {
-  zoom.value = Math.max(MIN_ZOOM, Math.round((zoom.value - ZOOM_STEP) * 100) / 100)
+function clampZoom(value: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100))
 }
 
-/** Ctrl+scroll (or a trackpad pinch, which browsers report as a ctrl-flagged wheel event) zooms; a plain wheel scrolls the wrapper as normal. */
+/**
+ * Changes zoom while keeping one point of the *content* fixed under a given
+ * position in the scroll wrapper's own viewport — `anchorX`/`anchorY`
+ * default to its centre, for callers (the toolbar buttons) with no cursor
+ * position to anchor to.
+ */
+function zoomTo(newZoom: number, anchorX?: number, anchorY?: number) {
+  const wrapper = scrollWrapperEl.value
+  if (!wrapper || newZoom === zoom.value) {
+    zoom.value = newZoom
+    return
+  }
+
+  const ax = anchorX ?? wrapper.clientWidth / 2
+  const ay = anchorY ?? wrapper.clientHeight / 2
+  const oldScale = displayScale.value
+
+  // The anchor's position in scale-independent content units — the same
+  // space shape coordinates live in.
+  const contentX = (wrapper.scrollLeft + ax) / oldScale
+  const contentY = (wrapper.scrollTop + ay) / oldScale
+
+  zoom.value = newZoom
+
+  nextTick(() => {
+    const newScale = displayScale.value
+    wrapper.scrollLeft = contentX * newScale - ax
+    wrapper.scrollTop = contentY * newScale - ay
+  })
+}
+
+function zoomIn(anchorX?: number, anchorY?: number) {
+  zoomTo(clampZoom(zoom.value + ZOOM_STEP), anchorX, anchorY)
+}
+function zoomOut(anchorX?: number, anchorY?: number) {
+  zoomTo(clampZoom(zoom.value - ZOOM_STEP), anchorX, anchorY)
+}
+
+/** Ctrl+scroll (or a trackpad pinch, which browsers report as a ctrl-flagged wheel event) zooms toward the cursor; a plain wheel scrolls the wrapper as normal. */
 function onWheel(event: WheelEvent) {
   if (!event.ctrlKey && !event.metaKey) return
   event.preventDefault()
-  if (event.deltaY < 0) zoomIn()
-  else zoomOut()
+  const wrapper = scrollWrapperEl.value
+  const rect = wrapper?.getBoundingClientRect()
+  const anchorX = rect ? event.clientX - rect.left : undefined
+  const anchorY = rect ? event.clientY - rect.top : undefined
+  if (event.deltaY < 0) zoomIn(anchorX, anchorY)
+  else zoomOut(anchorX, anchorY)
 }
 
 /** Skipped while typing — the text tool's own input, or the dialog's message field — so Ctrl+Z there undoes a keystroke, not a shape. */
@@ -183,13 +241,26 @@ watch(textInput, (value) => {
   if (value) nextTick(() => textInputEl.value?.focus())
 })
 
-interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } }, evt: Event }
+interface KonvaPointerEvent { target: { getStage: () => { getRelativePointerPosition: () => { x: number, y: number } | null } }, evt: PointerEvent }
 
 function pointerPosition(event: KonvaPointerEvent): { x: number, y: number } | null {
   return event.target.getStage().getRelativePointerPosition()
 }
 
 function onPointerDown(event: KonvaPointerEvent) {
+  if (tool.value === 'hand') {
+    const wrapper = scrollWrapperEl.value
+    if (!wrapper) return
+    panning.value = true
+    panStart.value = {
+      x: event.evt.clientX,
+      y: event.evt.clientY,
+      scrollLeft: wrapper.scrollLeft,
+      scrollTop: wrapper.scrollTop,
+    }
+    return
+  }
+
   const pos = pointerPosition(event)
   if (!pos) return
 
@@ -239,6 +310,15 @@ function onPointerDown(event: KonvaPointerEvent) {
 }
 
 function onPointerMove(event: KonvaPointerEvent) {
+  if (tool.value === 'hand') {
+    if (!panning.value) return
+    const wrapper = scrollWrapperEl.value
+    if (!wrapper) return
+    wrapper.scrollLeft = panStart.value.scrollLeft - (event.evt.clientX - panStart.value.x)
+    wrapper.scrollTop = panStart.value.scrollTop - (event.evt.clientY - panStart.value.y)
+    return
+  }
+
   if (!drawing.value || !currentShape.value) return
   const pos = pointerPosition(event)
   if (!pos) return
@@ -255,6 +335,11 @@ function onPointerMove(event: KonvaPointerEvent) {
 }
 
 function onPointerUp() {
+  if (tool.value === 'hand') {
+    panning.value = false
+    return
+  }
+
   if (drawing.value && currentShape.value) {
     shapes.value.push(currentShape.value)
   }
@@ -303,11 +388,12 @@ defineExpose({ export: exportImage })
       <UButton size="md" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
       <UButton size="md" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
       <UButton size="md" :variant="tool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="tool = 'text'" />
+      <UButton size="md" :variant="tool === 'hand' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-hand" aria-label="Move" @click="tool = 'hand'" />
 
       <div class="mx-1 flex items-center gap-1.5">
-        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut" />
+        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut()" />
         <span class="w-12 text-center text-sm text-(--ui-text-muted)">{{ Math.round(zoom * 100) }}%</span>
-        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn" />
+        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn()" />
       </div>
 
       <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
@@ -324,7 +410,12 @@ defineExpose({ export: exportImage })
       this box normally, which is what happens by default when `onWheel`
       returns early for anything without Ctrl/Cmd held.
     -->
-    <div ref="scrollWrapper" class="min-h-0 flex-1 overflow-auto" @wheel="onWheel">
+    <div
+      ref="scrollWrapper"
+      class="min-h-0 flex-1 overflow-auto"
+      :class="tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''"
+      @wheel="onWheel"
+    >
       <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
         <v-stage
           v-if="image"
