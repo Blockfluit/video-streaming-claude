@@ -27,7 +27,7 @@ interface CardVideo {
   width?: number | null
   height?: number | null
   /** Every collection this video is in; empty for a standalone one. */
-  collections: { collection: { slug: string, title: string } }[]
+  collections: { seasonId: string | null, collection: { slug: string, title: string } }[]
   /** Null means there is none, so the card does not ask for it. */
   bannerKey?: string | null
   /** The hero plays it. Null is the ordinary state of most of a library. */
@@ -329,8 +329,10 @@ function card(entry: RowItem) {
   const video = entry.video as CardVideo
   return {
     // Something already started goes straight back into playback; anything
-    // else lands on the page that describes it first.
-    to: entry.progress ? playPath(video) : videoPath(video),
+    // else lands on the page that describes it first. A season-bearing
+    // membership travels with the video itself, so a resumed episode still
+    // gets the player's Previous/Next — see `resumeCollectionSlug`.
+    to: entry.progress ? playPath(video, resumeCollectionSlug(video)) : videoPath(video),
     title: video.title,
     subtitle: collectionTitle(video),
     imageUrl: videoPoster(video),

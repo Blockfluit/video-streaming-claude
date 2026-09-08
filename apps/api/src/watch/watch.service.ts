@@ -34,6 +34,11 @@ const HISTORY_VIDEO_SELECT = {
     orderBy: { addedAt: 'asc' },
     select: {
       orderIndex: true,
+      // A season-bearing membership is what tells the player which
+      // collection to resume with a stepper — `resumeCollectionSlug`
+      // (`app/utils/links.ts`) uses it the same way `detailsPath` finds an
+      // episode's series, rather than trusting `collections[0]`.
+      seasonId: true,
       collection: { select: { id: true, slug: true, title: true } },
       season: { select: { id: true, slug: true, number: true } },
     },

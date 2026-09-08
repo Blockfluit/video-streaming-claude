@@ -71,12 +71,15 @@ export function videoPath(video: LinkableVideo): string {
  * belongs to any number of collections, and `seasonId` and `orderIndex` sit on
  * the membership, so the same episode can be episode 3 of a show and item 1 of a
  * best-of row. Once the link has been followed there is no honest way to choose
- * between them — the surface that built the link is the one that knew.
+ * between them for a card that has no membership of its own in hand — the
+ * surface that built the link is the one that knew.
  *
  * So the surfaces on the "plays" side of the rule above pass it, because being
  * inside a collection is exactly what put them there. Continue Watching and
- * History do not: they hold a video and a position, with no collection in hand.
- * Passing nothing is an ordinary state and simply means no stepper.
+ * History pass `resumeCollectionSlug(video)` below, since a video's own
+ * memberships travel with it wherever it is fetched. Passing nothing is still
+ * an ordinary state — a standalone film, or a video with no season-bearing
+ * membership — and simply means no stepper.
  */
 export function playPath(video: LinkableVideo, fromCollectionSlug?: string | null): string {
   const path = `/watch/${video.slug}`
@@ -88,6 +91,11 @@ export function playPath(video: LinkableVideo, fromCollectionSlug?: string | nul
 /** Enough of a membership to tell an episode from everything else. */
 export interface DescribableVideo extends LinkableVideo {
   collections?: { seasonId: string | null, collection: LinkableCollection }[] | null
+}
+
+/** The one membership, if any, that makes a video an episode of a series. */
+function seasonBearingCollection(video: DescribableVideo): LinkableCollection | null {
+  return video.collections?.find(membership => membership.seasonId)?.collection ?? null
 }
 
 /**
@@ -111,8 +119,27 @@ export interface DescribableVideo extends LinkableVideo {
  * answer that ordering wrongly.
  */
 export function detailsPath(video: DescribableVideo): string {
-  const episodeOf = video.collections?.find(membership => membership.seasonId)
-  return episodeOf ? collectionPath(episodeOf.collection) : videoPath(video)
+  const collection = seasonBearingCollection(video)
+  return collection ? collectionPath(collection) : videoPath(video)
+}
+
+/**
+ * Which collection a Continue Watching or History card should resume into.
+ *
+ * These rows hold a video and a position, fetched on their own rather than
+ * through a collection page — but the video's own memberships still travel
+ * with it, so the same test `detailsPath` uses to find an episode's series
+ * applies here too. `collections[0]`, what the "from …" subtitle under the
+ * title already reads, is exactly the ordering `detailsPath` warns against:
+ * a video can be an episode of one collection and an extra in another, and
+ * resuming into the extra's list would step through the wrong shelf entirely.
+ *
+ * Null is the honest answer for a standalone film or a video with no
+ * season-bearing membership — passing it leaves `playPath` with no stepper,
+ * exactly as if the surface had passed nothing at all.
+ */
+export function resumeCollectionSlug(video: DescribableVideo): string | null {
+  return seasonBearingCollection(video)?.slug ?? null
 }
 
 /**

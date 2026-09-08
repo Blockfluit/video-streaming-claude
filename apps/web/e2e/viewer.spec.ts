@@ -1119,6 +1119,85 @@ test.describe('viewer', () => {
   })
 
   /**
+   * Continue Watching resumes with a stepper too, now that it can.
+   *
+   * A video's own memberships travel with it wherever it is fetched — Continue
+   * Watching holds the video straight from `/me/history`, not through a
+   * collection page, but a season-bearing membership is exactly as available
+   * there as it is here. `resumeCollectionSlug` (`app/utils/links.ts`) is what
+   * turns that into the `?from=` the player needs, the same way `detailsPath`
+   * finds an episode's series rather than trusting `collections[0]`.
+   *
+   * Picked from the same shape the test above needs — one season, two videos
+   * — so seeding progress on the first video leaves a real next episode to
+   * step to.
+   */
+  test('a Continue Watching card resumes with a stepper', async ({ page }) => {
+    await visit(page, '/browse')
+    const target = await page.evaluate(async () => {
+      const list = await (await fetch('/api/collections?limit=100')).json()
+      for (const collection of list.items ?? []) {
+        const detail = await (await fetch(`/api/collections/${collection.slug}`)).json()
+        // Exactly one season, not merely "at most one": a saga of films with no
+        // seasons at all matches the shape the older stepper test needs — every
+        // link built on its own collection page carries `from=` regardless of
+        // seasons — but has no season-bearing membership for a video fetched on
+        // its own to carry into Continue Watching, which is the ability this
+        // test is checking for.
+        const episodes = (detail.videos ?? []).filter(
+          (v: { seasonId: string | null }) => v.seasonId,
+        )
+        if ((detail.seasons ?? []).length === 1 && episodes.length > 1) {
+          return {
+            collectionSlug: collection.slug as string,
+            video: episodes[0] as { id: string, slug: string, durationSec: number | null },
+          }
+        }
+      }
+      return null
+    })
+    test.skip(target === null, 'no collection here holds two episodes in one season')
+    const { collectionSlug, video } = target!
+
+    // A third of the way in, like the resume test above — far enough to be a
+    // real position, short of the 90% mark that would mark it finished and
+    // drop it out of Continue Watching entirely.
+    const duration = video.durationSec ?? 0
+    const seeded = Math.max(6, duration / 3)
+    test.skip(
+      !(duration > 0) || seeded >= duration * 0.9,
+      `the sample clip runs ${duration}s, too short to hold an unfinished position`,
+    )
+
+    await page.evaluate(
+      async ({ id, positionSec }) => {
+        await fetch(`/api/videos/${id}/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playSessionId: crypto.randomUUID(), positionSec, deltaSec: 1 }),
+        })
+      },
+      { id: video.id, positionSec: seeded },
+    )
+
+    await visit(page, '/')
+    const row = page.locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Continue watching' }) })
+    const card = row.locator(`a[href^="/watch/${video.slug}"]`)
+    await expect(card).toBeVisible()
+
+    const href = await card.getAttribute('href')
+    expect(
+      new URL(href!, page.url()).searchParams.get('from'),
+      'the video\'s own season-bearing membership travels with it into Continue Watching, same as a link built on a collection page',
+    ).toBe(collectionSlug)
+
+    await card.click()
+    await page.waitForURL(url => url.pathname + url.search === href)
+    await expect(page.getByRole('link', { name: 'Next episode' })).toBeVisible()
+  })
+
+  /**
    * The stepper is scoped by the URL, and this is what that costs.
    *
    * A video belongs to any number of collections, and where it sits is a fact

@@ -945,8 +945,14 @@ npm workspaces monorepo: `apps/web`, `apps/api`, `packages/shared`
   optional second argument.** Must travel in the URL: a video belongs to any number of collections and
   `seasonId`/`orderIndex` sit on the *membership*, so the same episode is episode 3 of a show and item 1
   of a best-of row — the player can't derive one running order from the video alone. `collections[0]` is
-  the tempting fix and is wrong for anything in two collections. Every "plays" surface passes it; Continue
-  Watching and History don't, since they hold a video and position with no collection in hand.
+  the tempting fix and is wrong for anything in two collections. Every "plays" surface inside a collection
+  passes the membership it already knew it was on. **Continue Watching and History pass
+  `resumeCollectionSlug(video)`** (`app/utils/links.ts`) instead of `collections[0]`: unlike a page reached
+  *through* a collection, these hold a video fetched on its own, but its memberships still travel with it,
+  so the same season-bearing-membership test `detailsPath` uses to find an episode's series picks the one
+  unambiguous collection to resume with — never the first, which is exactly the ordering that can be an
+  extra in one show and an episode of another. No season-bearing membership (a standalone film, or one in
+  only a saga collection) resumes with no stepper, same as passing nothing.
 - **`GET /videos?collectionId=…` is sorted by `title, id` and is not an episode order.** Deliberate — a
   library-wide listing has no single running order — and reading a sequence off it is how the outro's
   "Next episode" spent months going to the alphabetically next title. The order comes from
