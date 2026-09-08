@@ -7,6 +7,7 @@ import {
   imdbTitleUrl,
   personPath,
   playPath,
+  resumeCollectionSlug,
   videoPath,
 } from './links'
 
@@ -100,9 +101,9 @@ describe('playPath', () => {
 
   /**
    * The surfaces where the question is still what to watch pass nothing, and
-   * neither do Continue Watching and History, which hold a video and a position
-   * with no collection in hand. Every one of those call sites is untouched, so
-   * the no-argument form has to stay exactly what it was.
+   * so does a Continue Watching or History card built from `resumeCollectionSlug`
+   * for a video with no season-bearing membership. The no-argument form has to
+   * stay exactly what it was for both.
    */
   it('is unchanged when there is no collection to name', () => {
     expect(playPath({ slug: 'the-film' })).toBe('/watch/the-film')
@@ -181,6 +182,48 @@ describe('detailsPath', () => {
 
   it('never sends the player to another player', () => {
     expect(detailsPath(episode)).not.toContain('/watch/')
+  })
+})
+
+/**
+ * What Continue Watching and History pass as `playPath`'s second argument.
+ * Same test as `detailsPath`, since both need the one membership that makes a
+ * video an episode of a series rather than an extra somewhere else.
+ */
+describe('resumeCollectionSlug', () => {
+  it('finds the series behind an episode', () => {
+    expect(resumeCollectionSlug({
+      slug: 'pilot',
+      collections: [{ seasonId: 'season-1', collection: { slug: 'the-big-sky' } }],
+    })).toBe('the-big-sky')
+  })
+
+  /**
+   * The reason this isn't `collections[0]`: a video can be an episode of one
+   * collection and an extra in another, and resuming into the extra's list
+   * would step the player through the wrong shelf entirely.
+   */
+  it('skips a non-season membership listed first', () => {
+    expect(resumeCollectionSlug({
+      slug: 'pilot',
+      collections: [
+        { seasonId: null, collection: { slug: 'staff-picks' } },
+        { seasonId: 'season-1', collection: { slug: 'the-big-sky' } },
+      ],
+    })).toBe('the-big-sky')
+  })
+
+  it('has nothing to offer for a film in a saga, same as a standalone one', () => {
+    expect(resumeCollectionSlug({
+      slug: 'deathly-hallows',
+      collections: [{ seasonId: null, collection: { slug: 'harry-potter' } }],
+    })).toBeNull()
+    expect(resumeCollectionSlug({ slug: 'arrival', collections: [] })).toBeNull()
+  })
+
+  it('survives a video that arrived without its memberships', () => {
+    expect(resumeCollectionSlug({ slug: 'arrival' })).toBeNull()
+    expect(resumeCollectionSlug({ slug: 'arrival', collections: null })).toBeNull()
   })
 })
 

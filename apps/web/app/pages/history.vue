@@ -14,7 +14,7 @@ interface HistoryItem {
     title: string
     durationSec: number | null
     /** Every collection this video is in; empty for a standalone one. */
-    collections: { collection: { slug: string, title: string } }[]
+    collections: { seasonId: string | null, collection: { slug: string, title: string } }[]
   }
   progress: {
     lastPositionSec: number
@@ -60,7 +60,7 @@ useHead({ title: 'History' })
           Back into playback rather than to the description: a history row is a
           resume surface, and its whole subject is where you got to.
         -->
-        <NuxtLink :to="playPath(item.video)" class="grow min-w-0">
+        <NuxtLink :to="playPath(item.video, resumeCollectionSlug(item.video))" class="grow min-w-0">
           <p class="font-medium truncate">{{ item.video.title }}</p>
           <p class="text-sm text-(--ui-text-muted) truncate">
             {{ collectionTitle(item.video) }}
