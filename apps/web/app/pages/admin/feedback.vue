@@ -191,14 +191,31 @@ useHead({ title: 'Feedback' })
       </UButton>
     </div>
 
-    <UModal :open="viewing !== null" title="Screenshot" :ui="{ content: 'max-w-4xl' }" @update:open="viewing = null">
+    <!--
+      The screenshot at its native resolution, not shrunk to fit — a capture
+      is routinely wider and taller than 85vh, and squeezing it down is
+      exactly what a moderator reviewing a small UI detail doesn't want.
+      `overflow-auto` on a fixed-height frame scrolls the picture instead;
+      `w-max` keeps the image itself from being flexed down to the frame's
+      width the way `w-full` would.
+    -->
+    <UModal
+      :open="viewing !== null"
+      title="Screenshot"
+      :ui="{ content: 'max-w-4xl', body: 'p-0' }"
+      @update:open="viewing = null"
+    >
       <template #body>
-        <img
+        <div
           v-if="viewing"
-          :src="`/api/admin/feedback/${viewing.id}/screenshot`"
-          alt="Submitted screenshot"
-          class="mx-auto max-h-[85vh] w-full rounded object-contain"
+          class="max-h-[80vh] overflow-auto rounded-b-lg border-t border-(--ui-border) bg-(--ui-bg-elevated)"
         >
+          <img
+            :src="`/api/admin/feedback/${viewing.id}/screenshot`"
+            alt="Submitted screenshot"
+            class="mx-auto block w-max max-w-none"
+          >
+        </div>
       </template>
     </UModal>
   </div>

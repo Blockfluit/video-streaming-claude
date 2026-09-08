@@ -6,9 +6,15 @@
  * module scope — is never pulled into the SSR bundle; this only ever runs
  * from a click. Cannot capture cross-origin iframes (the hero trailer) or
  * reliably capture <video>/live <canvas> content — those render blank or
- * frozen. Not worked around; the text message still describes what's wrong,
- * and a failed capture degrades to a text-only submission rather than
- * blocking the dialog.
+ * frozen. Icons render as solid boxes in their `background-color`: this
+ * app's icons are CSS `mask-image` (Nuxt Icon's default "css" mode, the
+ * same mode the contrast-audit tooling already assumes), and html2canvas-pro
+ * has no `mask-image` support at all — checked its bundled source, there is
+ * no property descriptor for it and nothing in the renderer applies one.
+ * Switching the app's icon mode would fix it but breaks that audit tooling,
+ * so it stays a known capture gap. None of this is worked around; the text
+ * message still describes what's wrong, and a failed capture degrades to a
+ * text-only submission rather than blocking the dialog.
  *
  * `-pro`, not the original `html2canvas`: the original cannot parse the
  * `oklab`/`oklch` colors this app's Tailwind4/`@nuxt/ui` theme resolves
