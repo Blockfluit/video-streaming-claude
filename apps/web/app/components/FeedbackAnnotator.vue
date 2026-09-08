@@ -59,6 +59,14 @@
  * `pointerPosition()`/Konva coordinates at all, because panning is a fact
  * about the scroll wrapper (a plain element), not about where anything
  * would be drawn.
+ *
+ * This component renders only the image/canvas region — its toolbar lives
+ * in `FeedbackDialog`'s own template instead, in the message column rather
+ * than sitting next to the picture. `defineExpose` below is what makes
+ * that possible without moving any of the state above out of this
+ * component: the parent reads/drives `tool`/`zoom`/`shapes` through the
+ * exposed handle rather than owning any of it itself, so this file stays
+ * the one place that understands Konva, coordinates and scrolling.
  */
 import type Konva from 'konva'
 import type { VueKonvaRef } from 'vue-konva'
@@ -390,90 +398,81 @@ function exportImage(): string {
   return stage.toDataURL({ pixelRatio: displayScale.value > 0 ? 1 / displayScale.value : 1 })
 }
 
-defineExpose({ export: exportImage })
+defineExpose({
+  export: exportImage,
+  tool,
+  setTool: (t: Tool) => { tool.value = t },
+  zoom,
+  canZoomIn: computed(() => zoom.value < MAX_ZOOM),
+  canZoomOut: computed(() => zoom.value > MIN_ZOOM),
+  zoomIn: () => zoomIn(),
+  zoomOut: () => zoomOut(),
+  canUndo: computed(() => shapes.value.length > 0),
+  undo,
+})
 </script>
 
 <template>
   <!--
-    A flex column, not `space-y-*` — the parent (`FeedbackDialog`) gives this
-    component a bounded `flex-1` height so only the image region scrolls, not
-    the whole dialog, and that only works if this root passes the sizing
-    through: the toolbar stays its natural height (`shrink-0`), and the scroll
-    wrapper below is the other `min-h-0 flex-1` in that chain.
+    The scroll wrapper is the whole of this component's own template now —
+    there is no toolbar row above it here (see the top-of-file comment on
+    `defineExpose`). The parent still gives this component a bounded
+    `flex-1` height so only this region scrolls, not the whole dialog;
+    `min-h-0`/`min-w-0` (passed in as fallthrough classes from
+    `FeedbackDialog`) is what lets it actually shrink to that bound rather
+    than growing to fit its content.
+
+    `overflow-auto` on both axes, not just `-y`, because zooming in can
+    make either dimension bigger than what's available, and this is the
+    *only* thing that scrolls — the dialog around it does not. `@wheel` is
+    here rather than on the stage: an unmodified wheel still has to scroll
+    this box normally, which is what happens by default when `onWheel`
+    returns early for anything without Ctrl/Cmd held.
   -->
-  <div class="flex h-full min-h-0 flex-col gap-3">
-    <div class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
-      <UButton size="md" :variant="tool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="tool = 'pen'" />
-      <UButton size="md" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
-      <UButton size="md" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
-      <UButton size="md" :variant="tool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="tool = 'text'" />
-      <UButton size="md" :variant="tool === 'hand' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-hand" aria-label="Move" @click="tool = 'hand'" />
+  <div
+    ref="scrollWrapper"
+    class="overflow-auto"
+    :class="[
+      tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : '',
+      fitsWidth && fitsHeight ? 'flex items-center justify-center' : '',
+    ]"
+    @wheel="onWheel"
+  >
+    <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
+      <v-stage
+        v-if="image"
+        ref="stage"
+        :config="stageConfig"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+      >
+        <v-layer>
+          <v-image :config="imageConfig" />
+          <template v-for="shape in shapes" :key="shape.id">
+            <v-line v-if="shape.type === 'line'" :config="shape.config" />
+            <v-rect v-else-if="shape.type === 'rect'" :config="shape.config" />
+            <v-arrow v-else-if="shape.type === 'arrow'" :config="shape.config" />
+            <v-text v-else :config="shape.config" />
+          </template>
+          <template v-if="currentShape">
+            <v-line v-if="currentShape.type === 'line'" :config="currentShape.config" />
+            <v-rect v-else-if="currentShape.type === 'rect'" :config="currentShape.config" />
+            <v-arrow v-else-if="currentShape.type === 'arrow'" :config="currentShape.config" />
+          </template>
+        </v-layer>
+      </v-stage>
 
-      <div class="mx-1 flex items-center gap-1.5">
-        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut()" />
-        <span class="w-12 text-center text-sm text-(--ui-text-muted)">{{ Math.round(zoom * 100) }}%</span>
-        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn()" />
-      </div>
-
-      <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
-    </div>
-
-    <!--
-      `min-h-0 flex-1`, not a fixed `max-h-*`: this box fills whatever room
-      the dialog actually has (see FeedbackDialog's own comment on the same
-      chain) rather than a vh fraction guessed independently of it.
-      `overflow-auto` on both axes, not just `-y`, because zooming in can
-      make either dimension bigger than what's available, and this is the
-      *only* thing that scrolls — the dialog around it does not. `@wheel` is
-      here rather than on the stage: an unmodified wheel still has to scroll
-      this box normally, which is what happens by default when `onWheel`
-      returns early for anything without Ctrl/Cmd held.
-    -->
-    <div
-      ref="scrollWrapper"
-      class="min-h-0 flex-1 overflow-auto"
-      :class="[
-        tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : '',
-        fitsWidth && fitsHeight ? 'flex items-center justify-center' : '',
-      ]"
-      @wheel="onWheel"
-    >
-      <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
-        <v-stage
-          v-if="image"
-          ref="stage"
-          :config="stageConfig"
-          @pointerdown="onPointerDown"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-        >
-          <v-layer>
-            <v-image :config="imageConfig" />
-            <template v-for="shape in shapes" :key="shape.id">
-              <v-line v-if="shape.type === 'line'" :config="shape.config" />
-              <v-rect v-else-if="shape.type === 'rect'" :config="shape.config" />
-              <v-arrow v-else-if="shape.type === 'arrow'" :config="shape.config" />
-              <v-text v-else :config="shape.config" />
-            </template>
-            <template v-if="currentShape">
-              <v-line v-if="currentShape.type === 'line'" :config="currentShape.config" />
-              <v-rect v-else-if="currentShape.type === 'rect'" :config="currentShape.config" />
-              <v-arrow v-else-if="currentShape.type === 'arrow'" :config="currentShape.config" />
-            </template>
-          </v-layer>
-        </v-stage>
-
-        <input
-          v-if="textInput"
-          ref="textInputEl"
-          v-model="textValue"
-          type="text"
-          class="absolute rounded border border-(--ui-border) bg-(--ui-bg) px-1 text-sm"
-          :style="{ left: `${textInput.displayX}px`, top: `${textInput.displayY - 12}px` }"
-          @blur="commitText"
-          @keydown.enter="commitText"
-        >
-      </div>
+      <input
+        v-if="textInput"
+        ref="textInputEl"
+        v-model="textValue"
+        type="text"
+        class="absolute rounded border border-(--ui-border) bg-(--ui-bg) px-1 text-sm"
+        :style="{ left: `${textInput.displayX}px`, top: `${textInput.displayY - 12}px` }"
+        @blur="commitText"
+        @keydown.enter="commitText"
+      >
     </div>
   </div>
 </template>

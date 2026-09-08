@@ -18,6 +18,25 @@ const message = ref('')
 const submitting = ref(false)
 const annotator = ref<InstanceType<typeof FeedbackAnnotatorComponent> | null>(null)
 
+/*
+ * The toolbar lives here, not inside `FeedbackAnnotator` — it's rendered at
+ * the top of the message column instead of beside the picture (see that
+ * component's own top-of-file comment). Everything it needs is read through
+ * `annotator`'s exposed handle rather than owned here: Vue's `expose()`
+ * proxy auto-unwraps refs in the exposed object, the same way a template
+ * ref's own `.value` already reflects a component's setup-returned refs —
+ * so `annotator.value?.tool` is already the current `Tool` string, not a
+ * ref needing its own `.value`. Wrapped in `computed()` anyway so the
+ * toolbar re-renders when the child's state changes, since a bare read in
+ * the template only re-evaluates on `annotator` itself changing (mount/
+ * unmount), not on the values inside it.
+ */
+const activeTool = computed(() => annotator.value?.tool)
+const zoomPercent = computed(() => Math.round((annotator.value?.zoom ?? 1) * 100))
+const canZoomIn = computed(() => annotator.value?.canZoomIn ?? false)
+const canZoomOut = computed(() => annotator.value?.canZoomOut ?? false)
+const canUndo = computed(() => annotator.value?.canUndo ?? false)
+
 watch(open, (value) => {
   if (!value) message.value = ''
 })
@@ -76,10 +95,13 @@ async function submit() {
     that width, not picked for looks — see the values below for the
     reasoning at whatever they currently are.
 
-    The body is a row, not a column: the annotator (toolbar + image) on the
-    left, the message textarea as its own full-height column on the right —
-    asked for after the stacked layout left the textarea squeezed under a
-    now much bigger image.
+    The body is a row, not a column: the image on the left, a column on the
+    right holding — top to bottom — the annotator's toolbar, the message
+    textarea, and the Cancel/Send buttons. The toolbar sits in this column
+    rather than beside the picture, and Send/Cancel sit under the comment
+    box rather than in a `#footer` spanning both columns — both asked for
+    after the stacked layout put the toolbar next to the image and the
+    buttons in a bar underneath everything.
 
     `body` drops Nuxt UI's default `overflow-y-auto` in favour of
     `overflow-hidden`: without that, scrolling a tall annotated image would
@@ -106,21 +128,37 @@ async function submit() {
           Couldn't capture a screenshot of this page — you can still describe what's wrong below.
         </p>
 
-        <UTextarea
-          v-model="message"
-          :maxlength="MAX_FEEDBACK_MESSAGE_LENGTH"
-          placeholder="What's wrong, or what could be better?"
-          aria-label="Feedback message"
-          class="h-full w-80 shrink-0"
-          :ui="{ root: 'h-full', base: 'h-full resize-none' }"
-        />
-      </div>
-    </template>
+        <div class="flex h-full w-80 shrink-0 flex-col gap-3">
+          <div v-if="screenshot" class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
+            <UButton size="md" :variant="activeTool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="annotator?.setTool('pen')" />
+            <UButton size="md" :variant="activeTool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="annotator?.setTool('rectangle')" />
+            <UButton size="md" :variant="activeTool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="annotator?.setTool('arrow')" />
+            <UButton size="md" :variant="activeTool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="annotator?.setTool('text')" />
+            <UButton size="md" :variant="activeTool === 'hand' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-hand" aria-label="Move" @click="annotator?.setTool('hand')" />
 
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="open = false">Cancel</UButton>
-        <UButton :loading="submitting" :disabled="!message.trim()" @click="submit">Send</UButton>
+            <div class="mx-1 flex items-center gap-1.5">
+              <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="!canZoomOut" aria-label="Zoom out" @click="annotator?.zoomOut()" />
+              <span class="w-12 text-center text-sm text-(--ui-text-muted)">{{ zoomPercent }}%</span>
+              <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="!canZoomIn" aria-label="Zoom in" @click="annotator?.zoomIn()" />
+            </div>
+
+            <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="!canUndo" aria-label="Undo" class="ml-auto" @click="annotator?.undo()" />
+          </div>
+
+          <UTextarea
+            v-model="message"
+            :maxlength="MAX_FEEDBACK_MESSAGE_LENGTH"
+            placeholder="What's wrong, or what could be better?"
+            aria-label="Feedback message"
+            class="min-h-0 flex-1"
+            :ui="{ root: 'h-full', base: 'h-full resize-none' }"
+          />
+
+          <div class="flex shrink-0 justify-end gap-2">
+            <UButton color="neutral" variant="ghost" @click="open = false">Cancel</UButton>
+            <UButton :loading="submitting" :disabled="!message.trim()" @click="submit">Send</UButton>
+          </div>
+        </div>
       </div>
     </template>
   </UModal>
