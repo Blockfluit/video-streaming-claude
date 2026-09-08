@@ -99,67 +99,80 @@ useHead({ title: 'Feedback' })
     </div>
 
     <div v-if="items.length" class="space-y-2">
+      <!--
+        The same shape as the feedback dialog itself: the screenshot in its
+        own framed box on the left, everything else in a column on the
+        right — no toolbar here (there's nothing to draw), but the same
+        "picture on one side, its context on the other" split, rather than
+        the picture as an afterthought stacked under three lines of text.
+      -->
       <article
         v-for="item in items"
         :key="item.id"
-        class="rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-4"
+        class="flex gap-4 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-4"
       >
-        <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="font-medium">{{ item.user.displayName }}</span>
-          <span class="text-(--ui-text-dimmed)">{{ dateTime(item.createdAt) }}</span>
-          <a
-            :href="item.pageUrl"
-            target="_blank"
-            rel="noopener"
-            class="inline-flex items-center gap-1 text-(--ui-text-muted) hover:text-(--ui-text-highlighted)"
-          >
-            <UIcon name="i-lucide-external-link" class="size-3.5 shrink-0" />
-            {{ item.pageUrl }}
-          </a>
-
-          <UButton
-            class="ml-auto"
-            size="xs"
-            color="error"
-            variant="subtle"
-            icon="i-lucide-trash-2"
-            :aria-label="`Remove feedback from ${item.user.displayName}`"
-            @click="remove(item)"
-          >
-            Remove
-          </UButton>
-        </div>
-
-        <p class="mt-2 text-sm whitespace-pre-wrap">{{ item.message }}</p>
-
-        <!--
-          `truncate` rather than letting the full string set the card's
-          width — a user agent is diagnostic detail nobody reads at a
-          glance, and printed in full it routinely outran every other line
-          on the card. The full string is still there on hover via `title`.
-        -->
-        <p class="mt-1 truncate text-xs text-(--ui-text-dimmed)" :title="item.userAgent">
-          {{ item.viewportWidth }}×{{ item.viewportHeight }} · {{ item.userAgent }}
-        </p>
-
-        <!--
-          A border that brightens on hover, not an overlay — the same
-          affordance every other clickable card in this app uses, so this
-          one doesn't need to be discovered by accident.
-        -->
         <button
           v-if="item.hasScreenshot"
           type="button"
-          class="mt-3 block"
+          class="block h-40 w-56 shrink-0 overflow-hidden rounded-lg border border-(--ui-border) transition-colors hover:border-(--ui-border-accented)"
           :aria-label="`View the full screenshot from ${item.user.displayName}`"
           @click="viewing = item"
         >
           <img
             :src="`/api/admin/feedback/${item.id}/screenshot`"
             alt="Submitted screenshot"
-            class="h-32 rounded border border-(--ui-border) object-cover transition-colors hover:border-(--ui-border-accented)"
+            class="size-full object-cover"
           >
         </button>
+        <div
+          v-else
+          class="flex h-40 w-56 shrink-0 items-center justify-center rounded-lg border border-(--ui-border) text-center text-sm text-(--ui-text-dimmed)"
+        >
+          No screenshot
+        </div>
+
+        <div class="flex min-w-0 flex-1 flex-col">
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-medium">{{ item.user.displayName }}</span>
+            <span class="text-(--ui-text-dimmed)">{{ dateTime(item.createdAt) }}</span>
+            <a
+              :href="item.pageUrl"
+              target="_blank"
+              rel="noopener"
+              class="inline-flex items-center gap-1 text-(--ui-text-muted) hover:text-(--ui-text-highlighted)"
+            >
+              <UIcon name="i-lucide-external-link" class="size-3.5 shrink-0" />
+              {{ item.pageUrl }}
+            </a>
+
+            <UButton
+              class="ml-auto"
+              size="xs"
+              color="error"
+              variant="subtle"
+              icon="i-lucide-trash-2"
+              :aria-label="`Remove feedback from ${item.user.displayName}`"
+              @click="remove(item)"
+            >
+              Remove
+            </UButton>
+          </div>
+
+          <p class="mt-2 text-sm whitespace-pre-wrap">{{ item.message }}</p>
+
+          <!--
+            `mt-auto` pins this to the bottom of the column, which is as
+            tall as the screenshot beside it (flex row children stretch to
+            match by default) — so a short message doesn't leave the
+            technical detail floating awkwardly in the middle of empty
+            space. `truncate` rather than letting the full string set the
+            column's width — a user agent is diagnostic detail nobody reads
+            at a glance; the full string is still there on hover via `title`.
+          -->
+          <p class="mt-auto truncate pt-2 text-xs text-(--ui-text-dimmed)" :title="item.userAgent">
+            {{ item.viewportWidth }}×{{ item.viewportHeight }} · {{ item.userAgent }}
+          </p>
+        </div>
       </article>
     </div>
 
