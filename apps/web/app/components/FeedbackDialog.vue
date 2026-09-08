@@ -68,11 +68,32 @@ async function submit() {
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Send feedback" :ui="{ content: 'max-w-4xl' }">
+  <!--
+    Fixed at 80% of the viewport in both directions, not just a max-width —
+    a bigger modal was asked for explicitly, and a screenshot benefits from
+    the height too, not only the width.
+
+    `body` drops Nuxt UI's default `overflow-y-auto` in favour of
+    `overflow-hidden`: without that, scrolling a tall annotated image would
+    scroll the *whole dialog* — toolbar, textarea and Send button included —
+    off screen along with it, rather than just panning the picture. The inner
+    `min-h-0 flex-1` chain (here, and again on `FeedbackAnnotator`'s own root
+    and its scroll wrapper) is what makes only that one region — the image —
+    actually own the scrollbar; a flex child needs `min-h-0` to be allowed to
+    shrink below its content size at all, or `flex-1` alone does nothing.
+  -->
+  <UModal
+    v-model:open="open"
+    title="Send feedback"
+    :ui="{
+      content: 'w-[80vw] max-w-[80vw] h-[80vh] max-h-[80vh]',
+      body: 'flex-1 min-h-0 overflow-hidden flex flex-col',
+    }"
+  >
     <template #body>
-      <div class="space-y-4">
-        <FeedbackAnnotator v-if="screenshot" ref="annotator" :screenshot="screenshot" />
-        <p v-else class="text-sm text-(--ui-text-muted)">
+      <div class="flex min-h-0 flex-1 flex-col gap-4">
+        <FeedbackAnnotator v-if="screenshot" ref="annotator" :screenshot="screenshot" class="min-h-0 flex-1" />
+        <p v-else class="flex flex-1 items-center justify-center text-center text-sm text-(--ui-text-muted)">
           Couldn't capture a screenshot of this page — you can still describe what's wrong below.
         </p>
 
@@ -82,7 +103,7 @@ async function submit() {
           :rows="3"
           placeholder="What's wrong, or what could be better?"
           aria-label="Feedback message"
-          class="w-full"
+          class="w-full shrink-0"
         />
       </div>
     </template>

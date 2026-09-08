@@ -60,7 +60,8 @@ type Shape = LineShape | RectShape | ArrowShape | TextShape
 
 const STROKE_COLOR = '#ef4444'
 const STROKE_WIDTH = 4
-const MAX_DISPLAY_WIDTH = 800
+/** A guess for the very first paint, before `scrollWrapperEl` has been measured. */
+const FALLBACK_DISPLAY_WIDTH = 800
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 3
 const ZOOM_STEP = 0.25
@@ -79,7 +80,22 @@ const image = ref<HTMLImageElement | null>(null)
 const naturalWidth = ref(0)
 const naturalHeight = ref(0)
 
+/*
+ * How wide the scrollable wrapper actually is, measured once on mount rather
+ * than assumed — the dialog is 80% of the viewport, so "how much room is
+ * there" genuinely depends on the screen this loads on, not a constant that
+ * would either waste a 4K monitor's width or force a scrollbar on a laptop
+ * at what is supposed to be the un-zoomed "fits without scrolling" view.
+ * A CSS transform (the modal's open animation) does not affect `clientWidth`,
+ * so this is safe to read as soon as the component mounts — no need to wait
+ * for the animation to finish.
+ */
+const scrollWrapperEl = useTemplateRef<HTMLDivElement>('scrollWrapper')
+const containerWidth = ref(FALLBACK_DISPLAY_WIDTH)
+
 onMounted(() => {
+  if (scrollWrapperEl.value) containerWidth.value = scrollWrapperEl.value.clientWidth
+
   const img = new Image()
   img.onload = () => {
     naturalWidth.value = img.naturalWidth
@@ -100,7 +116,7 @@ onMounted(() => {
  */
 const scale = computed(() => {
   if (naturalWidth.value === 0) return 1
-  return Math.min(1, MAX_DISPLAY_WIDTH / naturalWidth.value)
+  return Math.min(1, containerWidth.value / naturalWidth.value)
 })
 /** The fit scale, adjusted by how far the zoom controls have moved it. */
 const displayScale = computed(() => scale.value * zoom.value)
@@ -274,8 +290,15 @@ defineExpose({ export: exportImage })
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div class="flex flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
+  <!--
+    A flex column, not `space-y-*` — the parent (`FeedbackDialog`) gives this
+    component a bounded `flex-1` height so only the image region scrolls, not
+    the whole dialog, and that only works if this root passes the sizing
+    through: the toolbar stays its natural height (`shrink-0`), and the scroll
+    wrapper below is the other `min-h-0 flex-1` in that chain.
+  -->
+  <div class="flex h-full min-h-0 flex-col gap-3">
+    <div class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
       <UButton size="md" :variant="tool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="tool = 'pen'" />
       <UButton size="md" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
       <UButton size="md" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
@@ -291,15 +314,17 @@ defineExpose({ export: exportImage })
     </div>
 
     <!--
-      Width-only scaling (see `scale` above) can leave a tall capture taller
-      than the dialog has room for, and zooming in can make either dimension
-      bigger than the dialog — `overflow-auto` on both axes, not just `-y`,
-      lets the zoom controls actually earn their keep. `@wheel` is here
-      rather than on the stage: an unmodified wheel still has to scroll this
-      box normally, which is what happens by default when `onWheel` returns
-      early for anything without Ctrl/Cmd held.
+      `min-h-0 flex-1`, not a fixed `max-h-*`: this box fills whatever room
+      the dialog actually has (see FeedbackDialog's own comment on the same
+      chain) rather than a vh fraction guessed independently of it.
+      `overflow-auto` on both axes, not just `-y`, because zooming in can
+      make either dimension bigger than what's available, and this is the
+      *only* thing that scrolls — the dialog around it does not. `@wheel` is
+      here rather than on the stage: an unmodified wheel still has to scroll
+      this box normally, which is what happens by default when `onWheel`
+      returns early for anything without Ctrl/Cmd held.
     -->
-    <div class="max-h-[75vh] overflow-auto" @wheel="onWheel">
+    <div ref="scrollWrapper" class="min-h-0 flex-1 overflow-auto" @wheel="onWheel">
       <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
         <v-stage
           v-if="image"
