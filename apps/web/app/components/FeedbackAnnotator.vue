@@ -428,10 +428,15 @@ defineExpose({
     here rather than on the stage: an unmodified wheel still has to scroll
     this box normally, which is what happens by default when `onWheel`
     returns early for anything without Ctrl/Cmd held.
+
+    The border/rounded-corner/elevated-background treatment matches the
+    toolbar box in `FeedbackDialog` — without it the image had no visible
+    edge of its own, which stood out once zooming out could leave it
+    centred with plain dialog background showing all the way around.
   -->
   <div
     ref="scrollWrapper"
-    class="overflow-auto"
+    class="overflow-auto rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated)"
     :class="[
       tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : '',
       fitsWidth && fitsHeight ? 'flex items-center justify-center' : '',

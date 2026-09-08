@@ -107,7 +107,13 @@ useHead({ title: 'Feedback' })
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="font-medium">{{ item.user.displayName }}</span>
           <span class="text-(--ui-text-dimmed)">{{ dateTime(item.createdAt) }}</span>
-          <a :href="item.pageUrl" target="_blank" rel="noopener" class="text-(--ui-text-muted) hover:text-(--ui-text-highlighted)">
+          <a
+            :href="item.pageUrl"
+            target="_blank"
+            rel="noopener"
+            class="inline-flex items-center gap-1 text-(--ui-text-muted) hover:text-(--ui-text-highlighted)"
+          >
+            <UIcon name="i-lucide-external-link" class="size-3.5 shrink-0" />
             {{ item.pageUrl }}
           </a>
 
@@ -126,20 +132,32 @@ useHead({ title: 'Feedback' })
 
         <p class="mt-2 text-sm whitespace-pre-wrap">{{ item.message }}</p>
 
-        <p class="mt-1 text-xs text-(--ui-text-dimmed)">
+        <!--
+          `truncate` rather than letting the full string set the card's
+          width — a user agent is diagnostic detail nobody reads at a
+          glance, and printed in full it routinely outran every other line
+          on the card. The full string is still there on hover via `title`.
+        -->
+        <p class="mt-1 truncate text-xs text-(--ui-text-dimmed)" :title="item.userAgent">
           {{ item.viewportWidth }}×{{ item.viewportHeight }} · {{ item.userAgent }}
         </p>
 
+        <!--
+          A border that brightens on hover, not an overlay — the same
+          affordance every other clickable card in this app uses, so this
+          one doesn't need to be discovered by accident.
+        -->
         <button
           v-if="item.hasScreenshot"
           type="button"
-          class="mt-2 block"
+          class="mt-3 block"
+          :aria-label="`View the full screenshot from ${item.user.displayName}`"
           @click="viewing = item"
         >
           <img
             :src="`/api/admin/feedback/${item.id}/screenshot`"
             alt="Submitted screenshot"
-            class="h-24 rounded border border-(--ui-border) object-cover"
+            class="h-32 rounded border border-(--ui-border) object-cover transition-colors hover:border-(--ui-border-accented)"
           >
         </button>
       </article>

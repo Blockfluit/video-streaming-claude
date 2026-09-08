@@ -129,20 +129,32 @@ async function submit() {
         </p>
 
         <div class="flex h-full w-80 shrink-0 flex-col gap-3">
+          <!--
+            Three functional groups — which tool is active, how far you've
+            zoomed, whether there's anything to undo — set off by hairline
+            dividers rather than gaps alone, so the grouping reads at a
+            glance instead of looking like six buttons in a row.
+          -->
           <div v-if="screenshot" class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
-            <UButton size="md" :variant="activeTool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="annotator?.setTool('pen')" />
-            <UButton size="md" :variant="activeTool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="annotator?.setTool('rectangle')" />
-            <UButton size="md" :variant="activeTool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="annotator?.setTool('arrow')" />
-            <UButton size="md" :variant="activeTool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="annotator?.setTool('text')" />
-            <UButton size="md" :variant="activeTool === 'hand' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-hand" aria-label="Move" @click="annotator?.setTool('hand')" />
+            <div class="flex items-center gap-1">
+              <UButton size="md" :variant="activeTool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="annotator?.setTool('pen')" />
+              <UButton size="md" :variant="activeTool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="annotator?.setTool('rectangle')" />
+              <UButton size="md" :variant="activeTool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="annotator?.setTool('arrow')" />
+              <UButton size="md" :variant="activeTool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="annotator?.setTool('text')" />
+              <UButton size="md" :variant="activeTool === 'hand' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-hand" aria-label="Move" @click="annotator?.setTool('hand')" />
+            </div>
 
-            <div class="mx-1 flex items-center gap-1.5">
+            <div class="h-6 w-px shrink-0 bg-(--ui-border)" />
+
+            <div class="flex items-center gap-1.5">
               <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="!canZoomOut" aria-label="Zoom out" @click="annotator?.zoomOut()" />
-              <span class="w-12 text-center text-sm text-(--ui-text-muted)">{{ zoomPercent }}%</span>
+              <span class="w-12 text-center text-sm text-(--ui-text-muted) tabular-nums">{{ zoomPercent }}%</span>
               <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="!canZoomIn" aria-label="Zoom in" @click="annotator?.zoomIn()" />
             </div>
 
-            <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="!canUndo" aria-label="Undo" class="ml-auto" @click="annotator?.undo()" />
+            <div class="ml-auto h-6 w-px shrink-0 bg-(--ui-border)" />
+
+            <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="!canUndo" aria-label="Undo" @click="annotator?.undo()" />
           </div>
 
           <UTextarea

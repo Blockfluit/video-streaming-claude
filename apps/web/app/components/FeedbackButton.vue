@@ -25,7 +25,7 @@ async function openDialog() {
     aria-label="Send feedback"
     @click="openDialog"
   >
-    <UIcon name="i-lucide-message-circle-warning" class="size-5" />
+    <UIcon name="i-lucide-message-square-plus" class="size-5" />
   </button>
 
   <FeedbackDialog v-model:open="open" :screenshot="screenshot" />
