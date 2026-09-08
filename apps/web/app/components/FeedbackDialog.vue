@@ -70,47 +70,49 @@ async function submit() {
 <template>
   <!--
     Fixed as a share of the viewport in both directions, not just a
-    max-width — a bigger modal was asked for explicitly. Width and height
-    are deliberately different shares (70/85, not 80/80): the annotator
-    fits its image by *width* alone (see its own scale comment), so a
-    dialog shaped too wide relative to its height produces a display size
-    taller than the space available for it, forcing a vertical scroll on
-    the very first paint — before anyone has touched the zoom controls,
-    which reads as "already zoomed in." Less width and more height brings
-    the width-driven fit size back within the vertical room actually on
-    offer, checked against a 1920×1080 screen specifically.
+    max-width — a bigger modal was asked for explicitly. The annotator fits
+    its image by *width* alone (see its own scale comment), so the exact
+    share in each direction is tuned against how tall the image ends up at
+    that width, not picked for looks — see the values below for the
+    reasoning at whatever they currently are.
+
+    The body is a row, not a column: the annotator (toolbar + image) on the
+    left, the message textarea as its own full-height column on the right —
+    asked for after the stacked layout left the textarea squeezed under a
+    now much bigger image.
 
     `body` drops Nuxt UI's default `overflow-y-auto` in favour of
     `overflow-hidden`: without that, scrolling a tall annotated image would
     scroll the *whole dialog* — toolbar, textarea and Send button included —
     off screen along with it, rather than just panning the picture. The inner
-    `min-h-0 flex-1` chain (here, and again on `FeedbackAnnotator`'s own root
-    and its scroll wrapper) is what makes only that one region — the image —
-    actually own the scrollbar; a flex child needs `min-h-0` to be allowed to
-    shrink below its content size at all, or `flex-1` alone does nothing.
+    `min-h-0`/`min-w-0` + `flex-1` chain (here, and again on
+    `FeedbackAnnotator`'s own root and its scroll wrapper) is what makes only
+    that one region — the image — actually own the scrollbar; a flex child
+    needs `min-h-0`/`min-w-0` to be allowed to shrink below its content size
+    at all, or `flex-1` alone does nothing.
   -->
   <UModal
     v-model:open="open"
     title="Send feedback"
     :ui="{
-      content: 'w-[58vw] max-w-[58vw] h-[90vh] max-h-[90vh]',
+      content: 'w-[74vw] max-w-[74vw] h-[90vh] max-h-[90vh]',
       body: 'flex-1 min-h-0 overflow-hidden flex flex-col',
     }"
   >
     <template #body>
-      <div class="flex min-h-0 flex-1 flex-col gap-4">
-        <FeedbackAnnotator v-if="screenshot" ref="annotator" :screenshot="screenshot" class="min-h-0 flex-1" />
-        <p v-else class="flex flex-1 items-center justify-center text-center text-sm text-(--ui-text-muted)">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-row gap-4">
+        <FeedbackAnnotator v-if="screenshot" ref="annotator" :screenshot="screenshot" class="min-h-0 min-w-0 flex-1" />
+        <p v-else class="flex min-h-0 min-w-0 flex-1 items-center justify-center text-center text-sm text-(--ui-text-muted)">
           Couldn't capture a screenshot of this page — you can still describe what's wrong below.
         </p>
 
         <UTextarea
           v-model="message"
           :maxlength="MAX_FEEDBACK_MESSAGE_LENGTH"
-          :rows="3"
           placeholder="What's wrong, or what could be better?"
           aria-label="Feedback message"
-          class="w-full shrink-0"
+          class="h-full w-80 shrink-0"
+          :ui="{ root: 'h-full', base: 'h-full resize-none' }"
         />
       </div>
     </template>

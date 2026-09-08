@@ -100,20 +100,24 @@ const naturalWidth = ref(0)
 const naturalHeight = ref(0)
 
 /*
- * How wide the scrollable wrapper actually is, measured once on mount rather
- * than assumed — the dialog is 80% of the viewport, so "how much room is
+ * How big the scrollable wrapper actually is, measured once on mount rather
+ * than assumed — the dialog is a share of the viewport, so "how much room is
  * there" genuinely depends on the screen this loads on, not a constant that
  * would either waste a 4K monitor's width or force a scrollbar on a laptop
  * at what is supposed to be the un-zoomed "fits without scrolling" view.
- * A CSS transform (the modal's open animation) does not affect `clientWidth`,
- * so this is safe to read as soon as the component mounts — no need to wait
- * for the animation to finish.
+ * A CSS transform (the modal's open animation) does not affect
+ * `clientWidth`/`clientHeight`, so this is safe to read as soon as the
+ * component mounts — no need to wait for the animation to finish.
  */
 const scrollWrapperEl = useTemplateRef<HTMLDivElement>('scrollWrapper')
 const containerWidth = ref(FALLBACK_DISPLAY_WIDTH)
+const containerHeight = ref(FALLBACK_DISPLAY_WIDTH)
 
 onMounted(() => {
-  if (scrollWrapperEl.value) containerWidth.value = scrollWrapperEl.value.clientWidth
+  if (scrollWrapperEl.value) {
+    containerWidth.value = scrollWrapperEl.value.clientWidth
+    containerHeight.value = scrollWrapperEl.value.clientHeight
+  }
 
   const img = new Image()
   img.onload = () => {
@@ -141,6 +145,21 @@ const scale = computed(() => {
 const displayScale = computed(() => scale.value * zoom.value)
 const displayWidth = computed(() => naturalWidth.value * displayScale.value)
 const displayHeight = computed(() => naturalHeight.value * displayScale.value)
+
+/*
+ * Whether the image, at the current zoom, is smaller than the wrapper in
+ * each direction — used to centre it instead of leaving it pinned in the
+ * top-left corner with dead space to the right/below, which is what plain
+ * block layout does by default once zooming out shrinks it below the
+ * wrapper's size. Only applied when *both* fit (see the wrapper's own
+ * class binding): centring an axis that is still overflowing runs into a
+ * real CSS quirk, not just a look — a centred flex item that overflows its
+ * container leaves the browser unable to scroll to the start-side overflow
+ * at all, which would make the top-left of a zoomed-in image permanently
+ * unreachable rather than just briefly off-screen.
+ */
+const fitsWidth = computed(() => displayWidth.value <= containerWidth.value)
+const fitsHeight = computed(() => displayHeight.value <= containerHeight.value)
 
 const stageConfig = computed(() => ({
   width: displayWidth.value,
@@ -413,7 +432,10 @@ defineExpose({ export: exportImage })
     <div
       ref="scrollWrapper"
       class="min-h-0 flex-1 overflow-auto"
-      :class="tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : ''"
+      :class="[
+        tool === 'hand' ? (panning ? 'cursor-grabbing' : 'cursor-grab') : '',
+        fitsWidth && fitsHeight ? 'flex items-center justify-center' : '',
+      ]"
       @wheel="onWheel"
     >
       <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
