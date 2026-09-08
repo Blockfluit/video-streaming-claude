@@ -26,6 +26,22 @@
  * That last one is why zooming never touches export quality: `pixelRatio:
  * 1 / displayScale` always divides back out to the screenshot's natural
  * resolution, whatever the current zoom happens to be.
+ *
+ * Ctrl/Cmd+Z is a `window`-level listener, not scoped to the canvas — Konva's
+ * stage is not itself a focusable element, so there is nothing to bind a
+ * keydown to that would reliably have focus. It is safe at that scope only
+ * because it is skipped whenever the event's target is an `INPUT`/`TEXTAREA`
+ * (the text tool's own input, or the dialog's message field below this
+ * component) — otherwise Ctrl+Z while typing feedback text would erase a
+ * shape instead of undoing a keystroke. Registered in `onMounted` and torn
+ * down in `onUnmounted`, so it is live only while this component actually
+ * is — which is only while the dialog holding it is open.
+ *
+ * Ctrl/Cmd+scroll to zoom is bound to the `wheel` event on the scrollable
+ * wrapper, not the stage, and only intercepts the event (`preventDefault`)
+ * when the modifier is held — an unmodified wheel still scrolls the wrapper
+ * normally. Konva itself is never asked to zoom; `zoom` driving `displayScale`
+ * is the only zoom mechanism, shared with the toolbar buttons.
  */
 import type Konva from 'konva'
 import type { VueKonvaRef } from 'vue-konva'
@@ -104,6 +120,27 @@ function zoomIn() {
 function zoomOut() {
   zoom.value = Math.max(MIN_ZOOM, Math.round((zoom.value - ZOOM_STEP) * 100) / 100)
 }
+
+/** Ctrl+scroll (or a trackpad pinch, which browsers report as a ctrl-flagged wheel event) zooms; a plain wheel scrolls the wrapper as normal. */
+function onWheel(event: WheelEvent) {
+  if (!event.ctrlKey && !event.metaKey) return
+  event.preventDefault()
+  if (event.deltaY < 0) zoomIn()
+  else zoomOut()
+}
+
+/** Skipped while typing — the text tool's own input, or the dialog's message field — so Ctrl+Z there undoes a keystroke, not a shape. */
+function onKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    undo()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 const imageConfig = computed(() => ({
   image: image.value,
@@ -237,29 +274,32 @@ defineExpose({ export: exportImage })
 </script>
 
 <template>
-  <div class="space-y-2">
-    <div class="flex flex-wrap items-center gap-1">
-      <UButton size="xs" :variant="tool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="tool = 'pen'" />
-      <UButton size="xs" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
-      <UButton size="xs" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
-      <UButton size="xs" :variant="tool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="tool = 'text'" />
+  <div class="space-y-3">
+    <div class="flex flex-wrap items-center gap-2 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-2">
+      <UButton size="md" :variant="tool === 'pen' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-pencil" aria-label="Pen" @click="tool = 'pen'" />
+      <UButton size="md" :variant="tool === 'rectangle' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-square" aria-label="Rectangle" @click="tool = 'rectangle'" />
+      <UButton size="md" :variant="tool === 'arrow' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-move-up-right" aria-label="Arrow" @click="tool = 'arrow'" />
+      <UButton size="md" :variant="tool === 'text' ? 'solid' : 'subtle'" color="neutral" icon="i-lucide-type" aria-label="Text" @click="tool = 'text'" />
 
-      <div class="mx-1 flex items-center gap-1">
-        <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut" />
-        <span class="w-10 text-center text-xs text-(--ui-text-muted)">{{ Math.round(zoom * 100) }}%</span>
-        <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn" />
+      <div class="mx-1 flex items-center gap-1.5">
+        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="zoom <= MIN_ZOOM" aria-label="Zoom out" @click="zoomOut" />
+        <span class="w-12 text-center text-sm text-(--ui-text-muted)">{{ Math.round(zoom * 100) }}%</span>
+        <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="zoom >= MAX_ZOOM" aria-label="Zoom in" @click="zoomIn" />
       </div>
 
-      <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
+      <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-undo-2" :disabled="shapes.length === 0" aria-label="Undo" class="ml-auto" @click="undo" />
     </div>
 
     <!--
       Width-only scaling (see `scale` above) can leave a tall capture taller
       than the dialog has room for, and zooming in can make either dimension
       bigger than the dialog — `overflow-auto` on both axes, not just `-y`,
-      lets the zoom controls actually earn their keep.
+      lets the zoom controls actually earn their keep. `@wheel` is here
+      rather than on the stage: an unmodified wheel still has to scroll this
+      box normally, which is what happens by default when `onWheel` returns
+      early for anything without Ctrl/Cmd held.
     -->
-    <div class="max-h-[75vh] overflow-auto">
+    <div class="max-h-[75vh] overflow-auto" @wheel="onWheel">
       <div class="relative inline-block" :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }">
         <v-stage
           v-if="image"
