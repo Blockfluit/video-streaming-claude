@@ -855,6 +855,20 @@ describe('Library (real database)', () => {
         expect(response.body.matchScore).toBeGreaterThan(0);
       });
 
+      /**
+       * The Clarksons Farm case: a show with no genres, no tags and no
+       * credits anywhere — not on the collection, not on any episode —
+       * scores 0 against `scoreCandidate`, indistinguishable from a genuine
+       * "checked and it doesn't match." Only the first is honest to show.
+       */
+      it('hides the match score for a show carrying no genres, tags or credits anywhere', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
       it('shows a match score once the caller clears the minimum watch history', async () => {
         for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
         await prisma.collection.update({ where: { id: show.id }, data: { genres: ['Drama'] } });

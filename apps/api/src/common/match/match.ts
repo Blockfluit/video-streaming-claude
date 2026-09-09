@@ -12,14 +12,19 @@ import {
   buildTasteProfile,
   evidenceTargetKey,
   hasEnoughSignal,
+  hasFeatures,
   scoreCandidate,
 } from './taste-profile';
 import { fetchEngagementEvidence, fetchTargetFeatures, fetchTargetFeaturesForVideos } from './evidence';
 
 /**
  * The badge on a video's or collection's own page, 0-100. `null` means
- * "hidden" — either the viewer hasn't cleared `MIN_STRONG_SIGNALS` yet, or
- * (defensively) the target has no readable features.
+ * "hidden" — the viewer hasn't cleared `MIN_STRONG_SIGNALS` yet, the target
+ * has no readable record, or (see `hasFeatures`) the target has genres, tags
+ * and credits nowhere at all, so there is nothing to have scored it *on* —
+ * common for anything not yet matched to TMDB. That last case is not the
+ * same claim as a genuine 0%, and showing one would be a lie about having
+ * checked.
  *
  * For a collection, `memberVideoIds` are its own episodes — the same ones
  * `progress()` already reads for its watch-progress rollup — excluded here so
@@ -61,7 +66,7 @@ export async function matchScoreFor(
     'videoId' in target
       ? await fetchTargetFeatures(prisma, { videoId: target.videoId })
       : await fetchTargetFeatures(prisma, { collectionId: target.collectionId });
-  if (!candidate) return null;
+  if (!candidate || !hasFeatures(candidate)) return null;
 
   return Math.round(scoreCandidate(profile, candidate) * 100);
 }
@@ -94,7 +99,8 @@ export async function matchScoresForVideos(
   const scores = new Map<string, number>();
   for (const videoId of videoIds) {
     const candidate = features.get(videoId);
-    if (!candidate) continue;
+    // No record, or nothing on it to score — either way, not a recommendation.
+    if (!candidate || !hasFeatures(candidate)) continue;
     scores.set(videoId, scoreCandidate(profile, candidate));
   }
   return scores;

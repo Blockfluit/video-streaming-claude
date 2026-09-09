@@ -42,6 +42,20 @@ export interface CandidateFeatures {
   credits: EvidenceCredit[];
 }
 
+/**
+ * Whether a candidate carries anything at all to score it on.
+ *
+ * A title matched to nothing yet — no genres, no tags, no credits, common
+ * for anything an admin hasn't run through TMDB import — always scores 0
+ * against `scoreCandidate`, indistinguishable from a title that genuinely
+ * shares nothing with the viewer's taste. Those are different claims: one
+ * says "we checked, and this doesn't match you," the other says "there is
+ * nothing here to check." `matchScoreFor` uses this to hide the badge for
+ * the second case rather than display a misleading 0%.
+ */
+export const hasFeatures = (candidate: CandidateFeatures): boolean =>
+  candidate.genres.length > 0 || candidate.tags.length > 0 || candidate.credits.length > 0;
+
 export interface TasteProfile {
   genreWeights: Map<string, number>;
   tagWeights: Map<string, number>;

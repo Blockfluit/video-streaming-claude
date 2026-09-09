@@ -537,6 +537,27 @@ describe('Watch tracking (real database)', () => {
         expect(response.body.matchScore).toBeGreaterThan(0);
       });
 
+      /**
+       * The Clarksons Farm case: a video with no genres, no tags and no
+       * credits — nowhere in the model, not even by inheritance — scores 0
+       * against `scoreCandidate`, indistinguishable from a genuine "checked
+       * and it doesn't match." Those are different claims, and only the
+       * first is honest to show as a number.
+       */
+      it('hides the match score for a video carrying no genres, tags or credits anywhere', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo(); // no genres, no tags, and the shared collection has none either
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
       it('shows a match score once the viewer clears the minimum watch history', async () => {
         for (let i = 0; i < 5; i += 1) {
           const filler = await seedVideo({ genres: ['Drama'] });

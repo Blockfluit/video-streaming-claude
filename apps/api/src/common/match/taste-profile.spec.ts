@@ -4,6 +4,7 @@ import {
   buildTasteProfile,
   evidenceWeight,
   hasEnoughSignal,
+  hasFeatures,
   MIN_STRONG_SIGNALS,
   scoreCandidate,
   WEIGHT_COMPLETED,
@@ -224,5 +225,25 @@ describe('hasEnoughSignal', () => {
     );
 
     expect(hasEnoughSignal(buildTasteProfile(many))).toBe(false);
+  });
+});
+
+describe('hasFeatures', () => {
+  it('is false for a title with no genres, tags or credits — nothing to have scored it on', () => {
+    expect(hasFeatures({ genres: [], tags: [], credits: [] })).toBe(false);
+  });
+
+  it('is true if only genres are present', () => {
+    expect(hasFeatures({ genres: ['Drama'], tags: [], credits: [] })).toBe(true);
+  });
+
+  it('is true if only tags are present', () => {
+    expect(hasFeatures({ genres: [], tags: ['favourite'], credits: [] })).toBe(true);
+  });
+
+  it('is true if only credits are present', () => {
+    expect(
+      hasFeatures({ genres: [], tags: [], credits: [credit('p1', 'ACTOR', 0)] }),
+    ).toBe(true);
   });
 });
