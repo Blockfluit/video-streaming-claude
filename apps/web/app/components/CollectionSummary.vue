@@ -103,6 +103,8 @@ const { data: progress } = await useApiData<{
    * that was already saved.
    */
   inMyList: boolean
+  /** Hidden — `null` — for a viewer whose taste profile is still too new to score. */
+  matchScore: number | null
 }>(
   () => `collection-progress-${props.collection.slug}`,
   () => `/collections/${props.collection.slug}/progress`,
@@ -308,6 +310,7 @@ const trailerOpen = ref(false)
 
           <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-(--ui-text-muted)">
             <span v-if="meta">{{ meta }}</span>
+            <MatchBadge :score="progress?.matchScore" />
             <UBadge v-if="collection.certification" color="neutral" variant="outline">
               {{ collection.certification }}
             </UBadge>

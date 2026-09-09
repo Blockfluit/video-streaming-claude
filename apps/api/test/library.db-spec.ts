@@ -810,6 +810,135 @@ describe('Library (real database)', () => {
       expect(response.body.inMyList).toBe(false);
     });
 
+    /**
+     * The scoring math itself is `common/match/taste-profile.spec.ts`. What is
+     * worth a real database is the threshold gate and self-exclusion, which
+     * need real watch history to observe.
+     */
+    describe('the match score', () => {
+      /** A completed, standalone video with a duration heartbeats can complete. */
+      async function completedFiller(genres: string[]): Promise<void> {
+        const filler = await seedStandaloneVideo(`Filler ${Math.random()}`, {
+          durationSec: 120,
+          genres,
+        });
+        await beat(filler.id, 119);
+      }
+
+      it('hides the match score for a caller with too little watch history', async () => {
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      /** The concrete case a threshold exists for: one episode of a show isn't a taste profile. */
+      it('stays hidden for a caller who has watched only one episode', async () => {
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      /**
+       * Proves the live setting is actually read, not a cached default: two
+       * signals stays hidden at the (default) 5 minimum — see the previous
+       * test — but clears an admin-lowered one.
+       */
+      it('respects an admin-configured minimum lower than the default', async () => {
+        await admin.patch('/admin/settings').send({ minTitlesForMatch: 2 }).expect(200);
+
+        await prisma.video.update({ where: { id: first.id }, data: { genres: ['Drama'] } });
+        await completedFiller(['Drama']);
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
+      it('derives a show’s score from its own episodes when the collection itself has no genres', async () => {
+        // A hand-made grouping is often never matched to anything in TMDB
+        // itself, even when every episode inside it plainly is — so the
+        // collection's own `genres` can be empty while its episodes' aren't.
+        await prisma.video.update({ where: { id: first.id }, data: { genres: ['Drama'] } });
+        await prisma.video.update({ where: { id: second.id }, data: { genres: ['Drama'] } });
+
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      /**
+       * The Clarksons Farm case: a show with no genres, no tags and no
+       * credits anywhere — not on the collection, not on any episode —
+       * scores 0 against `scoreCandidate`, indistinguishable from a genuine
+       * "checked and it doesn't match." Only the first is honest to show.
+       */
+      it('hides the match score for a show carrying no genres, tags or credits anywhere', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('shows a match score once the caller clears the minimum watch history', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+        await prisma.collection.update({ where: { id: show.id }, data: { genres: ['Drama'] } });
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      /**
+       * The bug this catches: excluding the show's own episodes before
+       * checking the gate can tip an exactly-at-minimum viewer under it,
+       * hiding the badge on precisely the show they've watched the most of.
+       * The gate is a fact about the viewer, evaluated on their whole
+       * history; only the score itself excludes the show's own episodes.
+       */
+      it('still shows a score for a show whose own episodes make up most of the viewer’s history', async () => {
+        await prisma.video.updateMany({
+          where: { id: { in: [first.id, second.id] } },
+          data: { genres: ['Drama'] },
+        });
+        await beat(first.id, 119);
+        await beat(second.id, 119);
+        for (let i = 0; i < 3; i += 1) await completedFiller(['Drama']);
+        // Exactly 5 signals total: the show's own 2 episodes plus 3 fillers.
+        // Excluding the show's own episodes leaves exactly 3, two under the
+        // threshold, which is what the old, buggy gate placement saw.
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
+      it('never inflates a show’s score by counting its own episodes as evidence', async () => {
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Action']);
+
+        // The show's own episodes carry a genre found nowhere else — if they
+        // leaked into the profile, the show would score itself a near-perfect
+        // match on that genre alone.
+        await prisma.video.updateMany({
+          where: { id: { in: [first.id, second.id] } },
+          data: { genres: ['Zzzunique'] },
+        });
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+        expect(response.body.matchScore).toBeLessThan(30);
+      });
+    });
+
     it('never offers a draft video to a USER', async () => {
       const draft = await seedVideo(show.id, 'Zero', publishable, { orderIndex: 0 });
       const user = await asUser();
@@ -853,7 +982,12 @@ describe('Library (real database)', () => {
 
       const response = await admin.get(`/collections/${empty.slug}/progress`).expect(200);
 
-      expect(response.body).toEqual({ next: null, items: [], inMyList: false });
+      expect(response.body).toEqual({
+        next: null,
+        items: [],
+        inMyList: false,
+        matchScore: null,
+      });
     });
   });
 

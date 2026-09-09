@@ -195,7 +195,7 @@ export class ListsService {
       return page.items;
     }
 
-    return computedItems(this.prisma, row, role);
+    return computedItems(this.prisma, row, userId, role);
   }
 
   async create(dto: CreateCuratedListInput) {

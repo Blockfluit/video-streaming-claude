@@ -29,4 +29,5 @@ export * from './schemas/lists.js';
 export * from './schemas/metadata.js';
 export * from './schemas/people.js';
 export * from './schemas/requests.js';
+export * from './schemas/settings.js';
 export * from './schemas/watch.js';

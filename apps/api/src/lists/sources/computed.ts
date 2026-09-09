@@ -1,6 +1,8 @@
 import { DEFAULT_TRENDING_WINDOW_DAYS } from '@video/shared';
 
 import { COUNTS_HERE_SELECT, withCountsHere } from '../../common/films';
+import { matchScoresForVideos } from '../../common/match/match';
+import { MIN_ROW_ITEM_SCORE } from '../../common/match/taste-profile';
 import { visibleStates, whereVisible } from '../../common/publishing';
 import type { PublishState, Role, RowKind, RowSource } from '../../prisma/generated/enums';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -12,9 +14,9 @@ import { latest, rollUpAndRank, total, type RankedEntry, type ScoredVideo } from
  * back into cards.
  *
  * Each source differs only in what it scores a video on — when it arrived, how
- * many views it has, how long it was watched lately. The roll-up and the
- * ordering are `rank.ts`, which is pure and tested on its own; this file is the
- * IO around it.
+ * many views it has, how long it was watched lately, how well it matches a
+ * viewer's own taste profile. The roll-up and the ordering are `rank.ts`,
+ * which is pure and tested on its own; this file is the IO around it.
  */
 
 export interface ComputedRow {
@@ -81,10 +83,14 @@ export interface ResolvedItem {
 export async function computedItems(
   prisma: PrismaService,
   row: ComputedRow,
+  userId: string,
   role: Role,
 ): Promise<ResolvedItem[]> {
-  const scored = await score(prisma, row, role);
-  const combine = row.source === 'RECENTLY_ADDED' ? latest : total;
+  const scored = await score(prisma, row, userId, role);
+  // A show is as recent, or as good a match, as its best-matching episode —
+  // summing would let episode count dominate and break the 0-100 scale
+  // `matchScoreFor` uses for the same viewer's detail-page badge.
+  const combine = row.source === 'RECENTLY_ADDED' || row.source === 'RECOMMENDED' ? latest : total;
 
   return hydrate(prisma, rollUpAndRank(scored, row.kind, row.maxItems, combine), role);
 }
@@ -93,6 +99,7 @@ export async function computedItems(
 async function score(
   prisma: PrismaService,
   row: ComputedRow,
+  userId: string,
   role: Role,
 ): Promise<ScoredVideo[]> {
   const videoFilter = {
@@ -100,6 +107,44 @@ async function score(
     // Spread last: the visibility rule is what nothing else may overwrite.
     ...whereVisible(role),
   };
+
+  if (row.source === 'RECOMMENDED') {
+    const videos = await prisma.video.findMany({
+      where: videoFilter,
+      select: { id: true, collections: MEMBERSHIP_SELECT },
+      // No meaningful order here — every candidate is scored, and the ranking
+      // below decides what survives — but `id` still makes it total, the same
+      // reason every other paged or bounded query here ends in it.
+      orderBy: [{ id: 'asc' }],
+      take: POOL_LIMIT,
+    });
+
+    // A title the viewer has already completed or explicitly saved is not a
+    // recommendation — it's confirmed, one way or the other.
+    const known = await knownVideoIds(prisma, userId);
+    const pool = videos.filter(
+      (video) => !known.has(video.id) && !isOrphaned(video.collections, role),
+    );
+
+    const scores = await matchScoresForVideos(
+      prisma,
+      userId,
+      pool.map((video) => video.id),
+    );
+    // The viewer hasn't cleared the admin-configured minimum yet — the row disappears
+    // entirely rather than showing a score built from too little.
+    if (scores === null) return [];
+
+    // Filtered here, before rollUpAndRank's limit — filtering after would
+    // silently under-fill a row an admin asked to hold `maxItems` entries.
+    return pool
+      .filter((video) => (scores.get(video.id) ?? 0) >= MIN_ROW_ITEM_SCORE)
+      .map((video) => ({
+        videoId: video.id,
+        collectionIds: visibleCollectionIds(video.collections, role),
+        score: scores.get(video.id) ?? 0,
+      }));
+  }
 
   if (row.source === 'RECENTLY_ADDED') {
     const videos = await prisma.video.findMany({
@@ -178,6 +223,46 @@ async function trendingTotals(prisma: PrismaService, row: ComputedRow, videoFilt
   });
 
   return rows.map((row) => ({ videoId: row.videoId, score: row._sum.deltaSec ?? 0 }));
+}
+
+/**
+ * Every video the viewer has completed, explicitly watchlisted, or that
+ * belongs to a collection they've watchlisted — none of it is a
+ * recommendation, because it's already confirmed one way or the other.
+ * Bounded by the viewer's own history and their saved collections' own
+ * membership, both small by construction on a private library.
+ */
+async function knownVideoIds(prisma: PrismaService, userId: string): Promise<Set<string>> {
+  const [completed, watchlistedVideos, watchlistedCollections] = await Promise.all([
+    prisma.watchProgress.findMany({
+      where: { userId, completed: true },
+      select: { videoId: true },
+    }),
+    prisma.watchlistItem.findMany({
+      where: { userId, videoId: { not: null } },
+      select: { videoId: true },
+    }),
+    prisma.watchlistItem.findMany({
+      where: { userId, collectionId: { not: null } },
+      select: { collectionId: true },
+    }),
+  ]);
+
+  const known = new Set<string>();
+  for (const row of completed) known.add(row.videoId);
+  for (const row of watchlistedVideos) if (row.videoId) known.add(row.videoId);
+
+  if (watchlistedCollections.length > 0) {
+    const members = await prisma.collectionVideo.findMany({
+      where: {
+        collectionId: { in: watchlistedCollections.map((row) => row.collectionId as string) },
+      },
+      select: { videoId: true },
+    });
+    for (const row of members) known.add(row.videoId);
+  }
+
+  return known;
 }
 
 const MEMBERSHIP_SELECT = {

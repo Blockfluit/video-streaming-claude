@@ -9,6 +9,7 @@ import {
 } from '@video/shared';
 
 import { COUNTS_HERE_SELECT, withCountsHere } from '../common/films';
+import { matchScoreFor } from '../common/match/match';
 import {
   collectionMissingFields,
   narrowToVisibleStates,
@@ -256,6 +257,13 @@ export class CollectionsService {
       // The title page's My List button, answered by the read it already makes.
       // Without it the button paints "add" for a collection already saved.
       inMyList: await savedToList(this.prisma, userId, { collectionId: collection.id }),
+      // Always present, `null` meaning hidden — same convention as `inMyList`.
+      // Excludes this collection's own episodes from its evidence, so a show
+      // never gets credit for matching itself.
+      matchScore: await matchScoreFor(this.prisma, userId, {
+        collectionId: collection.id,
+        memberVideoIds: memberships.map((m) => m.video.id),
+      }),
     };
   }
 

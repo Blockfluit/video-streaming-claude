@@ -669,6 +669,7 @@ enum RowSource {
   RECENTLY_ADDED
   TRENDING // watched most inside a rolling window
   MOST_VIEWED // all-time view count
+  RECOMMENDED // personalised match score, admin opt-in like TRENDING/MOST_VIEWED
   CONTINUE_WATCHING
   MY_LIST
 }
@@ -818,6 +819,29 @@ model IngestIssue {
   @@unique([kind, path])
   @@index([resolvedAt])
   @@index([videoId])
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+/// A single admin-tunable row for app-wide settings that don't belong to any
+/// one feature's own table. Lazily created — no seed migration — see
+/// common/settings.ts, which returns hardcoded defaults when this row
+/// doesn't exist yet, the same convention a fresh install's missing
+/// RECENTLY_ADDED home row already uses.
+model AppSettings {
+  /// Always the literal string "singleton" — never generated, never read as
+  /// an opaque id. A fixed key is what makes `upsert` atomic and rules out
+  /// two concurrent admin writes creating two rows, without a second
+  /// hand-added constraint.
+  id                String   @id
+  /// How many watched-or-listed titles a viewer needs before "% Match"
+  /// scores anything for them — see DEFAULT_MIN_TITLES_FOR_MATCH in
+  /// common/match/taste-profile.ts for the value a fresh install starts at.
+  minTitlesForMatch Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------

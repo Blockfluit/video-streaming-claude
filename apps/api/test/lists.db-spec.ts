@@ -225,6 +225,34 @@ describe('My List and curated rows (real database)', () => {
     });
   });
 
+  /**
+   * `RECOMMENDED`'s field support, exercised through the real HTTP validation
+   * and `settingsFor` rather than by calling `unsupportedRowFields` directly
+   * — `row-config.spec.ts` already covers that function on its own.
+   */
+  describe('a recommended row', () => {
+    it('accepts the settings it reads', async () => {
+      const response = await admin
+        .post('/lists')
+        .send({ title: 'For You', source: 'RECOMMENDED', kind: 'AUTO', maxItems: 8, tags: ['noir'] })
+        .expect(201);
+
+      expect(response.body).toMatchObject({
+        source: 'RECOMMENDED',
+        kind: 'AUTO',
+        maxItems: 8,
+        tags: ['noir'],
+      });
+    });
+
+    it('has no window, unlike trending', async () => {
+      await admin
+        .post('/lists')
+        .send({ title: 'For You', source: 'RECOMMENDED', windowDays: 7 })
+        .expect(400);
+    });
+  });
+
   describe('curated rows', () => {
     let listId: string;
 

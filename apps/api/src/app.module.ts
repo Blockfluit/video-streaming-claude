@@ -22,6 +22,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ServerTimingInterceptor } from './common/server-timing.interceptor';
 import { RequestsModule } from './requests/requests.module';
 import { SearchModule } from './search/search.module';
+import { SettingsModule } from './settings/settings.module';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { TranscodeModule } from './transcode/transcode.module';
 import { UploadsModule } from './uploads/uploads.module';
@@ -53,6 +54,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     VideosModule,
     LibraryModule,
     SearchModule,
+    SettingsModule,
     SubtitlesModule,
     TranscodeModule,
     UploadsModule,

@@ -345,6 +345,121 @@ describe('Computed home-page rows (real database)', () => {
     });
   });
 
+  /**
+   * The one computed source that is *also* personal — it goes through the same
+   * `score()`/`rollUpAndRank` machinery as trending and most-viewed, but ranks
+   * on a per-viewer taste profile rather than a library-wide total. The
+   * scoring math itself is `common/match/taste-profile.spec.ts`; what is worth
+   * a real database here is that the row disappears below the threshold, that
+   * a candidate already known to the viewer is never offered as new, and that
+   * visibility is still applied before the limit like every other source.
+   */
+  describe('recommended', () => {
+    /** Five completed, distinctly-genred videos — enough to clear MIN_STRONG_SIGNALS. */
+    async function clearThreshold(genres: string[] = ['Drama']): Promise<void> {
+      for (const genre of genres) {
+        const filler = await seedVideo(null, { genres: [genre] });
+        await viewer
+          .post(`/videos/${filler}/heartbeat`)
+          .send({ playSessionId: randomUUID(), positionSec: 600, deltaSec: 30 })
+          .expect(200);
+      }
+    }
+
+    it('hides the row entirely for a viewer with too little watch history', async () => {
+      await seedVideo(null, { title: 'A Drama', slug: 'a-drama', storageKey: 'ad.mkv', genres: ['Drama'] });
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).toEqual([]);
+    });
+
+    it('shows a video sharing genres with the viewer’s watch history', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      await seedVideo(null, { title: 'A Drama', slug: 'a-drama', storageKey: 'ad.mkv', genres: ['Drama'] });
+      await seedVideo(null, { title: 'A Comedy', slug: 'a-comedy', storageKey: 'ac.mkv', genres: ['Comedy'] });
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED', kind: 'AUTO' });
+
+      expect(await titlesOf(viewer, rowId)).toEqual(['A Drama']);
+    });
+
+    it('excludes a video the viewer has already completed — it is confirmed, not a recommendation', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      const alreadySeen = await seedVideo(null, {
+        title: 'Already Seen',
+        slug: 'already-seen',
+        storageKey: 'seen.mkv',
+        genres: ['Drama'],
+      });
+      await viewer
+        .post(`/videos/${alreadySeen}/heartbeat`)
+        .send({ playSessionId: randomUUID(), positionSec: 600, deltaSec: 30 })
+        .expect(200);
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).not.toContain('Already Seen');
+    });
+
+    it('excludes a video the viewer has already saved to My List', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      const saved = await seedVideo(null, {
+        title: 'Saved',
+        slug: 'saved',
+        storageKey: 'saved.mkv',
+        genres: ['Drama'],
+      });
+      await viewer.post('/me/watchlist').send({ videoId: saved }).expect(200);
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).not.toContain('Saved');
+    });
+
+    it('never offers an episode of a draft show as though it were a film, however well it matches', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      const hidden = await prisma.collection.create({
+        data: { slug: 'hidden-drama', title: 'Hidden Drama', folderKey: 'HiddenDrama', state: 'DRAFT' },
+        select: { id: true },
+      });
+      await seedVideo(hidden.id, { title: 'Secret Drama Episode', genres: ['Drama'] });
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).toEqual([]);
+      // The admin, who may see the show, is a different viewer with no watch
+      // history at all — so even for them the row stays hidden below the
+      // threshold. This asserts the visibility rule, not the threshold.
+      expect(await titlesOf(admin, rowId)).toEqual([]);
+    });
+
+    it('excludes a video whose overlap is too small to count as a real recommendation', async () => {
+      // Five completed videos, each its own genre: a candidate sharing only
+      // one of the five scores 0.3 * (1/5) = 0.06, under the 0.15 floor.
+      await clearThreshold(['Drama', 'Comedy', 'Horror', 'Romance', 'Western']);
+
+      await seedVideo(null, {
+        title: 'Weak Match',
+        slug: 'weak-match',
+        storageKey: 'weak.mkv',
+        genres: ['Drama'],
+      });
+      await seedVideo(null, {
+        title: 'Strong Match',
+        slug: 'strong-match',
+        storageKey: 'strong.mkv',
+        genres: ['Drama', 'Comedy', 'Horror', 'Romance', 'Western'],
+      });
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+      const titles = await titlesOf(viewer, rowId);
+
+      expect(titles).toContain('Strong Match');
+      expect(titles).not.toContain('Weak Match');
+    });
+  });
+
   describe('personal rows', () => {
     it('resolves continue watching for the caller, not for everyone', async () => {
       const film = await seedVideo(null, { title: 'A Film', slug: 'a-film', storageKey: 'f.mkv' });

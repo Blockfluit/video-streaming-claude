@@ -25,6 +25,7 @@ const sections = [
   { label: 'Feedback', to: '/admin/feedback', icon: 'i-lucide-message-square-plus' },
   { label: 'People', to: '/admin/people', icon: 'i-lucide-users' },
   { label: 'Accounts', to: '/admin/users', icon: 'i-lucide-key-round' },
+  { label: 'Settings', to: '/admin/settings', icon: 'i-lucide-settings' },
 ]
 
 const isActive = (to: string) =>

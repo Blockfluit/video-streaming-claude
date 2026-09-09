@@ -494,6 +494,135 @@ describe('Watch tracking (real database)', () => {
       expect(response.body.inMyList).toBe(false);
     });
 
+    /**
+     * The scoring math itself is `common/match/taste-profile.spec.ts`. What is
+     * worth a real database is the threshold gate and self-exclusion, both of
+     * which need real watch history to observe.
+     */
+    describe('the match score', () => {
+      it('hides the match score for a viewer with too little watch history', async () => {
+        const response = await viewer.get(`/videos/${videoId}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      /** The concrete case a threshold exists for: one episode of a show isn't a taste profile. */
+      it('stays hidden for a viewer who has watched only one thing', async () => {
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }).expect(200);
+
+        const other = await seedVideo({ genres: ['Drama'] });
+        const response = await viewer.get(`/videos/${other}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('inherits a show’s genre for an episode carrying none of its own', async () => {
+        // Real TMDB import never sets genres on an episode — only on the show
+        // (`mapEpisodes` has no genres field; only `mapTitle`, applied to the
+        // collection, does) — so a video's own `genres` is routinely empty for
+        // real TV content, and scoring has to reach the collection for it.
+        await prisma.collection.update({ where: { id: collectionId }, data: { genres: ['Drama'] } });
+
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo(); // no genres of its own — only the shared collection's
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo(); // also no genres of its own, same collection
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      /**
+       * The Clarksons Farm case: a video with no genres, no tags and no
+       * credits — nowhere in the model, not even by inheritance — scores 0
+       * against `scoreCandidate`, indistinguishable from a genuine "checked
+       * and it doesn't match." Those are different claims, and only the
+       * first is honest to show as a number.
+       */
+      it('hides the match score for a video carrying no genres, tags or credits anywhere', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo(); // no genres, no tags, and the shared collection has none either
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('shows a match score once the viewer clears the minimum watch history', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo({ genres: ['Drama'] });
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
+      /**
+       * The bug this catches: excluding the viewed video's own evidence
+       * before checking the gate can tip an exactly-at-minimum viewer under
+       * it, hiding the badge on precisely the titles they know best. The
+       * gate is a fact about the viewer, evaluated on their whole history;
+       * only the score itself excludes the video's own evidence.
+       */
+      it('still shows a score for a video that is itself one of exactly the minimum watched titles', async () => {
+        const target = await seedVideo({ genres: ['Drama'] });
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, target).expect(
+          200,
+        );
+        for (let i = 0; i < 4; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        // Exactly 5 signals total, with the target itself among them —
+        // excluding it for self-exclusion leaves exactly 4, one under the
+        // threshold, which is what the old, buggy gate placement saw.
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
+      it('never inflates a video’s score by counting its own evidence', async () => {
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo({ genres: ['Action'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+
+        // Completed too, with a genre found nowhere else — if its own evidence
+        // leaked into its own profile, it would score itself a near-perfect
+        // match on that genre alone.
+        const target = await seedVideo({ genres: ['Zzzunique'] });
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, target).expect(
+          200,
+        );
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+        expect(response.body.matchScore).toBeLessThan(30);
+      });
+    });
+
     it('gives an admin the aggregate', async () => {
       await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }).expect(200);
       await beat(admin, { playSessionId: randomUUID(), positionSec: 300, deltaSec: 30 }).expect(200);
