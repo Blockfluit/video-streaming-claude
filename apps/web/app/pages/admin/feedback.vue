@@ -66,6 +66,110 @@ const {
 
 const viewing = ref<FeedbackAdminView | null>(null)
 
+/*
+ * Fit-by-default, zoom-to-scroll — the same rule `FeedbackAnnotator` uses
+ * for its own screenshot view (see that component's top-of-file comment),
+ * reimplemented here for a plain `<img>` rather than a Konva stage since
+ * there's nothing to draw on an admin's read-only view. `fitScale` and
+ * `clampZoom` are the shared math (`app/utils/zoom.ts`); the anchor-
+ * preserving zoom-to-cursor scroll math below is copied rather than shared,
+ * since it reads/writes this component's own `scrollWrapperEl` and would
+ * otherwise need a live template ref threaded through a composable for two
+ * call sites.
+ *
+ * Natural size and the wrapper's own measured size both reset to 0 on
+ * `viewing`, so opening the next item starts fit-to-width and un-zoomed
+ * rather than carrying over whatever the previous item's zoom happened to
+ * be, or a wrapper measurement taken from a screenshot no longer showing.
+ */
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 3
+const ZOOM_STEP = 0.25
+
+const zoom = ref(1)
+const naturalWidth = ref(0)
+const naturalHeight = ref(0)
+const scrollWrapperEl = useTemplateRef<HTMLDivElement>('lightboxWrapper')
+const containerWidth = ref(0)
+const containerHeight = ref(0)
+
+/**
+ * Preloaded the same way `FeedbackAnnotator` preloads its own screenshot —
+ * through a bare `Image()`, not the template `<img>`'s own `@load` — so the
+ * real `<img>` only ever renders already sized (`v-if="naturalWidth"` below)
+ * rather than flashing up at its native size for a frame first. The actual
+ * `<img>` still requests the same URL; the browser serves that from cache.
+ */
+watch(viewing, (item) => {
+  zoom.value = 1
+  naturalWidth.value = 0
+  naturalHeight.value = 0
+  if (!item) return
+
+  const img = new Image()
+  img.onload = () => {
+    naturalWidth.value = img.naturalWidth
+    naturalHeight.value = img.naturalHeight
+    if (scrollWrapperEl.value) {
+      containerWidth.value = scrollWrapperEl.value.clientWidth
+      containerHeight.value = scrollWrapperEl.value.clientHeight
+    }
+  }
+  img.src = `/api/admin/feedback/${item.id}/screenshot`
+})
+
+const scale = computed(() => fitScale(containerWidth.value, naturalWidth.value))
+const displayScale = computed(() => scale.value * zoom.value)
+const displayWidth = computed(() => naturalWidth.value * displayScale.value)
+const displayHeight = computed(() => naturalHeight.value * displayScale.value)
+const fitsWidth = computed(() => displayWidth.value <= containerWidth.value)
+const fitsHeight = computed(() => displayHeight.value <= containerHeight.value)
+const zoomPercent = computed(() => Math.round(zoom.value * 100))
+const canZoomIn = computed(() => zoom.value < MAX_ZOOM)
+const canZoomOut = computed(() => zoom.value > MIN_ZOOM)
+
+/** Keeps one content point fixed under a given position in the wrapper's own viewport — the cursor, for a wheel zoom; the wrapper's centre, for the toolbar buttons. See `FeedbackAnnotator.zoomTo` for the full reasoning. */
+function zoomTo(newZoom: number, anchorX?: number, anchorY?: number) {
+  const wrapper = scrollWrapperEl.value
+  if (!wrapper || newZoom === zoom.value) {
+    zoom.value = newZoom
+    return
+  }
+
+  const ax = anchorX ?? wrapper.clientWidth / 2
+  const ay = anchorY ?? wrapper.clientHeight / 2
+  const oldScale = displayScale.value
+  const contentX = (wrapper.scrollLeft + ax) / oldScale
+  const contentY = (wrapper.scrollTop + ay) / oldScale
+
+  zoom.value = newZoom
+
+  nextTick(() => {
+    const newScale = displayScale.value
+    wrapper.scrollLeft = contentX * newScale - ax
+    wrapper.scrollTop = contentY * newScale - ay
+  })
+}
+
+function zoomIn(anchorX?: number, anchorY?: number) {
+  zoomTo(clampZoom(zoom.value + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM), anchorX, anchorY)
+}
+function zoomOut(anchorX?: number, anchorY?: number) {
+  zoomTo(clampZoom(zoom.value - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM), anchorX, anchorY)
+}
+
+/** Ctrl/Cmd+scroll zooms toward the cursor; a plain wheel scrolls the wrapper as normal. */
+function onWheel(event: WheelEvent) {
+  if (!event.ctrlKey && !event.metaKey) return
+  event.preventDefault()
+  const wrapper = scrollWrapperEl.value
+  const rect = wrapper?.getBoundingClientRect()
+  const anchorX = rect ? event.clientX - rect.left : undefined
+  const anchorY = rect ? event.clientY - rect.top : undefined
+  if (event.deltaY < 0) zoomIn(anchorX, anchorY)
+  else zoomOut(anchorX, anchorY)
+}
+
 /**
  * Back to one window, and re-fetch it.
  *
@@ -192,42 +296,57 @@ useHead({ title: 'Feedback' })
     </div>
 
     <!--
-      Same sizing rule as the annotator's own default view (see
-      `FeedbackAnnotator`'s `scale` computed): fit the frame's width and
-      never upscale past native size, so a capture never needs to scroll
-      *sideways* — only a tall one scrolls, and only vertically. `max-w-full
-      h-auto` is that rule in plain CSS with no image dimensions in hand;
-      `mx-auto` centers a capture narrower than the frame instead of pinning
-      it to the left edge.
+      Same behaviour as the feedback dialog's own screenshot view, in
+      `FeedbackAnnotator`: fits the frame by default, no scrollbars, and
+      only ctrl/cmd+scroll or the zoom buttons ever make it scroll. See that
+      component's top-of-file comment for the full reasoning behind the
+      fit-scale, the anchor-preserving zoom, and why zooming needs `nextTick`
+      before it can move `scrollLeft`/`scrollTop`; the state and functions
+      here are the same math (`fitScale`/`clampZoom` from `app/utils/zoom.ts`
+      are literally shared) reimplemented for a plain `<img>` rather than a
+      Konva stage, since there's nothing to draw on an admin's read-only view.
 
-      Sized to the same `74vw` share of the viewport as the feedback
-      dialog's own screenshot view, for the same reason it's there: a fixed
-      `max-w` is routinely narrower than a capture, and this is the one
-      screen an admin opens specifically to look closely at one.
+      Sized to the same `74vw` share of the viewport as the dialog itself,
+      for the same reason it's there: a fixed `max-w` is routinely narrower
+      than a capture, and this is the one screen an admin opens specifically
+      to look closely at one.
 
-      `body` drops Nuxt UI's default `overflow-y-auto`, the same override
-      `FeedbackDialog` needs and explains: `ui` *merges* onto that default
-      rather than replacing it, so without `overflow-hidden` here there were
-      two nested scroll containers — the modal body and the frame below —
+      `body` gets `flex flex-col` so the zoom toolbar and the frame below it
+      stack instead of overlapping, and drops Nuxt UI's default
+      `overflow-y-auto` — the same override `FeedbackDialog` needs and
+      explains: `ui` *merges* onto that default rather than replacing it, so
+      without `overflow-hidden` here there were two nested scroll containers
       fighting over the same wheel gesture instead of just the picture
       panning inside its frame.
     -->
     <UModal
       :open="viewing !== null"
       title="Screenshot"
-      :ui="{ content: 'w-[74vw] max-w-[74vw]', body: 'p-0 overflow-hidden' }"
+      :ui="{ content: 'w-[74vw] max-w-[74vw]', body: 'p-0 overflow-hidden flex flex-col' }"
       @update:open="viewing = null"
     >
       <template #body>
-        <div
-          v-if="viewing"
-          class="max-h-[85vh] overflow-y-auto rounded-b-lg border-t border-(--ui-border) bg-(--ui-bg-elevated)"
-        >
-          <img
-            :src="`/api/admin/feedback/${viewing.id}/screenshot`"
-            alt="Submitted screenshot"
-            class="mx-auto block h-auto max-w-full"
+        <div v-if="viewing" class="flex min-h-0 flex-1 flex-col">
+          <div class="flex shrink-0 items-center justify-end gap-1.5 border-b border-(--ui-border) bg-(--ui-bg-elevated) px-3 py-2">
+            <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-out" :disabled="!canZoomOut" aria-label="Zoom out" @click="zoomOut()" />
+            <span class="w-12 text-center text-sm text-(--ui-text-muted) tabular-nums">{{ zoomPercent }}%</span>
+            <UButton size="md" variant="ghost" color="neutral" icon="i-lucide-zoom-in" :disabled="!canZoomIn" aria-label="Zoom in" @click="zoomIn()" />
+          </div>
+
+          <div
+            ref="lightboxWrapper"
+            class="min-h-0 flex-1 overflow-auto rounded-b-lg bg-(--ui-bg-elevated)"
+            :class="fitsWidth && fitsHeight ? 'flex items-center justify-center' : ''"
+            @wheel="onWheel"
           >
+            <img
+              v-if="naturalWidth"
+              :src="`/api/admin/feedback/${viewing.id}/screenshot`"
+              alt="Submitted screenshot"
+              class="block max-w-none"
+              :style="{ width: `${displayWidth}px`, height: `${displayHeight}px` }"
+            >
+          </div>
         </div>
       </template>
     </UModal>

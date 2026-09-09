@@ -145,10 +145,7 @@ onMounted(() => {
  * the container its own scrollbar (below) keeps the drawing surface at a
  * usable size instead of compressing it.
  */
-const scale = computed(() => {
-  if (naturalWidth.value === 0) return 1
-  return Math.min(1, containerWidth.value / naturalWidth.value)
-})
+const scale = computed(() => fitScale(containerWidth.value, naturalWidth.value))
 /** The fit scale, adjusted by how far the zoom controls have moved it. */
 const displayScale = computed(() => scale.value * zoom.value)
 const displayWidth = computed(() => naturalWidth.value * displayScale.value)
@@ -175,10 +172,6 @@ const stageConfig = computed(() => ({
   scaleX: displayScale.value,
   scaleY: displayScale.value,
 }))
-
-function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100))
-}
 
 /**
  * Changes zoom while keeping one point of the *content* fixed under a given
@@ -212,10 +205,10 @@ function zoomTo(newZoom: number, anchorX?: number, anchorY?: number) {
 }
 
 function zoomIn(anchorX?: number, anchorY?: number) {
-  zoomTo(clampZoom(zoom.value + ZOOM_STEP), anchorX, anchorY)
+  zoomTo(clampZoom(zoom.value + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM), anchorX, anchorY)
 }
 function zoomOut(anchorX?: number, anchorY?: number) {
-  zoomTo(clampZoom(zoom.value - ZOOM_STEP), anchorX, anchorY)
+  zoomTo(clampZoom(zoom.value - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM), anchorX, anchorY)
 }
 
 /** Ctrl+scroll (or a trackpad pinch, which browsers report as a ctrl-flagged wheel event) zooms toward the cursor; a plain wheel scrolls the wrapper as normal. */
