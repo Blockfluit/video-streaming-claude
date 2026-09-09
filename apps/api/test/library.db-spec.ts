@@ -841,6 +841,30 @@ describe('Library (real database)', () => {
         expect(response.body.matchScore).toBeGreaterThan(0);
       });
 
+      /**
+       * The bug this catches: excluding the show's own episodes before
+       * checking the gate can tip an exactly-at-minimum viewer under it,
+       * hiding the badge on precisely the show they've watched the most of.
+       * The gate is a fact about the viewer, evaluated on their whole
+       * history; only the score itself excludes the show's own episodes.
+       */
+      it('still shows a score for a show whose own episodes make up most of the viewer’s history', async () => {
+        await prisma.video.updateMany({
+          where: { id: { in: [first.id, second.id] } },
+          data: { genres: ['Drama'] },
+        });
+        await beat(first.id, 119);
+        await beat(second.id, 119);
+        for (let i = 0; i < 3; i += 1) await completedFiller(['Drama']);
+        // Exactly 5 signals total: the show's own 2 episodes plus 3 fillers.
+        // Excluding the show's own episodes leaves exactly 3, two under the
+        // threshold, which is what the old, buggy gate placement saw.
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
       it('never inflates a show’s score by counting its own episodes as evidence', async () => {
         for (let i = 0; i < 5; i += 1) await completedFiller(['Action']);
 

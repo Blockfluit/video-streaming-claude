@@ -30,6 +30,17 @@ export async function matchScoreFor(
   userId: string,
   target: { videoId: string } | { collectionId: string; memberVideoIds?: string[] },
 ): Promise<number | null> {
+  const evidence = await fetchEngagementEvidence(prisma, userId);
+
+  // The gate is a property of the viewer — "has this account watched enough
+  // to have a taste profile at all" — not of which title happens to be on
+  // screen. Checking it after self-exclusion would mean viewing one of your
+  // own most-recently-watched titles could tip your total under the
+  // threshold and hide the badge, even though your overall history clears it
+  // easily; a show you've watched most of would lose its badge precisely
+  // because you know it best.
+  if (!hasEnoughSignal(buildTasteProfile(evidence))) return null;
+
   const excluded = new Set<string>();
   if ('videoId' in target) {
     excluded.add(evidenceTargetKey({ videoId: target.videoId }));
@@ -40,11 +51,11 @@ export async function matchScoreFor(
     }
   }
 
-  const evidence = await fetchEngagementEvidence(prisma, userId);
+  // Self-exclusion still applies to the score itself, so a title never gets
+  // credit for matching itself — only the gate above is exempt from it.
   const profile = buildTasteProfile(
     evidence.filter((item) => !excluded.has(evidenceTargetKey(item.target))),
   );
-  if (!hasEnoughSignal(profile)) return null;
 
   const candidate =
     'videoId' in target

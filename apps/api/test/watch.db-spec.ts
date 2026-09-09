@@ -521,6 +521,33 @@ describe('Watch tracking (real database)', () => {
         expect(response.body.matchScore).toBeGreaterThan(0);
       });
 
+      /**
+       * The bug this catches: excluding the viewed video's own evidence
+       * before checking the gate can tip an exactly-at-minimum viewer under
+       * it, hiding the badge on precisely the titles they know best. The
+       * gate is a fact about the viewer, evaluated on their whole history;
+       * only the score itself excludes the video's own evidence.
+       */
+      it('still shows a score for a video that is itself one of exactly the minimum watched titles', async () => {
+        const target = await seedVideo({ genres: ['Drama'] });
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, target).expect(
+          200,
+        );
+        for (let i = 0; i < 4; i += 1) {
+          const filler = await seedVideo({ genres: ['Drama'] });
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        // Exactly 5 signals total, with the target itself among them —
+        // excluding it for self-exclusion leaves exactly 4, one under the
+        // threshold, which is what the old, buggy gate placement saw.
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
       it('never inflates a video’s score by counting its own evidence', async () => {
         for (let i = 0; i < 5; i += 1) {
           const filler = await seedVideo({ genres: ['Action'] });
