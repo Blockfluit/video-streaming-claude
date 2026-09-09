@@ -197,18 +197,22 @@ useHead({ title: 'Feedback' })
       exactly what a moderator reviewing a small UI detail doesn't want.
       `overflow-auto` on a fixed-height frame scrolls the picture instead;
       `w-max` keeps the image itself from being flexed down to the frame's
-      width the way `w-full` would.
+      width the way `w-full` would. Sized to the same `74vw` share of the
+      viewport as the feedback dialog's own screenshot view, rather than a
+      fixed `max-w`, for the same reason: a capture is routinely wider than
+      any fixed cap, and this is the one screen an admin opens specifically
+      to look closely at one.
     -->
     <UModal
       :open="viewing !== null"
       title="Screenshot"
-      :ui="{ content: 'max-w-4xl', body: 'p-0' }"
+      :ui="{ content: 'w-[74vw] max-w-[74vw]', body: 'p-0' }"
       @update:open="viewing = null"
     >
       <template #body>
         <div
           v-if="viewing"
-          class="max-h-[80vh] overflow-auto rounded-b-lg border-t border-(--ui-border) bg-(--ui-bg-elevated)"
+          class="max-h-[85vh] overflow-auto rounded-b-lg border-t border-(--ui-border) bg-(--ui-bg-elevated)"
         >
           <img
             :src="`/api/admin/feedback/${viewing.id}/screenshot`"
