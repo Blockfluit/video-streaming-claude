@@ -438,6 +438,20 @@ export type CaptureThumbnailInput = z.infer<typeof captureThumbnailSchema>;
 export const THUMBNAIL_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
 export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
 
+/** The decoded byte length of a feedback screenshot, checked server-side after base64 decoding. */
+export const MAX_FEEDBACK_SCREENSHOT_BYTES = 5 * 1024 * 1024;
+
+/**
+ * There is deliberately no per-user bound on how much feedback (or how many
+ * screenshots) one account can submit, beyond the existing
+ * `@ThrottleAuthoring()` rate limit on `POST /feedback`. The feedback widget's
+ * spec explicitly declared rate-limiting beyond that bucket out of scope, and
+ * this is an invite-only app — every submission is attributable to a real
+ * account an admin already vetted. A deliberate omission, documented here
+ * rather than left silently unaddressed, the way this codebase records every
+ * other scope decision.
+ */
+
 /** A manually uploaded subtitle track. */
 export const uploadSubtitleSchema = z.object({
   /** ISO 639-1/2. Unknown codes are accepted and flagged, never rejected. */

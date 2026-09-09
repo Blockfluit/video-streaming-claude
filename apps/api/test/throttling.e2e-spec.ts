@@ -127,6 +127,7 @@ describe('Rate limiting', () => {
       ['a collection poster', '/collections/whatever/poster'],
       ['a subtitle track', '/videos/whatever/subtitles/track.vtt'],
       ['the session probe', '/auth/me'],
+      ['a feedback screenshot', '/admin/feedback/whatever/screenshot'],
     ])('never rate-limits %s', async (_label, path) => {
       const server = app.getHttpServer();
       const statuses = new Set<number>();

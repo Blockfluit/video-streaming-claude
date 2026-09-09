@@ -9,6 +9,7 @@ import { CollectionsModule } from './collections/collections.module';
 import { CommentsModule } from './comments/comments.module';
 import { CommonModule } from './common/common.module';
 import { CreditsModule } from './credits/credits.module';
+import { FeedbackModule } from './feedback/feedback.module';
 import { IngestModule } from './ingest/ingest.module';
 import { InvitesModule } from './invites/invites.module';
 import { LibraryModule } from './library/library.module';
@@ -61,6 +62,7 @@ import { THROTTLERS, UserThrottlerGuard } from './common/throttling';
     WatchModule,
     PeopleModule,
     CreditsModule,
+    FeedbackModule,
     CommentsModule,
     WatchlistModule,
     ListsModule,
