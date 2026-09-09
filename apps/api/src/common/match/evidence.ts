@@ -36,7 +36,6 @@ export async function fetchEngagementEvidence(
       where: { userId },
       select: {
         videoId: true,
-        completed: true,
         maxPositionSec: true,
         video: { select: { durationSec: true } },
       },
@@ -61,7 +60,6 @@ export async function fetchEngagementEvidence(
 
   interface Merging {
     target: EvidenceTarget;
-    completed: boolean;
     onWatchlist: boolean;
     watchedFraction: number | null;
   }
@@ -77,7 +75,6 @@ export async function fetchEngagementEvidence(
 
     byKey.set(`video:${row.videoId}`, {
       target: { videoId: row.videoId },
-      completed: row.completed,
       onWatchlist: false,
       watchedFraction,
     });
@@ -91,7 +88,6 @@ export async function fetchEngagementEvidence(
       else {
         byKey.set(key, {
           target: { videoId: row.videoId },
-          completed: false,
           onWatchlist: true,
           watchedFraction: null,
         });
@@ -99,7 +95,6 @@ export async function fetchEngagementEvidence(
     } else if (row.collectionId) {
       byKey.set(`collection:${row.collectionId}`, {
         target: { collectionId: row.collectionId },
-        completed: false,
         onWatchlist: true,
         watchedFraction: null,
       });

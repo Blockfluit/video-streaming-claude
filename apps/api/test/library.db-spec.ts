@@ -840,6 +840,23 @@ describe('Library (real database)', () => {
         expect(response.body.matchScore).toBeNull();
       });
 
+      /**
+       * Proves the live setting is actually read, not a cached default: two
+       * signals stays hidden at the (default) 5 minimum — see the previous
+       * test — but clears an admin-lowered one.
+       */
+      it('respects an admin-configured minimum lower than the default', async () => {
+        await admin.patch('/admin/settings').send({ minTitlesForMatch: 2 }).expect(200);
+
+        await prisma.video.update({ where: { id: first.id }, data: { genres: ['Drama'] } });
+        await completedFiller(['Drama']);
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).not.toBeNull();
+      });
+
       it('derives a show’s score from its own episodes when the collection itself has no genres', async () => {
         // A hand-made grouping is often never matched to anything in TMDB
         // itself, even when every episode inside it plainly is — so the

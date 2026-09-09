@@ -211,7 +211,7 @@ export class WatchService {
     const inMyList = await savedToList(this.prisma, userId, { videoId });
 
     // Always present, `null` meaning hidden — same convention as `mine` above.
-    // Hidden below `MIN_STRONG_SIGNALS`, and never inflated by the video
+    // Hidden below the admin-configured minimum, and never inflated by the video
     // matching itself: `matchScoreFor` excludes this video's own evidence
     // before scoring it.
     const matchScore = await matchScoreFor(this.prisma, userId, { videoId });

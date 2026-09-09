@@ -7,6 +7,7 @@
  * video never gets credit for matching itself.
  */
 
+import { getMinTitlesForMatch } from '../settings';
 import type { PrismaService } from '../../prisma/prisma.service';
 import {
   buildTasteProfile,
@@ -19,12 +20,12 @@ import { fetchEngagementEvidence, fetchTargetFeatures, fetchTargetFeaturesForVid
 
 /**
  * The badge on a video's or collection's own page, 0-100. `null` means
- * "hidden" — the viewer hasn't cleared `MIN_STRONG_SIGNALS` yet, the target
- * has no readable record, or (see `hasFeatures`) the target has genres, tags
- * and credits nowhere at all, so there is nothing to have scored it *on* —
- * common for anything not yet matched to TMDB. That last case is not the
- * same claim as a genuine 0%, and showing one would be a lie about having
- * checked.
+ * "hidden" — the viewer hasn't cleared the admin-configured minimum yet
+ * (`common/settings.ts`), the target has no readable record, or (see
+ * `hasFeatures`) the target has genres, tags and credits nowhere at all, so
+ * there is nothing to have scored it *on* — common for anything not yet
+ * matched to TMDB. That last case is not the same claim as a genuine 0%,
+ * and showing one would be a lie about having checked.
  *
  * For a collection, `memberVideoIds` are its own episodes — the same ones
  * `progress()` already reads for its watch-progress rollup — excluded here so
@@ -36,6 +37,7 @@ export async function matchScoreFor(
   target: { videoId: string } | { collectionId: string; memberVideoIds?: string[] },
 ): Promise<number | null> {
   const evidence = await fetchEngagementEvidence(prisma, userId);
+  const minTitles = await getMinTitlesForMatch(prisma);
 
   // The gate is a property of the viewer — "has this account watched enough
   // to have a taste profile at all" — not of which title happens to be on
@@ -44,7 +46,7 @@ export async function matchScoreFor(
   // threshold and hide the badge, even though your overall history clears it
   // easily; a show you've watched most of would lose its badge precisely
   // because you know it best.
-  if (!hasEnoughSignal(buildTasteProfile(evidence))) return null;
+  if (!hasEnoughSignal(buildTasteProfile(evidence), minTitles)) return null;
 
   const excluded = new Set<string>();
   if ('videoId' in target) {
@@ -80,8 +82,8 @@ export async function matchScoreFor(
  * against `MIN_ROW_ITEM_SCORE`; the rounded percentage is a display concern
  * of `matchScoreFor` alone.
  *
- * `null` means the viewer hasn't cleared `MIN_STRONG_SIGNALS` — the row
- * disappears entirely rather than showing a score built from too little.
+ * `null` means the viewer hasn't cleared the admin-configured minimum — the
+ * row disappears entirely rather than showing a score built from too little.
  */
 export async function matchScoresForVideos(
   prisma: PrismaService,
@@ -92,7 +94,8 @@ export async function matchScoresForVideos(
 
   const evidence = await fetchEngagementEvidence(prisma, userId);
   const profile = buildTasteProfile(evidence);
-  if (!hasEnoughSignal(profile)) return null;
+  const minTitles = await getMinTitlesForMatch(prisma);
+  if (!hasEnoughSignal(profile, minTitles)) return null;
 
   const features = await fetchTargetFeaturesForVideos(prisma, videoIds);
 

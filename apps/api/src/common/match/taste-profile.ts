@@ -3,7 +3,7 @@
  * like a title they haven't seen.
  *
  * Pure, for the same reason `rank.ts` is — the rules only bite in combination
- * (a completed watch and a watchlist add for the same title must not add up,
+ * (a watched title and a watchlist add for the same title must not add up,
  * a lead actor must outweigh someone billed 39th, a genre a viewer has never
  * touched must contribute nothing) and every one of those is the sort of
  * thing that is only wrong in a badge nobody double-checks. There is no
@@ -25,8 +25,6 @@ export interface EvidenceCredit {
 /** One title from the viewer's own history, reduced to what scoring needs. */
 export interface EngagementEvidence {
   target: EvidenceTarget;
-  /** Only ever true for a video — a collection has no completion of its own. */
-  completed: boolean;
   onWatchlist: boolean;
   /** Null when the duration is unknown, or the target is a collection. */
   watchedFraction: number | null;
@@ -60,18 +58,20 @@ export interface TasteProfile {
   genreWeights: Map<string, number>;
   tagWeights: Map<string, number>;
   personWeights: Map<string, number>;
-  /** Distinct completed-or-watchlisted titles. What `hasEnoughSignal` gates on. */
-  strongSignalCount: number;
+  /** Distinct titles carrying any evidence weight at all. What `hasEnoughSignal` gates on. */
+  signalCount: number;
 }
 
-/** Finishing something is the strongest signal available with no rating system. */
-export const WEIGHT_COMPLETED = 1.0;
 /** Deliberate, but not confirmed by actually watching. */
 export const WEIGHT_WATCHLISTED = 0.6;
 /**
- * The ceiling a partial watch can reach, scaled by how far the viewer got.
- * Capped below both other weights so a half-watched title can never outweigh
- * a completed one or a deliberate list add.
+ * The ceiling a watched title can reach, scaled continuously by how far the
+ * viewer got — no step at any particular fraction, including the app-wide
+ * 90%-of-duration "completed" line elsewhere in this app. Capped below
+ * `WEIGHT_WATCHLISTED` so watching something all the way through can never
+ * outweigh a deliberate list add: finishing something is not more
+ * confirmatory of taste than choosing to save it, with no rating system to
+ * say which one you actually liked.
  */
 export const WEIGHT_PARTIAL_MAX = 0.5;
 /** Below 10% watched, a bare click is not evidence of anything. */
@@ -85,11 +85,14 @@ export const TAG_WEIGHT = 0.25;
 export const CAST_WEIGHT = 0.45;
 
 /**
- * Reachable within a first weekend of real use, but rules out one afternoon of
- * bingeing a single show counting as "knowing someone's taste" — a profile
- * built from one show has no genre or cast diversity at all.
+ * The default gate value — admin-configurable from here on (see
+ * `common/settings.ts`), but this is what a fresh install starts at before
+ * anyone has touched the setting. Reachable within a first weekend of real
+ * use, but rules out one afternoon of bingeing a single show counting as
+ * "knowing someone's taste" — a profile built from one show has no genre or
+ * cast diversity at all.
  */
-export const MIN_STRONG_SIGNALS = 5;
+export const DEFAULT_MIN_TITLES_FOR_MATCH = 5;
 
 /**
  * Below this, an "overlap" is one broad shared genre out of a big profile —
@@ -132,22 +135,20 @@ const billingFactor = (position: number): number => 1 / (1 + Math.max(position, 
 /**
  * How much one watched/listed title counts as "liked".
  *
- * `max`, never sum: a title that is both completed and on My List must
- * contribute once, not twice.
+ * Continuous in how far the viewer got — no cliff at any particular
+ * fraction — and `max`, never sum, against the watchlist signal: a title
+ * that is both mostly watched and on My List must contribute once, not
+ * twice.
  */
 export function evidenceWeight(
-  evidence: Pick<EngagementEvidence, 'completed' | 'onWatchlist' | 'watchedFraction'>,
+  evidence: Pick<EngagementEvidence, 'onWatchlist' | 'watchedFraction'>,
 ): number {
   const partial =
     evidence.watchedFraction !== null && evidence.watchedFraction >= MIN_PARTIAL_FRACTION
       ? evidence.watchedFraction * WEIGHT_PARTIAL_MAX
       : 0;
 
-  return Math.max(
-    evidence.completed ? WEIGHT_COMPLETED : 0,
-    evidence.onWatchlist ? WEIGHT_WATCHLISTED : 0,
-    partial,
-  );
+  return Math.max(evidence.onWatchlist ? WEIGHT_WATCHLISTED : 0, partial);
 }
 
 /** Exported so `match.ts` can exclude a candidate's own evidence by the same key. */
@@ -166,7 +167,7 @@ function normalize(raw: Map<string, number>): Map<string, number> {
  * Builds a viewer's taste profile from their watch history and My List.
  *
  * Evidence is grouped by target first — defensively, in case the IO layer
- * ever sends two rows for the same title (e.g. it is both completed and on
+ * ever sends two rows for the same title (e.g. it is both watched and on
  * My List) — so a title contributes its single strongest weight once, never
  * once per row that happens to describe it.
  */
@@ -182,13 +183,15 @@ export function buildTasteProfile(evidenceList: EngagementEvidence[]): TasteProf
   const rawGenre = new Map<string, number>();
   const rawTag = new Map<string, number>();
   const rawPerson = new Map<string, number>();
-  let strongSignalCount = 0;
+  let signalCount = 0;
 
   for (const group of byTarget.values()) {
     const weight = Math.max(...group.map(evidenceWeight));
+    // Everything past this line cleared evidenceWeight > 0 — a real watch
+    // above the floor, or a watchlist add — so it counts toward the gate
+    // exactly once, the same title it counts toward the profile with.
     if (weight <= 0) continue;
-
-    if (group.some((item) => item.completed || item.onWatchlist)) strongSignalCount += 1;
+    signalCount += 1;
 
     // Every row in a group describes the same title, so any one of them
     // carries the genres/tags/credits that title's full weight applies to.
@@ -212,7 +215,7 @@ export function buildTasteProfile(evidenceList: EngagementEvidence[]): TasteProf
     genreWeights: normalize(rawGenre),
     tagWeights: normalize(rawTag),
     personWeights: normalize(rawPerson),
-    strongSignalCount,
+    signalCount,
   };
 }
 
@@ -240,6 +243,7 @@ export function scoreCandidate(profile: TasteProfile, candidate: CandidateFeatur
   return Math.min(Math.max(score, 0), 1);
 }
 
-export function hasEnoughSignal(profile: TasteProfile): boolean {
-  return profile.strongSignalCount >= MIN_STRONG_SIGNALS;
+/** `minTitles` is the admin-configured gate value — see `common/settings.ts`. */
+export function hasEnoughSignal(profile: TasteProfile, minTitles: number): boolean {
+  return profile.signalCount >= minTitles;
 }

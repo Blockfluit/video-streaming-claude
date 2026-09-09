@@ -131,7 +131,7 @@ async function score(
       userId,
       pool.map((video) => video.id),
     );
-    // The viewer hasn't cleared MIN_STRONG_SIGNALS yet — the row disappears
+    // The viewer hasn't cleared the admin-configured minimum yet — the row disappears
     // entirely rather than showing a score built from too little.
     if (scores === null) return [];
 
