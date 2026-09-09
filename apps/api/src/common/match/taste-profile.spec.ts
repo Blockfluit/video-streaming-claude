@@ -2,6 +2,7 @@ import type { CreditRole } from '../../prisma/generated/enums';
 
 import {
   buildTasteProfile,
+  CAST_WEIGHT,
   DEFAULT_MIN_TITLES_FOR_MATCH,
   evidenceWeight,
   hasEnoughSignal,
@@ -163,6 +164,34 @@ describe('buildTasteProfile', () => {
 
     expect(profile.genreWeights.size).toBe(0);
   });
+
+  /**
+   * `personWeights` is peak-relative, not share-of-total: a real watch
+   * history spans far more distinct people than genres, and sum-normalizing
+   * it diluted even a viewer's single most-recognized favorite actor to a
+   * near-zero weight. Two equally-weighted people in separate titles must
+   * both reach the category ceiling, not split it — the direct regression
+   * guard for the bug this fixes.
+   */
+  it('normalises personWeights peak-relative, not sum-to-1, across a multi-item profile', () => {
+    const profile = buildTasteProfile([
+      evidence({ onWatchlist: true, credits: [credit('p1', 'ACTOR', 0)] }),
+      evidence({ onWatchlist: true, credits: [credit('p2', 'ACTOR', 0)] }),
+    ]);
+
+    expect(profile.personWeights.get('p1')).toBeCloseTo(1);
+    expect(profile.personWeights.get('p2')).toBeCloseTo(1);
+  });
+
+  it('still ranks a lead above a minor cast member when they come from separate titles', () => {
+    const profile = buildTasteProfile([
+      evidence({ onWatchlist: true, credits: [credit('lead', 'ACTOR', 0)] }),
+      evidence({ onWatchlist: true, credits: [credit('minor', 'ACTOR', 39)] }),
+    ]);
+
+    expect(profile.personWeights.get('lead')).toBeCloseTo(1);
+    expect(profile.personWeights.get('minor')!).toBeLessThan(1);
+  });
 });
 
 describe('scoreCandidate', () => {
@@ -212,6 +241,45 @@ describe('scoreCandidate', () => {
     const profile = buildTasteProfile([]);
     const score = scoreCandidate(profile, candidate({ genres: ['Action'] }));
     expect(score).toBe(0);
+  });
+
+  /**
+   * The direct regression test for the "always low" production bug: a
+   * shared favourite actor's contribution must not shrink just because the
+   * viewer's history also contains a lot of unrelated cast. Sum-normalizing
+   * personWeights diluted this to near zero once the profile spanned dozens
+   * of people; peak-relative weighting keeps a #1 favourite at the category
+   * ceiling regardless of how much unrelated cast surrounds it.
+   */
+  it('keeps a shared favourite actor’s contribution near CAST_WEIGHT however much unrelated cast surrounds it', () => {
+    const unrelatedCast = Array.from({ length: 20 }, (_, i) =>
+      credit(`unrelated-${i}`, 'OTHER', 20),
+    );
+
+    const profile = buildTasteProfile([
+      evidence({ onWatchlist: true, credits: [credit('favourite', 'ACTOR', 0), ...unrelatedCast] }),
+    ]);
+
+    const score = scoreCandidate(profile, candidate({ credits: [credit('favourite', 'ACTOR', 0)] }));
+
+    expect(score).toBeCloseTo(CAST_WEIGHT, 2);
+  });
+
+  it('clamps a candidate crediting several independently peak-weighted people to a score of at most 1', () => {
+    const profile = buildTasteProfile([
+      evidence({ onWatchlist: true, credits: [credit('p1', 'ACTOR', 0)] }),
+      evidence({ onWatchlist: true, credits: [credit('p2', 'ACTOR', 0)] }),
+      evidence({ onWatchlist: true, credits: [credit('p3', 'ACTOR', 0)] }),
+    ]);
+
+    const score = scoreCandidate(
+      profile,
+      candidate({
+        credits: [credit('p1', 'ACTOR', 0), credit('p2', 'ACTOR', 0), credit('p3', 'ACTOR', 0)],
+      }),
+    );
+
+    expect(score).toBeLessThanOrEqual(1);
   });
 });
 

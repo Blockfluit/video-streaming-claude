@@ -155,12 +155,47 @@ export function evidenceWeight(
 export const evidenceTargetKey = (target: EvidenceTarget): string =>
   'videoId' in target ? `video:${target.videoId}` : `collection:${target.collectionId}`;
 
-/** Each map scaled to sum to 1, bounding every category to [0,1] regardless of library size. */
-function normalize(raw: Map<string, number>): Map<string, number> {
+/**
+ * Whether one `WatchProgress` row is real engagement with its video — reused
+ * by the Recommended row to decide what "already watched" means, not just
+ * what the app-wide `completed` flag means. `completed` alone misses a video
+ * whose duration is unknown (a failed ffprobe writes 0, so it can never
+ * become `completed`) and, for a show, misses every episode short of the one
+ * the viewer actually finished.
+ */
+export function isSubstantiallyWatched(
+  maxPositionSec: number,
+  durationSec: number | null,
+  completed: boolean,
+): boolean {
+  if (completed) return true;
+  if (durationSec === null || durationSec <= 0) return false;
+  return maxPositionSec / durationSec >= MIN_PARTIAL_FRACTION;
+}
+
+/** Genre/tag vocabularies are small and bounded by the library's own taxonomy — scaled to sum to 1. */
+function sumNormalize(raw: Map<string, number>): Map<string, number> {
   const total = [...raw.values()].reduce((sum, value) => sum + value, 0);
   if (total <= 0) return new Map();
 
   return new Map([...raw].map(([key, value]) => [key, value / total]));
+}
+
+/**
+ * Scaled so the single largest raw value reaches 1 — peak-relative rather
+ * than share-of-total. Cast/crew breadth across a real watch history is
+ * large (50-300+ distinct people for a handful of titles), where sum-
+ * normalizing dilutes even a viewer's single most-recognized favorite actor
+ * to a near-zero share of a real match score; this keeps a #1 favorite
+ * person at full weight within the cast category regardless of how many
+ * other people are in the profile, while still preserving relative order (a
+ * lead still outweighs an extra billed 39th).
+ */
+function maxNormalize(raw: Map<string, number>): Map<string, number> {
+  const peak = Math.max(...raw.values(), 0);
+  if (peak <= 0) return new Map();
+
+  return new Map([...raw].map(([key, value]) => [key, value / peak]));
 }
 
 /**
@@ -212,9 +247,9 @@ export function buildTasteProfile(evidenceList: EngagementEvidence[]): TasteProf
   }
 
   return {
-    genreWeights: normalize(rawGenre),
-    tagWeights: normalize(rawTag),
-    personWeights: normalize(rawPerson),
+    genreWeights: sumNormalize(rawGenre),
+    tagWeights: sumNormalize(rawTag),
+    personWeights: maxNormalize(rawPerson),
     signalCount,
   };
 }
@@ -233,11 +268,16 @@ export function scoreCandidate(profile: TasteProfile, candidate: CandidateFeatur
   const genreScore = sumWeights(profile.genreWeights, candidate.genres);
   const tagScore = sumWeights(profile.tagWeights, candidate.tags);
 
-  const castScore = candidate.credits.reduce((sum, c) => {
+  const rawCastScore = candidate.credits.reduce((sum, c) => {
     const base = profile.personWeights.get(c.personId);
     if (!base) return sum;
     return sum + base * roleWeight(c.role) * billingFactor(c.position);
   }, 0);
+  // personWeights is peak-relative, not share-of-total, so summing several
+  // strongly-weighted credits on one candidate can exceed 1 — clamped here
+  // to keep CAST_WEIGHT a real per-category ceiling, the same invariant
+  // sum-normalization gave genre/tag for free.
+  const castScore = Math.min(rawCastScore, 1);
 
   const score = GENRE_WEIGHT * genreScore + TAG_WEIGHT * tagScore + CAST_WEIGHT * castScore;
   return Math.min(Math.max(score, 0), 1);

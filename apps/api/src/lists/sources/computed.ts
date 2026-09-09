@@ -2,7 +2,7 @@ import { DEFAULT_TRENDING_WINDOW_DAYS } from '@video/shared';
 
 import { COUNTS_HERE_SELECT, withCountsHere } from '../../common/films';
 import { matchScoresForVideos } from '../../common/match/match';
-import { MIN_ROW_ITEM_SCORE } from '../../common/match/taste-profile';
+import { isSubstantiallyWatched, MIN_ROW_ITEM_SCORE } from '../../common/match/taste-profile';
 import { visibleStates, whereVisible } from '../../common/publishing';
 import type { PublishState, Role, RowKind, RowSource } from '../../prisma/generated/enums';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -119,11 +119,17 @@ async function score(
       take: POOL_LIMIT,
     });
 
-    // A title the viewer has already completed or explicitly saved is not a
-    // recommendation — it's confirmed, one way or the other.
+    // A title the viewer has substantially watched or explicitly saved is
+    // not a recommendation — it's confirmed, one way or the other. Once any
+    // one episode of a show clears that bar, the whole show is dropped too:
+    // Continue Watching already surfaces it, so leaving its other episodes
+    // in the pool would only duplicate that card here under a new score.
     const known = await knownVideoIds(prisma, userId);
     const pool = videos.filter(
-      (video) => !known.has(video.id) && !isOrphaned(video.collections, role),
+      (video) =>
+        !known.videos.has(video.id) &&
+        !video.collections.some((membership) => known.engagedCollections.has(membership.collectionId)) &&
+        !isOrphaned(video.collections, role),
     );
 
     const scores = await matchScoresForVideos(
@@ -225,18 +231,35 @@ async function trendingTotals(prisma: PrismaService, row: ComputedRow, videoFilt
   return rows.map((row) => ({ videoId: row.videoId, score: row._sum.deltaSec ?? 0 }));
 }
 
+interface KnownVideos {
+  /** Individually excluded: substantially watched, or explicitly saved. */
+  videos: Set<string>;
+  /** Collections dropped in full because at least one episode is substantially watched. */
+  engagedCollections: Set<string>;
+}
+
 /**
- * Every video the viewer has completed, explicitly watchlisted, or that
- * belongs to a collection they've watchlisted — none of it is a
- * recommendation, because it's already confirmed one way or the other.
- * Bounded by the viewer's own history and their saved collections' own
- * membership, both small by construction on a private library.
+ * Every video the viewer has substantially watched (see
+ * `isSubstantiallyWatched` — not only the ones marked `completed`),
+ * explicitly watchlisted, or that belongs to a collection they've
+ * watchlisted — none of it is a recommendation, because it's already
+ * confirmed one way or the other. A collection with any substantially-
+ * watched episode is dropped in full: Continue Watching already covers a
+ * show once it's been started, so its other episodes competing for a
+ * Recommended slot would only duplicate that card. Bounded by the viewer's
+ * own history and their saved collections' own membership, both small by
+ * construction on a private library.
  */
-async function knownVideoIds(prisma: PrismaService, userId: string): Promise<Set<string>> {
-  const [completed, watchlistedVideos, watchlistedCollections] = await Promise.all([
+async function knownVideoIds(prisma: PrismaService, userId: string): Promise<KnownVideos> {
+  const [progress, watchlistedVideos, watchlistedCollections] = await Promise.all([
     prisma.watchProgress.findMany({
-      where: { userId, completed: true },
-      select: { videoId: true },
+      where: { userId },
+      select: {
+        videoId: true,
+        maxPositionSec: true,
+        completed: true,
+        video: { select: { durationSec: true, collections: { select: { collectionId: true } } } },
+      },
     }),
     prisma.watchlistItem.findMany({
       where: { userId, videoId: { not: null } },
@@ -248,9 +271,16 @@ async function knownVideoIds(prisma: PrismaService, userId: string): Promise<Set
     }),
   ]);
 
-  const known = new Set<string>();
-  for (const row of completed) known.add(row.videoId);
-  for (const row of watchlistedVideos) if (row.videoId) known.add(row.videoId);
+  const videos = new Set<string>();
+  const engagedCollections = new Set<string>();
+
+  for (const row of progress) {
+    if (!isSubstantiallyWatched(row.maxPositionSec, row.video.durationSec, row.completed)) continue;
+    videos.add(row.videoId);
+    for (const membership of row.video.collections) engagedCollections.add(membership.collectionId);
+  }
+
+  for (const row of watchlistedVideos) if (row.videoId) videos.add(row.videoId);
 
   if (watchlistedCollections.length > 0) {
     const members = await prisma.collectionVideo.findMany({
@@ -259,10 +289,10 @@ async function knownVideoIds(prisma: PrismaService, userId: string): Promise<Set
       },
       select: { videoId: true },
     });
-    for (const row of members) known.add(row.videoId);
+    for (const row of members) videos.add(row.videoId);
   }
 
-  return known;
+  return { videos, engagedCollections };
 }
 
 const MEMBERSHIP_SELECT = {
