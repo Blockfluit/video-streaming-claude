@@ -458,6 +458,41 @@ describe('Computed home-page rows (real database)', () => {
       expect(titles).toContain('Strong Match');
       expect(titles).not.toContain('Weak Match');
     });
+
+    it('excludes an entire show once the viewer has substantially watched any one of its episodes, even if none are marked completed', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      const episodeOne = await seedVideo(showId, { genres: ['Drama'] });
+      await seedVideo(showId, { genres: ['Drama'] });
+      // Half the video, well past MIN_PARTIAL_FRACTION but short of the
+      // app-wide 90% "completed" line — Continue Watching already covers
+      // this show, so it must not also compete for a Recommended slot.
+      await viewer
+        .post(`/videos/${episodeOne}/heartbeat`)
+        .send({ playSessionId: randomUUID(), positionSec: 300, deltaSec: 30 })
+        .expect(200);
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).not.toContain('Show');
+    });
+
+    it('excludes a standalone video the viewer has substantially watched but not completed', async () => {
+      await clearThreshold(['Drama', 'Drama', 'Drama', 'Drama', 'Drama']);
+      const partiallySeen = await seedVideo(null, {
+        title: 'Partially Seen',
+        slug: 'partially-seen',
+        storageKey: 'partial.mkv',
+        genres: ['Drama'],
+      });
+      await viewer
+        .post(`/videos/${partiallySeen}/heartbeat`)
+        .send({ playSessionId: randomUUID(), positionSec: 300, deltaSec: 30 })
+        .expect(200);
+
+      const rowId = await createRow({ title: 'For You', source: 'RECOMMENDED' });
+
+      expect(await titlesOf(viewer, rowId)).not.toContain('Partially Seen');
+    });
   });
 
   describe('personal rows', () => {
