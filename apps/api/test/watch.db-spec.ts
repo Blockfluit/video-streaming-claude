@@ -506,6 +506,37 @@ describe('Watch tracking (real database)', () => {
         expect(response.body.matchScore).toBeNull();
       });
 
+      /** The concrete case a threshold exists for: one episode of a show isn't a taste profile. */
+      it('stays hidden for a viewer who has watched only one thing', async () => {
+        await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }).expect(200);
+
+        const other = await seedVideo({ genres: ['Drama'] });
+        const response = await viewer.get(`/videos/${other}/stats`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('inherits a show’s genre for an episode carrying none of its own', async () => {
+        // Real TMDB import never sets genres on an episode — only on the show
+        // (`mapEpisodes` has no genres field; only `mapTitle`, applied to the
+        // collection, does) — so a video's own `genres` is routinely empty for
+        // real TV content, and scoring has to reach the collection for it.
+        await prisma.collection.update({ where: { id: collectionId }, data: { genres: ['Drama'] } });
+
+        for (let i = 0; i < 5; i += 1) {
+          const filler = await seedVideo(); // no genres of its own — only the shared collection's
+          await beat(viewer, { playSessionId: randomUUID(), positionSec: 540, deltaSec: 30 }, filler).expect(
+            200,
+          );
+        }
+        const target = await seedVideo(); // also no genres of its own, same collection
+
+        const response = await viewer.get(`/videos/${target}/stats`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
       it('shows a match score once the viewer clears the minimum watch history', async () => {
         for (let i = 0; i < 5; i += 1) {
           const filler = await seedVideo({ genres: ['Drama'] });

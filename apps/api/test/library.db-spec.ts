@@ -831,6 +831,30 @@ describe('Library (real database)', () => {
         expect(response.body.matchScore).toBeNull();
       });
 
+      /** The concrete case a threshold exists for: one episode of a show isn't a taste profile. */
+      it('stays hidden for a caller who has watched only one episode', async () => {
+        await beat(first.id, 119);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toBeNull();
+      });
+
+      it('derives a show’s score from its own episodes when the collection itself has no genres', async () => {
+        // A hand-made grouping is often never matched to anything in TMDB
+        // itself, even when every episode inside it plainly is — so the
+        // collection's own `genres` can be empty while its episodes' aren't.
+        await prisma.video.update({ where: { id: first.id }, data: { genres: ['Drama'] } });
+        await prisma.video.update({ where: { id: second.id }, data: { genres: ['Drama'] } });
+
+        for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
+
+        const response = await admin.get(`/collections/${show.slug}/progress`).expect(200);
+
+        expect(response.body.matchScore).toEqual(expect.any(Number));
+        expect(response.body.matchScore).toBeGreaterThan(0);
+      });
+
       it('shows a match score once the caller clears the minimum watch history', async () => {
         for (let i = 0; i < 5; i += 1) await completedFiller(['Drama']);
         await prisma.collection.update({ where: { id: show.id }, data: { genres: ['Drama'] } });

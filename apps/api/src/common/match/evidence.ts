@@ -145,10 +145,18 @@ export const fetchTargetFeaturesForVideos = (
 ): Promise<Map<string, TargetFeatures>> => videoFeaturesBatch(prisma, videoIds);
 
 /**
- * A video's own genres/tags, and its credits merged with its collection(s)' —
- * the same "episode's own credit wins, the show's fills in the rest" rule
- * `credits/merge.ts` uses for display, applied here to signal instead: an
- * episode with no credits of its own should still carry the show's cast.
+ * A video's genres/tags/credits, merged with its collection(s)' — the same
+ * "episode's own wins, the show's fills in the rest" rule `credits/merge.ts`
+ * uses for display, applied here to signal instead.
+ *
+ * Genres in particular are not optional to merge: TMDB's per-episode import
+ * (`mapEpisodes`) never sets them at all, only `mapTitle` does — and that
+ * lands on the **show**, not the episode. Reading a video's own `genres` in
+ * isolation means a real, properly-imported TV episode's `genres` is always
+ * `[]`, which would make watching one contribute nothing to a taste profile
+ * and an unwatched one unscorable on genre, however clearly the show
+ * matches. Tags get the same treatment for the same structural reason: an
+ * episode with none of its own should still carry whatever the show does.
  */
 async function videoFeaturesBatch(
   prisma: PrismaService,
@@ -171,14 +179,20 @@ async function videoFeaturesBatch(
     for (const membership of video.collections) collectionIds.add(membership.collectionId);
   }
 
-  const credits = await prisma.credit.findMany({
-    where: {
-      OR: [{ videoId: { in: videoIds } }, { collectionId: { in: [...collectionIds] } }],
-      // Billing past this is already negligible — see EVIDENCE_MAX_BILLING_POSITION.
-      position: { lt: EVIDENCE_MAX_BILLING_POSITION },
-    },
-    select: { videoId: true, collectionId: true, personId: true, role: true, position: true },
-  });
+  const [credits, collections] = await Promise.all([
+    prisma.credit.findMany({
+      where: {
+        OR: [{ videoId: { in: videoIds } }, { collectionId: { in: [...collectionIds] } }],
+        // Billing past this is already negligible — see EVIDENCE_MAX_BILLING_POSITION.
+        position: { lt: EVIDENCE_MAX_BILLING_POSITION },
+      },
+      select: { videoId: true, collectionId: true, personId: true, role: true, position: true },
+    }),
+    prisma.collection.findMany({
+      where: { id: { in: [...collectionIds] } },
+      select: { id: true, genres: true, tags: true },
+    }),
+  ]);
 
   const creditsByVideo = new Map<string, EvidenceCredit[]>();
   const creditsByCollection = new Map<string, EvidenceCredit[]>();
@@ -187,26 +201,44 @@ async function videoFeaturesBatch(
     if (credit.videoId) push(creditsByVideo, credit.videoId, entry);
     else if (credit.collectionId) push(creditsByCollection, credit.collectionId, entry);
   }
+  const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
 
   const result = new Map<string, TargetFeatures>();
   for (const video of videos) {
     const own = creditsByVideo.get(video.id) ?? [];
-    const inherited = video.collections.flatMap(
+    const inheritedCredits = video.collections.flatMap(
       (membership) => creditsByCollection.get(membership.collectionId) ?? [],
     );
-    result.set(video.id, { genres: video.genres, tags: video.tags, credits: mergeOwnFirst(own, inherited) });
+    const parentGenres = video.collections.flatMap(
+      (membership) => collectionById.get(membership.collectionId)?.genres ?? [],
+    );
+    const parentTags = video.collections.flatMap(
+      (membership) => collectionById.get(membership.collectionId)?.tags ?? [],
+    );
+
+    result.set(video.id, {
+      genres: dedupe([...video.genres, ...parentGenres]),
+      tags: dedupe([...video.tags, ...parentTags]),
+      credits: mergeOwnFirst(own, inheritedCredits),
+    });
   }
   return result;
 }
 
-/** A collection's own genres/tags/credits — no merge, unlike a video's. */
+/**
+ * A collection's genres/tags/credits, merged with the union of its member
+ * videos' — the reverse direction of the same rule. A hand-made grouping
+ * (a saga collecting individually-matched films, say) is often never itself
+ * matched to anything in TMDB and so carries no genres of its own, even
+ * though every film inside it obviously does.
+ */
 async function collectionFeaturesBatch(
   prisma: PrismaService,
   collectionIds: string[],
 ): Promise<Map<string, TargetFeatures>> {
   if (collectionIds.length === 0) return new Map();
 
-  const [collections, credits] = await Promise.all([
+  const [collections, credits, memberships] = await Promise.all([
     prisma.collection.findMany({
       where: { id: { in: collectionIds } },
       select: { id: true, genres: true, tags: true },
@@ -214,6 +246,10 @@ async function collectionFeaturesBatch(
     prisma.credit.findMany({
       where: { collectionId: { in: collectionIds }, position: { lt: EVIDENCE_MAX_BILLING_POSITION } },
       select: { collectionId: true, personId: true, role: true, position: true },
+    }),
+    prisma.collectionVideo.findMany({
+      where: { collectionId: { in: collectionIds } },
+      select: { collectionId: true, video: { select: { genres: true, tags: true } } },
     }),
   ]);
 
@@ -227,11 +263,18 @@ async function collectionFeaturesBatch(
     });
   }
 
+  const memberGenres = new Map<string, string[]>();
+  const memberTags = new Map<string, string[]>();
+  for (const membership of memberships) {
+    push(memberGenres, membership.collectionId, ...membership.video.genres);
+    push(memberTags, membership.collectionId, ...membership.video.tags);
+  }
+
   const result = new Map<string, TargetFeatures>();
   for (const collection of collections) {
     result.set(collection.id, {
-      genres: collection.genres,
-      tags: collection.tags,
+      genres: dedupe([...collection.genres, ...(memberGenres.get(collection.id) ?? [])]),
+      tags: dedupe([...collection.tags, ...(memberTags.get(collection.id) ?? [])]),
       credits: creditsByCollection.get(collection.id) ?? [],
     });
   }
@@ -244,8 +287,10 @@ function mergeOwnFirst(own: EvidenceCredit[], inherited: EvidenceCredit[]): Evid
   return [...own, ...inherited.filter((credit) => !ownPeople.has(credit.personId))];
 }
 
-function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+const dedupe = (values: string[]): string[] => [...new Set(values)];
+
+function push<K, V>(map: Map<K, V[]>, key: K, ...values: V[]): void {
   const list = map.get(key);
-  if (list) list.push(value);
-  else map.set(key, [value]);
+  if (list) list.push(...values);
+  else map.set(key, [...values]);
 }
