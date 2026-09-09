@@ -202,11 +202,18 @@ useHead({ title: 'Feedback' })
       fixed `max-w`, for the same reason: a capture is routinely wider than
       any fixed cap, and this is the one screen an admin opens specifically
       to look closely at one.
+
+      `body` drops Nuxt UI's default `overflow-y-auto`, the same override
+      `FeedbackDialog` needs and explains: `ui` *merges* onto that default
+      rather than replacing it, so without `overflow-hidden` here there were
+      two nested scroll containers — the modal body and the frame below —
+      fighting over the same wheel gesture instead of just the picture
+      panning inside its frame.
     -->
     <UModal
       :open="viewing !== null"
       title="Screenshot"
-      :ui="{ content: 'w-[74vw] max-w-[74vw]', body: 'p-0' }"
+      :ui="{ content: 'w-[74vw] max-w-[74vw]', body: 'p-0 overflow-hidden' }"
       @update:open="viewing = null"
     >
       <template #body>
