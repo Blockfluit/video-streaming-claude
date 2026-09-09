@@ -10,6 +10,8 @@
 useHead({
   titleTemplate: title => (title ? `${title} · Library` : 'Library'),
 })
+
+const { isSignedIn } = useSession()
 </script>
 
 <template>
@@ -31,5 +33,6 @@ useHead({
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
+    <FeedbackButton v-if="isSignedIn" />
   </UApp>
 </template>

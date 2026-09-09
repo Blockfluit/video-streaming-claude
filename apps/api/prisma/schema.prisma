@@ -142,6 +142,7 @@ model User {
   progress         WatchProgress[]
   events           WatchEvent[]
   comments         Comment[]
+  feedback         Feedback[]
   watchlist        WatchlistItem[]
   jobs             MediaJob[]
   mintedBy         InviteToken[]   @relation("Minter")
@@ -817,4 +818,28 @@ model IngestIssue {
   @@unique([kind, path])
   @@index([resolvedAt])
   @@index([videoId])
+}
+
+// ---------------------------------------------------------------------------
+// Feedback
+// ---------------------------------------------------------------------------
+
+/// Submitted from the floating feedback button. No status workflow — admins
+/// read this as a plain list and delete what they've dealt with.
+model Feedback {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message        String
+  /// Where the submitter was when they opened the dialog.
+  pageUrl        String
+  userAgent      String
+  viewportWidth  Int
+  viewportHeight Int
+  /// True means a file exists at `feedbackScreenshotKey(id)` under DERIVED_ROOT.
+  /// Not a stored key — the key is deterministic from the id alone.
+  hasScreenshot  Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
 }

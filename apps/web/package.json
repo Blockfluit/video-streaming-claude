@@ -20,8 +20,11 @@
     "@dnd-kit/vue": "^0.5.0",
     "@nuxt/ui": "^4.10.0",
     "@video/shared": "*",
+    "html2canvas-pro": "^2.4.2",
+    "konva": "^10.3.3",
     "nuxt": "^4.5.1",
-    "vue": "^3.5.40"
+    "vue": "^3.5.40",
+    "vue-konva": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

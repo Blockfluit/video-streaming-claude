@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
@@ -11,7 +12,20 @@ import { bigIntReplacer } from './common/json';
 import { describeError } from './common/errors';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+
+  /*
+   * Nest's default body parser caps a JSON body at Express's stock 100kb,
+   * which a feedback screenshot blows straight past — a base64-encoded PNG
+   * runs ~1.33x its raw byte size, before MAX_FEEDBACK_SCREENSHOT_BYTES
+   * (5MB) even gets a chance to reject it, so the request would 413 before
+   * validation ever runs. Raised globally rather than per-route: nothing
+   * else in this API sends a JSON body anywhere near this size, and every
+   * multipart upload (posters, subtitles) goes through multer, which never
+   * touches this parser at all.
+   */
+  app.use(json({ limit: '7mb' }));
+  app.use(urlencoded({ extended: true, limit: '7mb' }));
 
   // `Video.sizeBytes` is a BigInt, and JSON.stringify throws on those. Express
   // hands this replacer to every res.json(), so it is handled once at the real
